@@ -117,20 +117,36 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     ? (emailOrStudentId.split('@')[0].match(/^\d{4}-\d-\d{2}-\d{3}$/) ? emailOrStudentId.split('@')[0] : emailOrStudentId.split('@')[0])
     : emailOrStudentId;
 
+  // Safe fetch helper to handle HTML/JSON responses gracefully
+  const safeAuthCall = async (endpoint: string, body: Record<string, unknown>) => {
+    try {
+      const res = await fetch(`${API_URL}${endpoint}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      const contentType = res.headers.get('content-type') || '';
+      if (!contentType.includes('application/json')) {
+        throw new Error('Backend server returned an HTML error page. Ensure your backend server is running on port 4000 or on Render.');
+      }
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.message || 'Request failed');
+      return data;
+    } catch (err: any) {
+      if (err.message?.includes('Failed to fetch') || err.name === 'TypeError') {
+        throw new Error('Unable to connect to backend API. Please check your network or backend server status.');
+      }
+      throw err;
+    }
+  };
+
   // Handle Login
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setFormLoading(true);
     setError('');
     try {
-      const res = await fetch(`${API_URL}/auth/login`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ emailOrStudentId, password }),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.message || 'Login failed');
-
+      const data = await safeAuthCall('/auth/login', { emailOrStudentId, password });
       if (rememberMe) {
         localStorage.setItem('auth_token', data.token);
         localStorage.setItem('auth_user', JSON.stringify(data.user));
@@ -173,14 +189,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     setFormLoading(true);
     try {
-      const res = await fetch(`${API_URL}/auth/register-otp`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email: lower }),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.message || 'Failed to send OTP');
-
+      const data = await safeAuthCall('/auth/register-otp', { email: lower });
       setOtpId(data.otpId);
       setTimerSeconds(300);
       setAuthView('verify-register');
@@ -202,23 +211,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setFormLoading(true);
     setError('');
     try {
-      const res = await fetch(`${API_URL}/auth/signup`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          email: emailOrStudentId.toLowerCase().trim(),
-          password,
-          fullName,
-          phone,
-          department,
-          batch,
-          studentId: computedStudentId,
-          otpCode,
-          otpId,
-        }),
+      const data = await safeAuthCall('/auth/signup', {
+        email: emailOrStudentId.toLowerCase().trim(),
+        password,
+        fullName,
+        phone,
+        department,
+        batch,
+        studentId: computedStudentId,
+        otpCode,
+        otpId,
       });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.message || 'Verification failed');
 
       localStorage.setItem('auth_token', data.token);
       localStorage.setItem('auth_user', JSON.stringify(data.user));
@@ -243,14 +246,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setFormLoading(true);
     setError('');
     try {
-      const res = await fetch(`${API_URL}/auth/forgot-password/otp`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ identifier: emailOrStudentId }),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.message || 'User not found');
-
+      const data = await safeAuthCall('/auth/forgot-password/otp', { identifier: emailOrStudentId });
       setOtpId(data.otpId);
       setTimerSeconds(300);
       setAuthView('verify-forgot');
@@ -280,14 +276,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setFormLoading(true);
     setError('');
     try {
-      const res = await fetch(`${API_URL}/auth/forgot-password/reset`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ otpId, code: otpCode, newPassword: password }),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.message || 'Reset failed');
-
+      const data = await safeAuthCall('/auth/forgot-password/reset', { otpId, code: otpCode, newPassword: password });
       toast.success(data.message || 'Password reset successful!');
       setAuthView('login');
       setPassword('');
