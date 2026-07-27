@@ -14,10 +14,12 @@ const app = express();
 const PORT = process.env.PORT || 4000;
 
 // Middleware
-app.use(helmet());
-app.use(cors({ origin: process.env.FRONTEND_URL || '*', credentials: true }));
+app.use(helmet({ crossOriginResourcePolicy: false }));
+app.use(cors({ origin: '*', credentials: true }));
 app.use(express.json({ limit: '10mb' }));
 app.use('/uploads', express.static(path.join(__dirname, '../uploads')));
+
+const router = express.Router();
 
 // File upload config
 const storage = multer.diskStorage({
@@ -40,7 +42,7 @@ async function hashPin(pin: string, salt: string): Promise<string> {
 // ─── AUTH ROUTES ───
 
 // Send OTP for student registration
-app.post('/api/auth/register-otp', async (req, res) => {
+router.post('/auth/register-otp', async (req, res) => {
   try {
     const { email } = req.body;
     if (!email) return res.status(400).json({ message: 'Email is required' });
@@ -90,7 +92,7 @@ app.post('/api/auth/register-otp', async (req, res) => {
 });
 
 // Final Registration after OTP verification
-app.post('/api/auth/signup', async (req, res) => {
+router.post('/auth/signup', async (req, res) => {
   try {
     const { email, password, fullName, phone, department, batch, studentId, otpCode, otpId } = req.body;
     if (!email || !password || !fullName || !otpCode || !otpId) {
@@ -187,7 +189,7 @@ app.post('/api/auth/signup', async (req, res) => {
 });
 
 // Login by Email OR Student ID
-app.post('/api/auth/login', async (req, res) => {
+router.post('/auth/login', async (req, res) => {
   try {
     const { emailOrStudentId, password } = req.body;
     const identifier = req.body.email || req.body.emailOrStudentId;
@@ -230,7 +232,7 @@ app.post('/api/auth/login', async (req, res) => {
 });
 
 // Forgot Password — Request OTP
-app.post('/api/auth/forgot-password/otp', async (req, res) => {
+router.post('/auth/forgot-password/otp', async (req, res) => {
   try {
     const { identifier } = req.body;
     if (!identifier) return res.status(400).json({ message: 'Email or Student ID is required' });
@@ -268,7 +270,7 @@ app.post('/api/auth/forgot-password/otp', async (req, res) => {
 });
 
 // Forgot Password — Reset Password
-app.post('/api/auth/forgot-password/reset', async (req, res) => {
+router.post('/auth/forgot-password/reset', async (req, res) => {
   try {
     const { otpId, code, newPassword } = req.body;
     if (!otpId || !code || !newPassword) return res.status(400).json({ message: 'All fields are required' });
@@ -298,14 +300,14 @@ app.post('/api/auth/forgot-password/reset', async (req, res) => {
 });
 
 // ─── FILE UPLOAD ───
-app.post('/api/upload', authMiddleware, upload.single('file'), (req: AuthRequest, res) => {
+router.post('/upload', authMiddleware, upload.single('file'), (req: AuthRequest, res) => {
   if (!req.file) return res.status(400).json({ message: 'No file provided' });
   const baseUrl = process.env.BACKEND_URL || `http://localhost:${PORT}`;
   res.json({ url: `${baseUrl}/uploads/${req.file.filename}` });
 });
 
 // ─── STUDENT DASHBOARD ───
-app.post('/api/student/dashboard', authMiddleware, async (req: AuthRequest, res) => {
+router.post('/student/dashboard', authMiddleware, async (req: AuthRequest, res) => {
   try {
     const userId = req.user!.id;
     await prisma.user.update({ where: { id: userId }, data: { lastLogin: new Date() } });
@@ -358,7 +360,7 @@ app.post('/api/student/dashboard', authMiddleware, async (req: AuthRequest, res)
 });
 
 // ─── SHOPS ───
-app.post('/api/shops', async (req, res) => {
+router.post('/shops', async (req, res) => {
   try {
     const { category } = req.body;
     const where: any = { status: 'Active' };
@@ -378,7 +380,7 @@ app.post('/api/shops', async (req, res) => {
   }
 });
 
-app.post('/api/shops/detail', async (req, res) => {
+router.post('/shops/detail', async (req, res) => {
   try {
     const { shopId } = req.body;
     const shop = await prisma.shop.findUnique({ where: { id: shopId } });
@@ -396,7 +398,7 @@ app.post('/api/shops/detail', async (req, res) => {
 });
 
 // ─── SHOP PAY ───
-app.post('/api/shops/pay', authMiddleware, async (req: AuthRequest, res) => {
+router.post('/shops/pay', authMiddleware, async (req: AuthRequest, res) => {
   try {
     const userId = req.user!.id;
     const { shopId, shopName, amount, mode, description } = req.body;
@@ -453,7 +455,7 @@ app.post('/api/shops/pay', authMiddleware, async (req: AuthRequest, res) => {
 });
 
 // ─── QR VALIDATE ───
-app.post('/api/shops/validate-qr', authMiddleware, async (req: AuthRequest, res) => {
+router.post('/shops/validate-qr', authMiddleware, async (req: AuthRequest, res) => {
   try {
     const { qrData } = req.body;
     let parsed: any;
@@ -473,7 +475,7 @@ app.post('/api/shops/validate-qr', authMiddleware, async (req: AuthRequest, res)
 });
 
 // ─── DUES ───
-app.post('/api/dues', authMiddleware, async (req: AuthRequest, res) => {
+router.post('/dues', authMiddleware, async (req: AuthRequest, res) => {
   try {
     const userId = req.user!.id;
     const [sem, lib, adm, pl] = await Promise.all([
@@ -493,7 +495,7 @@ app.post('/api/dues', authMiddleware, async (req: AuthRequest, res) => {
   }
 });
 
-app.post('/api/dues/pay', authMiddleware, async (req: AuthRequest, res) => {
+router.post('/dues/pay', authMiddleware, async (req: AuthRequest, res) => {
   try {
     const userId = req.user!.id;
     const { items } = req.body;
@@ -527,7 +529,7 @@ app.post('/api/dues/pay', authMiddleware, async (req: AuthRequest, res) => {
 });
 
 // ─── DISPUTE FINE ───
-app.post('/api/fines/dispute', authMiddleware, async (req: AuthRequest, res) => {
+router.post('/fines/dispute', authMiddleware, async (req: AuthRequest, res) => {
   try {
     const { fineId, source, reason } = req.body;
     if (source === 'admin') await prisma.adminFine.update({ where: { id: fineId }, data: { status: 'Disputed' } });
@@ -540,7 +542,7 @@ app.post('/api/fines/dispute', authMiddleware, async (req: AuthRequest, res) => 
 });
 
 // ─── TRANSACTIONS ───
-app.post('/api/transactions', authMiddleware, async (req: AuthRequest, res) => {
+router.post('/transactions', authMiddleware, async (req: AuthRequest, res) => {
   try {
     const userId = req.user!.id;
     const { type, direction, limit = 50, offset = 0 } = req.body;
@@ -568,7 +570,7 @@ app.post('/api/transactions', authMiddleware, async (req: AuthRequest, res) => {
 });
 
 // ─── NOTIFICATIONS ───
-app.post('/api/notifications', authMiddleware, async (req: AuthRequest, res) => {
+router.post('/notifications', authMiddleware, async (req: AuthRequest, res) => {
   try {
     const userId = req.user!.id;
     const txns = await prisma.transaction.findMany({ where: { userId }, take: 30, orderBy: { createdAt: 'desc' } });
@@ -593,7 +595,7 @@ app.post('/api/notifications', authMiddleware, async (req: AuthRequest, res) => 
 });
 
 // ─── RECEIPT ───
-app.post('/api/receipt', authMiddleware, async (req: AuthRequest, res) => {
+router.post('/receipt', authMiddleware, async (req: AuthRequest, res) => {
   try {
     const { transactionId } = req.body;
     const tx = await prisma.transaction.findUnique({ where: { id: transactionId }, include: { user: true, shop: true } });
@@ -614,7 +616,7 @@ app.post('/api/receipt', authMiddleware, async (req: AuthRequest, res) => {
 });
 
 // ─── TRANSFER ───
-app.post('/api/transfer', authMiddleware, async (req: AuthRequest, res) => {
+router.post('/transfer', authMiddleware, async (req: AuthRequest, res) => {
   try {
     const senderId = req.user!.id;
     const { recipientIdentifier, amount, note } = req.body;
@@ -679,7 +681,7 @@ app.post('/api/transfer', authMiddleware, async (req: AuthRequest, res) => {
 });
 
 // ─── WITHDRAWAL ───
-app.post('/api/withdrawal/request', authMiddleware, async (req: AuthRequest, res) => {
+router.post('/withdrawal/request', authMiddleware, async (req: AuthRequest, res) => {
   try {
     const userId = req.user!.id;
     const { amount, method, accountDetails } = req.body;
@@ -702,7 +704,7 @@ app.post('/api/withdrawal/request', authMiddleware, async (req: AuthRequest, res
 });
 
 // ─── PIN ───
-app.post('/api/pin/set', authMiddleware, async (req: AuthRequest, res) => {
+router.post('/pin/set', authMiddleware, async (req: AuthRequest, res) => {
   try {
     const userId = req.user!.id;
     const { pin, currentPin } = req.body;
@@ -733,7 +735,7 @@ app.post('/api/pin/set', authMiddleware, async (req: AuthRequest, res) => {
   }
 });
 
-app.post('/api/pin/verify', authMiddleware, async (req: AuthRequest, res) => {
+router.post('/pin/verify', authMiddleware, async (req: AuthRequest, res) => {
   try {
     const userId = req.user!.id;
     const { pin } = req.body;
@@ -763,7 +765,7 @@ app.post('/api/pin/verify', authMiddleware, async (req: AuthRequest, res) => {
 });
 
 // ─── OTP ───
-app.post('/api/otp/send', authMiddleware, async (req: AuthRequest, res) => {
+router.post('/otp/send', authMiddleware, async (req: AuthRequest, res) => {
   try {
     const userId = req.user!.id;
     const { purpose } = req.body;
@@ -797,7 +799,7 @@ app.post('/api/otp/send', authMiddleware, async (req: AuthRequest, res) => {
   }
 });
 
-app.post('/api/otp/verify', authMiddleware, async (req: AuthRequest, res) => {
+router.post('/otp/verify', authMiddleware, async (req: AuthRequest, res) => {
   try {
     const { otpId, code } = req.body;
     const otp = await prisma.otpCode.findUnique({ where: { id: otpId } });
@@ -828,7 +830,7 @@ app.post('/api/otp/verify', authMiddleware, async (req: AuthRequest, res) => {
 });
 
 // ─── PROFILE ───
-app.post('/api/profile/update', authMiddleware, async (req: AuthRequest, res) => {
+router.post('/profile/update', authMiddleware, async (req: AuthRequest, res) => {
   try {
     const userId = req.user!.id;
     const { phone, emergencyContact, address, bloodGroup, gender, dateOfBirth, bio, profilePicture, studentId, department, batch } = req.body;
@@ -853,7 +855,7 @@ app.post('/api/profile/update', authMiddleware, async (req: AuthRequest, res) =>
 });
 
 // ─── SSL PAYMENT ───
-app.post('/api/payment/init', authMiddleware, async (req: AuthRequest, res) => {
+router.post('/payment/init', authMiddleware, async (req: AuthRequest, res) => {
   try {
     const userId = req.user!.id;
     const { amount, purpose, itemId, itemLabel } = req.body;
@@ -909,7 +911,7 @@ app.post('/api/payment/init', authMiddleware, async (req: AuthRequest, res) => {
   }
 });
 
-app.post('/api/payment/validate', authMiddleware, async (req: AuthRequest, res) => {
+router.post('/payment/validate', authMiddleware, async (req: AuthRequest, res) => {
   try {
     const userId = req.user!.id;
     const { transactionRef, purpose, itemId } = req.body;
@@ -975,7 +977,7 @@ app.post('/api/payment/validate', authMiddleware, async (req: AuthRequest, res) 
 });
 
 // ─── ADMIN ROUTES ───
-app.post('/api/admin/overview', authMiddleware, async (req: AuthRequest, res) => {
+router.post('/admin/overview', authMiddleware, async (req: AuthRequest, res) => {
   try {
     const [totalStudents, totalShops, totalTransactions, recentLogs] = await Promise.all([
       prisma.user.count({ where: { role: 'Student' } }),
@@ -995,7 +997,7 @@ app.post('/api/admin/overview', authMiddleware, async (req: AuthRequest, res) =>
   }
 });
 
-app.post('/api/admin/seed', authMiddleware, async (req: AuthRequest, res) => {
+router.post('/admin/seed', authMiddleware, async (req: AuthRequest, res) => {
   try {
     const existingShops = await prisma.shop.findMany({ take: 1 });
     if (existingShops.length > 0) return res.json({ success: false, message: 'Database already has data. Seed skipped.' });
@@ -1021,7 +1023,7 @@ app.post('/api/admin/seed', authMiddleware, async (req: AuthRequest, res) => {
   }
 });
 
-app.post('/api/admin/shops', authMiddleware, async (req: AuthRequest, res) => {
+router.post('/admin/shops', authMiddleware, async (req: AuthRequest, res) => {
   try {
     const shops = await prisma.shop.findMany({ take: 100, orderBy: { createdAt: 'desc' } });
     res.json({
@@ -1036,7 +1038,7 @@ app.post('/api/admin/shops', authMiddleware, async (req: AuthRequest, res) => {
   }
 });
 
-app.post('/api/admin/shops/manage', authMiddleware, async (req: AuthRequest, res) => {
+router.post('/admin/shops/manage', authMiddleware, async (req: AuthRequest, res) => {
   try {
     const { action, shopId, ...data } = req.body;
     if (action === 'create') {
@@ -1057,7 +1059,7 @@ app.post('/api/admin/shops/manage', authMiddleware, async (req: AuthRequest, res
   }
 });
 
-app.post('/api/admin/audit-logs', authMiddleware, async (req: AuthRequest, res) => {
+router.post('/admin/audit-logs', authMiddleware, async (req: AuthRequest, res) => {
   try {
     const { limit = 50, offset = 0, action, entityType } = req.body;
     const where: any = {};
@@ -1082,7 +1084,7 @@ app.post('/api/admin/audit-logs', authMiddleware, async (req: AuthRequest, res) 
   }
 });
 
-app.post('/api/admin/staff', authMiddleware, async (req: AuthRequest, res) => {
+router.post('/admin/staff', authMiddleware, async (req: AuthRequest, res) => {
   try {
     const { search } = req.body;
     let staff = await prisma.user.findMany({ where: { role: { not: 'Student' } }, take: 500 });
@@ -1097,7 +1099,7 @@ app.post('/api/admin/staff', authMiddleware, async (req: AuthRequest, res) => {
   }
 });
 
-app.post('/api/admin/staff/manage', authMiddleware, async (req: AuthRequest, res) => {
+router.post('/admin/staff/manage', authMiddleware, async (req: AuthRequest, res) => {
   try {
     const { action, userId, ...data } = req.body;
     if (action === 'create') {
@@ -1123,7 +1125,7 @@ app.post('/api/admin/staff/manage', authMiddleware, async (req: AuthRequest, res
   }
 });
 
-app.post('/api/admin/search-students', authMiddleware, async (req: AuthRequest, res) => {
+router.post('/admin/search-students', authMiddleware, async (req: AuthRequest, res) => {
   try {
     const { query } = req.body;
     if (!query || query.length < 2) return res.json({ students: [] });
@@ -1149,7 +1151,7 @@ app.post('/api/admin/search-students', authMiddleware, async (req: AuthRequest, 
   }
 });
 
-app.post('/api/admin/fines/assign', authMiddleware, async (req: AuthRequest, res) => {
+router.post('/admin/fines/assign', authMiddleware, async (req: AuthRequest, res) => {
   try {
     const { studentId, reason, amount, incidentDate } = req.body;
     const ref = `AF-${Date.now().toString(36).toUpperCase()}`;
@@ -1161,7 +1163,7 @@ app.post('/api/admin/fines/assign', authMiddleware, async (req: AuthRequest, res
   }
 });
 
-app.post('/api/admin/waivers', authMiddleware, async (req: AuthRequest, res) => {
+router.post('/admin/waivers', authMiddleware, async (req: AuthRequest, res) => {
   try {
     const disputed = await prisma.adminFine.findMany({ where: { status: 'Disputed' }, include: { student: true } });
     const libDisputed = await prisma.libraryFine.findMany({ where: { status: 'Disputed' }, include: { student: true } });
@@ -1176,7 +1178,7 @@ app.post('/api/admin/waivers', authMiddleware, async (req: AuthRequest, res) => 
   }
 });
 
-app.post('/api/admin/waivers/update', authMiddleware, async (req: AuthRequest, res) => {
+router.post('/admin/waivers/update', authMiddleware, async (req: AuthRequest, res) => {
   try {
     const { waiverId, type, action } = req.body;
     const newStatus = action === 'approve' ? 'Waived' : action === 'reject' ? 'Pending' : 'Pending';
@@ -1189,7 +1191,7 @@ app.post('/api/admin/waivers/update', authMiddleware, async (req: AuthRequest, r
 });
 
 // ─── LIBRARY ROUTES ───
-app.post('/api/library/overview', authMiddleware, async (req: AuthRequest, res) => {
+router.post('/library/overview', authMiddleware, async (req: AuthRequest, res) => {
   try {
     const [total, pending, paid] = await Promise.all([
       prisma.libraryFine.count(),
@@ -1213,7 +1215,7 @@ app.post('/api/library/overview', authMiddleware, async (req: AuthRequest, res) 
   }
 });
 
-app.post('/api/library/student-lookup', authMiddleware, async (req: AuthRequest, res) => {
+router.post('/library/student-lookup', authMiddleware, async (req: AuthRequest, res) => {
   try {
     const { identifier } = req.body;
     let student = await prisma.user.findUnique({ where: { email: identifier } });
@@ -1230,7 +1232,7 @@ app.post('/api/library/student-lookup', authMiddleware, async (req: AuthRequest,
   }
 });
 
-app.post('/api/library/fines/assign', authMiddleware, async (req: AuthRequest, res) => {
+router.post('/library/fines/assign', authMiddleware, async (req: AuthRequest, res) => {
   try {
     const { studentId, fineType, amount, dueDate, label } = req.body;
     const ref = `LIB-${Date.now().toString(36).toUpperCase()}`;
@@ -1242,7 +1244,7 @@ app.post('/api/library/fines/assign', authMiddleware, async (req: AuthRequest, r
   }
 });
 
-app.post('/api/library/fines/waive', authMiddleware, async (req: AuthRequest, res) => {
+router.post('/library/fines/waive', authMiddleware, async (req: AuthRequest, res) => {
   try {
     const { fineId, reason } = req.body;
     await prisma.libraryFine.update({ where: { id: fineId }, data: { status: 'Waived' } });
@@ -1253,7 +1255,7 @@ app.post('/api/library/fines/waive', authMiddleware, async (req: AuthRequest, re
   }
 });
 
-app.post('/api/library/clearance', authMiddleware, async (req: AuthRequest, res) => {
+router.post('/library/clearance', authMiddleware, async (req: AuthRequest, res) => {
   try {
     const students = await prisma.user.findMany({ where: { role: 'Student' }, take: 100 });
     const result = [];
@@ -1272,7 +1274,7 @@ app.post('/api/library/clearance', authMiddleware, async (req: AuthRequest, res)
 });
 
 // ─── ACCOUNTS ROUTES ───
-app.post('/api/accounts/overview', authMiddleware, async (req: AuthRequest, res) => {
+router.post('/accounts/overview', authMiddleware, async (req: AuthRequest, res) => {
   try {
     const [totalAgg, collectedAgg, pendingAgg] = await Promise.all([
       prisma.semesterFee.aggregate({ _sum: { amount: true } }),
@@ -1294,7 +1296,7 @@ app.post('/api/accounts/overview', authMiddleware, async (req: AuthRequest, res)
   }
 });
 
-app.post('/api/accounts/fee-push', authMiddleware, async (req: AuthRequest, res) => {
+router.post('/accounts/fee-push', authMiddleware, async (req: AuthRequest, res) => {
   try {
     const { label, amount, dueDate, department, batch } = req.body;
     const where: any = { role: 'Student' };
@@ -1315,7 +1317,7 @@ app.post('/api/accounts/fee-push', authMiddleware, async (req: AuthRequest, res)
   }
 });
 
-app.post('/api/accounts/fee-adjust', authMiddleware, async (req: AuthRequest, res) => {
+router.post('/accounts/fee-adjust', authMiddleware, async (req: AuthRequest, res) => {
   try {
     const { feeId, newAmount, newStatus, reason } = req.body;
     const data: any = {};
@@ -1329,7 +1331,7 @@ app.post('/api/accounts/fee-adjust', authMiddleware, async (req: AuthRequest, re
   }
 });
 
-app.post('/api/accounts/analytics', authMiddleware, async (req: AuthRequest, res) => {
+router.post('/accounts/analytics', authMiddleware, async (req: AuthRequest, res) => {
   try {
     const students = await prisma.user.findMany({ where: { role: 'Student' } });
     const fees = await prisma.semesterFee.findMany({ include: { student: true } });
@@ -1361,7 +1363,7 @@ app.post('/api/accounts/analytics', authMiddleware, async (req: AuthRequest, res
   }
 });
 
-app.post('/api/accounts/withdrawals', authMiddleware, async (req: AuthRequest, res) => {
+router.post('/accounts/withdrawals', authMiddleware, async (req: AuthRequest, res) => {
   try {
     const txns = await prisma.transaction.findMany({ where: { type: 'Withdrawal' }, take: 100, orderBy: { createdAt: 'desc' }, include: { user: true } });
     res.json({
@@ -1376,7 +1378,7 @@ app.post('/api/accounts/withdrawals', authMiddleware, async (req: AuthRequest, r
   }
 });
 
-app.post('/api/accounts/withdrawals/process', authMiddleware, async (req: AuthRequest, res) => {
+router.post('/accounts/withdrawals/process', authMiddleware, async (req: AuthRequest, res) => {
   try {
     const { transactionId, action } = req.body;
     const tx = await prisma.transaction.findUnique({ where: { id: transactionId } });
@@ -1397,7 +1399,7 @@ app.post('/api/accounts/withdrawals/process', authMiddleware, async (req: AuthRe
 });
 
 // ─── SHOP DASHBOARD ROUTES ───
-app.post('/api/shop/dashboard', authMiddleware, async (req: AuthRequest, res) => {
+router.post('/shop/dashboard', authMiddleware, async (req: AuthRequest, res) => {
   try {
     const userId = req.user!.id;
     const user = await prisma.user.findUnique({ where: { id: userId } });
@@ -1430,7 +1432,7 @@ app.post('/api/shop/dashboard', authMiddleware, async (req: AuthRequest, res) =>
   }
 });
 
-app.post('/api/shop/regenerate-qr', authMiddleware, async (req: AuthRequest, res) => {
+router.post('/shop/regenerate-qr', authMiddleware, async (req: AuthRequest, res) => {
   try {
     const shop = await prisma.shop.findFirst({ where: { status: 'Active' } });
     if (!shop) return res.status(404).json({ message: 'Shop not found' });
@@ -1444,14 +1446,22 @@ app.post('/api/shop/regenerate-qr', authMiddleware, async (req: AuthRequest, res
 });
 
 // ─── DEPRECATED ───
-app.post('/api/wallet/add-money', authMiddleware, async (_req: AuthRequest, res) => {
+router.post('/wallet/add-money', authMiddleware, async (_req: AuthRequest, res) => {
   res.status(400).json({ message: 'Direct deposits are disabled. Use SSLCommerz.' });
 });
 
 // Health check
-app.get('/api/health', (_req, res) => res.json({ status: 'ok', timestamp: new Date().toISOString() }));
+router.get('/health', (_req, res) => res.json({ status: 'ok', timestamp: new Date().toISOString() }));
 
 // Start server
+app.use('/api', router);
+app.use('/', router);
+
+// Fallback JSON 404 handler (ensures HTML is NEVER returned)
+app.use((_req, res) => {
+  res.status(404).json({ message: 'API endpoint not found. Please check endpoint URL.' });
+});
+
 app.listen(PORT, () => {
   console.log(`🎓 Smart Campus API running on port ${PORT}`);
 });
