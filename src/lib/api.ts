@@ -6,17 +6,32 @@ function getToken(): string | null {
 
 async function apiCall<T>(endpoint: string, input: Record<string, unknown> = {}): Promise<T> {
   const token = getToken();
-  const res = await fetch(`${API_URL}${endpoint}`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-    },
-    body: JSON.stringify(input),
-  });
-  const data = await res.json();
-  if (!res.ok) throw new Error(data.message || 'Request failed');
-  return data;
+  try {
+    const res = await fetch(`${API_URL}${endpoint}`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      },
+      body: JSON.stringify(input),
+    });
+    const contentType = res.headers.get('content-type') || '';
+    if (!contentType.includes('application/json')) {
+      if (window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1') {
+        throw new Error('Backend URL is not connected to Vercel. Please set VITE_API_URL in Vercel Settings.');
+      } else {
+        throw new Error('Backend server is not running on localhost (port 4000).');
+      }
+    }
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.message || 'Request failed');
+    return data;
+  } catch (err: any) {
+    if (err.message?.includes('Failed to fetch') || err.name === 'TypeError') {
+      throw new Error('Cannot connect to backend server. Make sure the API server is running.');
+    }
+    throw err;
+  }
 }
 
 // ─── Type exports ───

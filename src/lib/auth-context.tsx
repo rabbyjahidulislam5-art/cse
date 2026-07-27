@@ -120,21 +120,30 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   // Safe fetch helper to handle HTML/JSON responses gracefully
   const safeAuthCall = async (endpoint: string, body: Record<string, unknown>) => {
     try {
-      const res = await fetch(`${API_URL}${endpoint}`, {
+      const targetUrl = `${API_URL}${endpoint}`;
+      const res = await fetch(targetUrl, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
       });
       const contentType = res.headers.get('content-type') || '';
       if (!contentType.includes('application/json')) {
-        throw new Error('Backend server returned an HTML error page. Ensure your backend server is running on port 4000 or on Render.');
+        if (window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1') {
+          throw new Error('Backend URL is not connected to Vercel. Please go to Vercel Settings -> Environment Variables and add VITE_API_URL = (Your Render API URL).');
+        } else {
+          throw new Error('Backend server is not running on localhost. Please start the backend with "cd server && npm run dev".');
+        }
       }
       const data = await res.json();
       if (!res.ok) throw new Error(data.message || 'Request failed');
       return data;
     } catch (err: any) {
       if (err.message?.includes('Failed to fetch') || err.name === 'TypeError') {
-        throw new Error('Unable to connect to backend API. Please check your network or backend server status.');
+        if (window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1') {
+          throw new Error('Cannot reach Render Backend server. Please verify your Render Backend URL in Vercel Environment Variables.');
+        } else {
+          throw new Error('Cannot connect to local backend (port 4000). Make sure to run "npm run dev" inside the server directory.');
+        }
       }
       throw err;
     }
