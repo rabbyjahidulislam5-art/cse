@@ -1,0 +1,278 @@
+import { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { motion, AnimatePresence } from 'framer-motion';
+import { ArrowLeft, ScanLine, Store, Wallet, CreditCard, Clock, Loader2, Shield, ChevronRight } from 'lucide-react';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import BarcodeScanner from '@/components/BarcodeScanner';
+import PinDialog from '@/components/PinDialog';
+import OtpDialog from '@/components/OtpDialog';
+import SuccessScreen from '@/components/SuccessScreen';
+import { toast } from 'sonner';
+import { validateQrMerchant, payShop, initSSLPayment, type ValidateQrMerchantOutputType } from '@/lib/api';
+import { useUser } from '@/lib/user-context';
+import { formatCurrency } from '@/lib/mock-data';
+import { FadeIn } from '@/components/PageTransition';
+
+type ShopInfo = NonNullable<ValidateQrMerchantOutputType['shop']>;
+type Step = 'scan' | 'validating' | 'merchant' | 'amount' | 'method' | 'confirm' | 'processing' | 'success' | 'error';
+
+export default function QrScannerPage() {
+  const navigate = useNavigate();
+  const { wallet, refreshDashboard } = useUser();
+  const [step, setStep] = useState<Step>('scan');
+  const [shop, setShop] = useState<ShopInfo | null>(null);
+  const [amount, setAmount] = useState('');
+  const [payMode, setPayMode] = useState<'wallet' | 'ssl' | 'later'>('wallet');
+  const [pinOpen, setPinOpen] = useState(false);
+  const [otpOpen, setOtpOpen] = useState(false);
+  const [error, setError] = useState('');
+
+  const amt = parseFloat(amount) || 0;
+  const needsOtp = amt >= 5000;
+
+  const handleScan = async (value: string) => {
+    setStep('validating');
+    try {
+      const res = await validateQrMerchant({ qrData: value });
+      if (res.valid && res.shop) { setShop(res.shop); setStep('merchant'); }
+      else { setError(res.message || 'Invalid QR code'); setStep('error'); }
+    } catch (e: any) { setError(e.message || 'Failed to validate'); setStep('error'); }
+  };
+
+  const handleProceedToAmount = () => setStep('amount');
+  const handleProceedToMethod = () => {
+    if (!amt || amt <= 0) { toast.error('Enter a valid amount'); return; }
+    setStep('method');
+  };
+  const handleProceedToConfirm = () => setStep('confirm');
+
+  const handlePay = () => {
+    if (payMode === 'ssl') { handleSSLPay(); return; }
+    if (payMode === 'wallet') { setPinOpen(true); return; }
+    executePayment();
+  };
+
+  const onPinVerified = () => {
+    if (needsOtp && payMode === 'wallet') setOtpOpen(true);
+    else executePayment();
+  };
+
+  const executePayment = async () => {
+    if (!shop) return;
+    setStep('processing');
+    try {
+      await payShop({ shopId: shop.id, shopName: shop.name, amount: amt, mode: payMode === 'later' ? 'later' : 'now' });
+      setStep('success');
+      refreshDashboard();
+    } catch (e: any) { toast.error(e.message || 'Payment failed'); setStep('confirm'); }
+  };
+
+  const handleSSLPay = async () => {
+    if (!shop) return;
+    setStep('processing');
+    try {
+      const res = await initSSLPayment({ amount: amt, purpose: 'shop_payment', itemId: shop.id, itemLabel: shop.name });
+      localStorage.setItem('ssl_payment', JSON.stringify({ ref: res.transactionRef, purpose: 'shop_payment', itemId: shop.id }));
+      window.location.href = res.gatewayUrl;
+    } catch (e: any) { toast.error(e.message || 'Payment gateway failed'); setStep('confirm'); }
+  };
+
+  const reset = () => { setStep('scan'); setShop(null); setAmount(''); setPayMode('wallet'); setError(''); };
+
+  const stepIndex = ['scan','validating','merchant','amount','method','confirm','processing','success','error'].indexOf(step);
+  const progress = step === 'success' ? 100 : step === 'error' ? 0 : Math.min((stepIndex / 6) * 100, 100);
+
+  return (
+    <div className="container mx-auto px-4 sm:px-6 py-6 max-w-lg">
+      {/* Header */}
+      <div className="flex items-center gap-3 mb-6">
+        <button onClick={() => step === 'scan' ? navigate(-1) : reset()} className="p-2 rounded-xl hover:bg-accent transition-colors">
+          <ArrowLeft className="w-5 h-5 text-muted-foreground" />
+        </button>
+        <div className="flex-1">
+          <h1 className="text-lg font-bold text-foreground">QR Payment</h1>
+          <p className="text-xs text-muted-foreground">Scan a merchant QR code to pay</p>
+        </div>
+      </div>
+
+      {/* Progress */}
+      {!['scan','error','success'].includes(step) && (
+        <div className="h-1 bg-accent rounded-full mb-6 overflow-hidden">
+          <motion.div className="h-full gradient-primary rounded-full" animate={{ width: `${progress}%` }} transition={{ duration: 0.3 }} />
+        </div>
+      )}
+
+      <AnimatePresence mode="wait">
+        {/* SCAN */}
+        {step === 'scan' && (
+          <motion.div key="scan" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
+            <div className="rounded-2xl overflow-hidden border border-border/60">
+              <BarcodeScanner onScan={handleScan} formats={['qr_code']} confirmations={2} />
+            </div>
+            <p className="text-xs text-muted-foreground text-center mt-4">Point your camera at a merchant QR code</p>
+          </motion.div>
+        )}
+
+        {/* VALIDATING */}
+        {step === 'validating' && (
+          <motion.div key="val" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="text-center py-20">
+            <Loader2 className="w-10 h-10 animate-spin text-primary mx-auto mb-4" />
+            <p className="text-sm text-muted-foreground font-medium">Validating merchant...</p>
+          </motion.div>
+        )}
+
+        {/* MERCHANT DETAILS */}
+        {step === 'merchant' && shop && (
+          <FadeIn key="merchant">
+            <div className="rounded-2xl border border-border/60 bg-card p-6 text-center mb-4">
+              <div className="w-16 h-16 rounded-2xl bg-primary/10 flex items-center justify-center mx-auto mb-4">
+                <Store className="w-8 h-8 text-primary" />
+              </div>
+              <h2 className="text-xl font-bold text-foreground">{shop.name}</h2>
+              <p className="text-sm text-muted-foreground mt-1">{shop.category} · {shop.location}</p>
+              <div className="flex items-center justify-center gap-1.5 mt-3">
+                <Shield className="w-3.5 h-3.5 text-[hsl(var(--chart-3))]" />
+                <span className="text-xs text-[hsl(var(--chart-3))] font-medium">Verified Merchant</span>
+              </div>
+            </div>
+            <Button onClick={handleProceedToAmount} className="w-full h-12 font-semibold">
+              Continue to Payment <ChevronRight className="w-4 h-4 ml-1" />
+            </Button>
+          </FadeIn>
+        )}
+
+        {/* AMOUNT */}
+        {step === 'amount' && (
+          <FadeIn key="amount">
+            <div className="space-y-5">
+              <div className="text-center">
+                <p className="text-sm text-muted-foreground mb-1">Paying to</p>
+                <p className="font-bold text-foreground">{shop?.name}</p>
+              </div>
+              <div>
+                <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Amount (৳)</label>
+                <Input type="number" placeholder="0.00" value={amount} onChange={e => setAmount(e.target.value)}
+                  className="mt-2 text-2xl font-bold h-14 text-center bg-accent/50 border-border/60" min={1} autoFocus />
+              </div>
+              <div className="text-xs text-muted-foreground text-center">
+                Wallet Balance: <span className="text-foreground font-semibold">{formatCurrency(wallet?.balance || 0)}</span>
+              </div>
+              <Button onClick={handleProceedToMethod} className="w-full h-12 font-semibold" disabled={!amt || amt <= 0}>
+                Continue <ChevronRight className="w-4 h-4 ml-1" />
+              </Button>
+            </div>
+          </FadeIn>
+        )}
+
+        {/* METHOD */}
+        {step === 'method' && (
+          <FadeIn key="method">
+            <div className="space-y-4">
+              <div className="text-center py-2">
+                <span className="text-3xl font-bold text-foreground tabular">{formatCurrency(amt)}</span>
+                <p className="text-sm text-muted-foreground mt-1">to {shop?.name}</p>
+              </div>
+              {([
+                { key: 'wallet' as const, label: 'Campus Wallet', icon: Wallet, desc: `Balance: ${formatCurrency(wallet?.balance || 0)}`, disabled: amt > (wallet?.balance || 0) },
+                { key: 'ssl' as const, label: 'Online Payment', icon: CreditCard, desc: 'Cards, bKash, Nagad, Rocket' },
+                { key: 'later' as const, label: 'Pay Later', icon: Clock, desc: '7-day payment deadline' },
+              ]).map((m) => (
+                <button key={m.key} onClick={() => !m.disabled && setPayMode(m.key)} disabled={m.disabled}
+                  className={`w-full p-4 rounded-xl border-2 text-left transition-all flex items-center gap-4 ${
+                    m.disabled ? 'opacity-40 cursor-not-allowed border-border/30' :
+                    payMode === m.key ? 'border-primary bg-primary/5' : 'border-border/60 hover:border-muted-foreground/30'
+                  }`}>
+                  <div className={`w-11 h-11 rounded-xl flex items-center justify-center ${payMode === m.key ? 'bg-primary/15' : 'bg-accent'}`}>
+                    <m.icon className={`w-5 h-5 ${payMode === m.key ? 'text-primary' : 'text-muted-foreground'}`} />
+                  </div>
+                  <div className="flex-1">
+                    <span className={`font-semibold text-sm ${payMode === m.key ? 'text-primary' : 'text-foreground'}`}>{m.label}</span>
+                    <span className="text-xs text-muted-foreground block">{m.desc}</span>
+                  </div>
+                  <div className={`w-5 h-5 rounded-full border-2 flex items-center justify-center ${payMode === m.key ? 'border-primary' : 'border-border'}`}>
+                    {payMode === m.key && <div className="w-2.5 h-2.5 rounded-full bg-primary" />}
+                  </div>
+                </button>
+              ))}
+              <Button onClick={handleProceedToConfirm} className="w-full h-12 font-semibold">
+                Continue <ChevronRight className="w-4 h-4 ml-1" />
+              </Button>
+            </div>
+          </FadeIn>
+        )}
+
+        {/* CONFIRM */}
+        {step === 'confirm' && (
+          <FadeIn key="confirm">
+            <div className="space-y-5">
+              <h2 className="text-lg font-bold text-foreground text-center">Review Payment</h2>
+              <div className="rounded-xl border border-border/60 bg-accent/30 p-4 space-y-3">
+                <div className="flex justify-between text-sm"><span className="text-muted-foreground">Merchant</span><span className="font-semibold text-foreground">{shop?.name}</span></div>
+                <div className="flex justify-between text-sm"><span className="text-muted-foreground">Amount</span><span className="font-bold text-foreground tabular">{formatCurrency(amt)}</span></div>
+                <div className="flex justify-between text-sm"><span className="text-muted-foreground">Method</span><span className="font-medium text-foreground">{payMode === 'wallet' ? 'Campus Wallet' : payMode === 'ssl' ? 'Online Payment' : 'Pay Later'}</span></div>
+                {needsOtp && payMode === 'wallet' && (
+                  <div className="flex justify-between text-sm"><span className="text-muted-foreground">Security</span><span className="font-medium text-[hsl(var(--chart-4))]">PIN + OTP required</span></div>
+                )}
+              </div>
+              <div className="flex items-center gap-2 text-xs text-muted-foreground bg-accent/30 p-3 rounded-xl">
+                <Shield className="w-4 h-4 text-primary shrink-0" />
+                <span>{payMode === 'ssl' ? 'You will be redirected to the secure payment gateway.' : 'Transaction secured with bank-grade encryption.'}</span>
+              </div>
+              <Button onClick={handlePay} className="w-full h-12 font-semibold">
+                {payMode === 'ssl' ? 'Proceed to Payment' : payMode === 'later' ? 'Create Due' : `Pay ${formatCurrency(amt)}`}
+              </Button>
+            </div>
+          </FadeIn>
+        )}
+
+        {/* PROCESSING */}
+        {step === 'processing' && (
+          <motion.div key="proc" initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="text-center py-20">
+            <div className="relative w-16 h-16 mx-auto mb-6">
+              <div className="absolute inset-0 rounded-full border-2 border-primary/20" />
+              <div className="absolute inset-0 rounded-full border-2 border-transparent border-t-primary animate-spin" />
+              <Wallet className="absolute inset-0 m-auto w-6 h-6 text-primary" />
+            </div>
+            <p className="text-sm font-medium text-foreground">Processing Payment...</p>
+            <p className="text-xs text-muted-foreground mt-1">Please wait, do not close this page</p>
+          </motion.div>
+        )}
+
+        {/* SUCCESS */}
+        {step === 'success' && (
+          <SuccessScreen
+            title="Payment Successful!"
+            subtitle={`${formatCurrency(amt)} ${payMode === 'later' ? 'due created for' : 'paid to'} ${shop?.name}`}
+            details={[
+              { label: 'Merchant', value: shop?.name || '' },
+              { label: 'Amount', value: formatCurrency(amt) },
+              { label: 'Method', value: payMode === 'wallet' ? 'Campus Wallet' : payMode === 'ssl' ? 'Online Payment' : 'Pay Later' },
+            ]}
+            actions={[
+              { label: 'Scan Again', onClick: reset, variant: 'outline' },
+              { label: 'Done', onClick: () => navigate('/student') },
+            ]}
+          />
+        )}
+
+        {/* ERROR */}
+        {step === 'error' && (
+          <FadeIn key="error">
+            <div className="text-center py-16">
+              <div className="w-16 h-16 rounded-full bg-destructive/10 flex items-center justify-center mx-auto mb-4">
+                <ScanLine className="w-8 h-8 text-destructive" />
+              </div>
+              <h2 className="text-lg font-bold text-foreground mb-2">Invalid QR Code</h2>
+              <p className="text-sm text-muted-foreground mb-6">{error}</p>
+              <Button onClick={reset}><ScanLine className="w-4 h-4 mr-2" /> Scan Again</Button>
+            </div>
+          </FadeIn>
+        )}
+      </AnimatePresence>
+
+      <PinDialog open={pinOpen} onOpenChange={setPinOpen} mode="verify" onSuccess={onPinVerified} />
+      <OtpDialog open={otpOpen} onOpenChange={setOtpOpen} purpose="Payment" onSuccess={executePayment} />
+    </div>
+  );
+}
