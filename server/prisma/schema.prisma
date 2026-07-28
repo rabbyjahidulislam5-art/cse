@@ -31,6 +31,8 @@ model User {
   gender           String?
   dateOfBirth      String?
   bio              String?
+  authProvider     String    @default("password")
+  googleId         String?   @unique
   createdAt        DateTime  @default(now())
   updatedAt        DateTime  @updatedAt
 
@@ -156,8 +158,8 @@ model PayLaterDue {
 model OtpCode {
   id        String    @id @default(cuid())
   code      String
-  user      User      @relation(fields: [userId], references: [id])
-  userId    String
+  user      User?     @relation(fields: [userId], references: [id])
+  userId    String?
   purpose   String
   status    String    @default("Active")
   attempts  Int       @default(0)

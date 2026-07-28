@@ -1,7 +1,9 @@
 import { createContext, useContext, useState, useEffect, useCallback, type ReactNode } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { GraduationCap, Eye, EyeOff, Lock, Mail, User, Phone, CheckCircle2, AlertCircle, ShieldCheck, ArrowLeft, RefreshCw, KeyRound, Sparkles } from 'lucide-react';
+import { GraduationCap, Eye, EyeOff, Lock, Mail, User, Phone, CheckCircle2, AlertCircle, ShieldCheck, ArrowLeft, RefreshCw, KeyRound, Sparkles, ShieldAlert } from 'lucide-react';
+import { GoogleLogin, type CredentialResponse } from '@react-oauth/google';
 import { toast } from 'sonner';
+import PinDialog from '@/components/PinDialog';
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:4000/api';
 
@@ -53,6 +55,40 @@ function evaluatePasswordStrength(pass: string) {
 const DEPARTMENTS = ['CSE', 'EEE', 'BBA', 'Pharmacy', 'English', 'Law', 'Economics', 'Sociology'];
 const BATCHES = ['2022', '2023', '2024', '2025', '2026'];
 
+function GoogleAuthDivider() {
+  return (
+    <div className="flex items-center gap-3 py-1">
+      <div className="h-px flex-1 bg-border/60" />
+      <span className="text-[11px] font-medium text-muted-foreground uppercase tracking-wider">or</span>
+      <div className="h-px flex-1 bg-border/60" />
+    </div>
+  );
+}
+
+function GoogleAuthButton({ onSuccess, loading }: { onSuccess: (r: CredentialResponse) => void; loading?: boolean }) {
+  const clientId = import.meta.env.VITE_GOOGLE_CLIENT_ID as string | undefined;
+  if (!clientId) {
+    return (
+      <div className="text-center text-[11px] text-muted-foreground bg-accent/30 border border-border/50 rounded-xl py-2.5 px-3 flex items-center justify-center gap-1.5">
+        <ShieldAlert className="w-3.5 h-3.5" /> Google Sign-In isn't configured yet
+      </div>
+    );
+  }
+  return (
+    <div className={`flex justify-center [&>div]:w-full ${loading ? 'opacity-50 pointer-events-none' : ''}`}>
+      <GoogleLogin
+        onSuccess={onSuccess}
+        onError={() => toast.error('Google Sign-In failed. Please try again.')}
+        theme="filled_black"
+        shape="pill"
+        size="large"
+        text="continue_with"
+        width="320"
+      />
+    </div>
+  );
+}
+
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<AuthUser | null>(null);
   const [token, setToken] = useState<string | null>(null);
@@ -71,14 +107,23 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [showPassword, setShowPassword] = useState(false);
   const [rememberMe, setRememberMe] = useState(true);
   const [acceptTerms, setAcceptTerms] = useState(true);
+  const [loginPin, setLoginPin] = useState('');
 
   // OTP state
   const [otpCode, setOtpCode] = useState('');
   const [otpId, setOtpId] = useState('');
   const [timerSeconds, setTimerSeconds] = useState(300);
 
+  // Google Sign-In: when the account already has a Wallet PIN, we need one more step to collect it
+  const [googlePinStep, setGooglePinStep] = useState<{ credential: string } | null>(null);
+  const [googlePin, setGooglePin] = useState('');
+  const [googleLoading, setGoogleLoading] = useState(false);
+
   const [error, setError] = useState('');
   const [formLoading, setFormLoading] = useState(false);
+
+  // Mandatory Wallet PIN setup — shown as a blocking overlay right after signup/login until a PIN exists
+  const needsPinSetup = !!user && !user.pinSet;
 
   useEffect(() => {
     const saved = localStorage.getItem('auth_token');
@@ -149,25 +194,58 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   };
 
-  // Handle Login
+  // Handle Login — Email/Student ID + Password, plus Wallet PIN once one has been set
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setFormLoading(true);
     setError('');
     try {
-      const data = await safeAuthCall('/auth/login', { emailOrStudentId, password });
+      const data = await safeAuthCall('/auth/login', { emailOrStudentId, password, pin: loginPin || undefined });
+      if (data.requiresPin) {
+        setError('This account has a Wallet PIN set — enter it below to continue.');
+        return;
+      }
       if (rememberMe) {
         localStorage.setItem('auth_token', data.token);
         localStorage.setItem('auth_user', JSON.stringify(data.user));
       }
       setToken(data.token);
       setUser(data.user);
+      setLoginPin('');
       setShowAuth(false);
-      toast.success(`Welcome back, ${data.user.fullName || 'Student'}!`);
+      toast.success(data.requiresPinSetup ? `Welcome, ${data.user.fullName || 'Student'}! Set a Wallet PIN to secure your account.` : `Welcome back, ${data.user.fullName || 'Student'}!`);
     } catch (err: any) {
       setError(err.message || 'Invalid credentials');
     } finally {
       setFormLoading(false);
+    }
+  };
+
+  // Handle Google Sign-In / Sign-Up — restricted server-side to verified @std.ewubd.edu accounts
+  const handleGoogleAuth = async (response: CredentialResponse, pin?: string) => {
+    const credential = response.credential || googlePinStep?.credential;
+    if (!credential) return;
+    setGoogleLoading(true);
+    setError('');
+    try {
+      const data = await safeAuthCall('/auth/google', { credential, pin });
+      if (data.requiresPin) {
+        setGooglePinStep({ credential });
+        setError('This account has a Wallet PIN set — enter it below to continue.');
+        return;
+      }
+      localStorage.setItem('auth_token', data.token);
+      localStorage.setItem('auth_user', JSON.stringify(data.user));
+      setToken(data.token);
+      setUser(data.user);
+      setGooglePinStep(null);
+      setGooglePin('');
+      setShowAuth(false);
+      toast.success(data.requiresPinSetup ? `Welcome, ${data.user.fullName || 'Student'}! Set a Wallet PIN to secure your account.` : `Welcome back, ${data.user.fullName || 'Student'}!`);
+    } catch (err: any) {
+      setError(err.message || 'Google Sign-In failed');
+    } finally {
+      setGoogleLoading(false);
     }
   };
 
@@ -237,7 +315,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setToken(data.token);
       setUser(data.user);
       setShowAuth(false);
-      toast.success('Account created successfully! Welcome to Smart Campus.');
+      toast.success('Account created! Now set a Wallet PIN to secure your account.');
     } catch (err: any) {
       setError(err.message || 'OTP verification failed');
     } finally {
@@ -300,6 +378,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const passwordStrength = evaluatePasswordStrength(password);
 
+  // Back button — local to this auth card only. Steps back through the auth flow; never touches app/router navigation.
+  const canGoBack = !!googlePinStep || authView !== 'login';
+  const handleBack = () => {
+    setError('');
+    if (googlePinStep) { setGooglePinStep(null); setGooglePin(''); return; }
+    if (authView === 'verify-register') { setAuthView('signup'); return; }
+    if (authView === 'verify-forgot') { setAuthView('forgot'); return; }
+    if (authView === 'forgot') { setAuthView('login'); return; }
+    if (authView === 'signup') { setAuthView('login'); return; }
+  };
+
   if (showAuth && !user) {
     return (
       <div className="min-h-screen bg-background flex items-center justify-center p-4 relative overflow-hidden">
@@ -316,7 +405,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             className="glass-strong rounded-3xl p-6 sm:p-8 border border-border/80 shadow-2xl space-y-6"
           >
             {/* Header */}
-            <div className="text-center space-y-2">
+            <div className="relative text-center space-y-2">
+              {canGoBack && (
+                <button
+                  type="button"
+                  onClick={handleBack}
+                  aria-label="Back"
+                  className="absolute left-0 top-0 w-9 h-9 rounded-xl flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-accent/60 active:scale-95 transition-all"
+                >
+                  <ArrowLeft className="w-4.5 h-4.5" />
+                </button>
+              )}
               <div className="w-14 h-14 rounded-2xl gradient-primary flex items-center justify-center shadow-xl shadow-primary/20 mx-auto">
                 <GraduationCap className="w-7 h-7 text-primary-foreground" />
               </div>
@@ -325,30 +424,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
                 <p className="text-xs font-medium text-primary tracking-wide uppercase mt-0.5">East West University Wallet</p>
               </div>
             </div>
-
-            {/* View Switcher Tabs */}
-            {(authView === 'login' || authView === 'signup') && (
-              <div className="flex bg-accent/60 p-1 rounded-xl border border-border/60">
-                <button
-                  type="button"
-                  onClick={() => { setAuthView('login'); setError(''); }}
-                  className={`flex-1 py-2.5 text-xs font-bold rounded-lg transition-all ${
-                    authView === 'login' ? 'bg-primary text-primary-foreground shadow-md' : 'text-muted-foreground hover:text-foreground'
-                  }`}
-                >
-                  Sign In
-                </button>
-                <button
-                  type="button"
-                  onClick={() => { setAuthView('signup'); setError(''); }}
-                  className={`flex-1 py-2.5 text-xs font-bold rounded-lg transition-all ${
-                    authView === 'signup' ? 'bg-primary text-primary-foreground shadow-md' : 'text-muted-foreground hover:text-foreground'
-                  }`}
-                >
-                  Register Student
-                </button>
-              </div>
-            )}
 
             {/* Error banner */}
             <AnimatePresence mode="wait">
@@ -365,8 +440,40 @@ export function AuthProvider({ children }: { children: ReactNode }) {
               )}
             </AnimatePresence>
 
+            {/* GOOGLE SIGN-IN — WALLET PIN STEP */}
+            {googlePinStep && (
+              <form
+                onSubmit={e => { e.preventDefault(); if (googlePin.length === 4) handleGoogleAuth({ credential: googlePinStep.credential } as CredentialResponse, googlePin); }}
+                className="space-y-5"
+              >
+                <div className="text-center space-y-1 bg-accent/30 p-4 rounded-2xl border border-border/60">
+                  <KeyRound className="w-8 h-8 text-primary mx-auto mb-2" />
+                  <h3 className="text-sm font-bold text-foreground">Enter Your Wallet PIN</h3>
+                  <p className="text-xs text-muted-foreground">This Google account already has a Wallet PIN set. Enter it to finish signing in.</p>
+                </div>
+                <input
+                  type="password"
+                  inputMode="numeric"
+                  maxLength={4}
+                  autoFocus
+                  value={googlePin}
+                  onChange={e => setGooglePin(e.target.value.replace(/\D/g, '').slice(0, 4))}
+                  placeholder="••••"
+                  className="w-full h-14 text-center font-mono text-3xl tracking-[12px] font-black rounded-2xl bg-accent/50 border border-border/80 focus:border-primary text-foreground"
+                />
+                <button
+                  type="submit"
+                  disabled={googleLoading || googlePin.length !== 4}
+                  className="w-full h-12 rounded-xl gradient-primary text-primary-foreground font-bold text-sm shadow-xl shadow-primary/20 hover:shadow-primary/30 transition-all disabled:opacity-50 flex items-center justify-center gap-2"
+                >
+                  {googleLoading ? <RefreshCw className="w-4 h-4 animate-spin" /> : <ShieldCheck className="w-4 h-4" />}
+                  {googleLoading ? 'Verifying...' : 'Unlock Wallet'}
+                </button>
+              </form>
+            )}
+
             {/* LOGIN FORM */}
-            {authView === 'login' && (
+            {authView === 'login' && !googlePinStep && (
               <form onSubmit={handleLogin} className="space-y-4">
                 <div>
                   <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider block mb-1.5">
@@ -418,6 +525,24 @@ export function AuthProvider({ children }: { children: ReactNode }) {
                   </div>
                 </div>
 
+                <div>
+                  <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider block mb-1.5">
+                    Wallet PIN <span className="text-muted-foreground font-normal normal-case text-[11px]">(leave blank if you haven't set one yet)</span>
+                  </label>
+                  <div className="relative">
+                    <KeyRound className="w-4 h-4 text-muted-foreground absolute left-3.5 top-3.5" />
+                    <input
+                      type="password"
+                      inputMode="numeric"
+                      maxLength={4}
+                      value={loginPin}
+                      onChange={e => setLoginPin(e.target.value.replace(/\D/g, '').slice(0, 4))}
+                      placeholder="4-digit PIN"
+                      className="w-full h-11 rounded-xl bg-accent/40 border border-border/60 pl-10 pr-4 text-sm text-foreground placeholder:text-muted-foreground focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20 transition-all tracking-[6px] font-mono"
+                    />
+                  </div>
+                </div>
+
                 <div className="flex items-center justify-between pt-1">
                   <label className="flex items-center gap-2 text-xs text-muted-foreground cursor-pointer select-none">
                     <input
@@ -438,11 +563,21 @@ export function AuthProvider({ children }: { children: ReactNode }) {
                   {formLoading ? <RefreshCw className="w-4 h-4 animate-spin" /> : <ShieldCheck className="w-4 h-4" />}
                   {formLoading ? 'Signing In...' : 'Sign In to Wallet'}
                 </button>
+
+                <GoogleAuthDivider />
+                <GoogleAuthButton onSuccess={r => handleGoogleAuth(r)} loading={googleLoading} />
+
+                <p className="text-center text-xs text-muted-foreground pt-1">
+                  New to Smart Campus?{' '}
+                  <button type="button" onClick={() => { setAuthView('signup'); setError(''); }} className="text-primary font-semibold hover:underline">
+                    Create an account
+                  </button>
+                </p>
               </form>
             )}
 
             {/* REGISTRATION FORM */}
-            {authView === 'signup' && (
+            {authView === 'signup' && !googlePinStep && (
               <form onSubmit={handleRegisterOtpRequest} className="space-y-3.5">
                 <div>
                   <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider block mb-1">
@@ -586,6 +721,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
                   {formLoading ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Mail className="w-4 h-4" />}
                   {formLoading ? 'Sending OTP...' : 'Continue — Send Email OTP'}
                 </button>
+
+                <GoogleAuthDivider />
+                <GoogleAuthButton onSuccess={r => handleGoogleAuth(r)} loading={googleLoading} />
+                <p className="text-center text-[11px] text-muted-foreground -mt-1">Google Sign-Up is restricted to @std.ewubd.edu accounts</p>
+
+                <p className="text-center text-xs text-muted-foreground pt-1">
+                  Already have an account?{' '}
+                  <button type="button" onClick={() => { setAuthView('login'); setError(''); }} className="text-primary font-semibold hover:underline">
+                    Sign in
+                  </button>
+                </p>
               </form>
             )}
 
@@ -627,14 +773,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
                   {formLoading ? 'Verifying...' : 'Verify OTP & Create Account'}
                 </button>
 
-                <div className="flex justify-between items-center text-xs">
-                  <button
-                    type="button"
-                    onClick={() => { setAuthView('signup'); setError(''); }}
-                    className="text-muted-foreground hover:text-foreground flex items-center gap-1"
-                  >
-                    <ArrowLeft className="w-3.5 h-3.5" /> Back to Form
-                  </button>
+                <div className="flex justify-end items-center text-xs">
                   <button
                     type="button"
                     onClick={handleRegisterOtpRequest}
@@ -677,14 +816,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
                 >
                   {formLoading ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Mail className="w-4 h-4" />}
                   {formLoading ? 'Sending...' : 'Send Password Reset OTP'}
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => { setAuthView('login'); setError(''); }}
-                  className="w-full text-center text-xs font-semibold text-muted-foreground hover:text-foreground flex items-center justify-center gap-1 pt-1"
-                >
-                  <ArrowLeft className="w-3.5 h-3.5" /> Back to Sign In
                 </button>
               </form>
             )}
@@ -764,6 +895,21 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   return (
     <AuthContext.Provider value={{ user, isLoading, loginWithRedirect, logout, token }}>
       {children}
+      {needsPinSetup && (
+        <PinDialog
+          open
+          mandatory
+          mode="set"
+          title="Secure Your Wallet"
+          description="Create a 4-digit Wallet PIN. You'll need it for every future login and to authorize payments."
+          onOpenChange={() => {}}
+          onSuccess={() => {
+            const updated = { ...user!, pinSet: true };
+            setUser(updated);
+            localStorage.setItem('auth_user', JSON.stringify(updated));
+          }}
+        />
+      )}
     </AuthContext.Provider>
   );
 }

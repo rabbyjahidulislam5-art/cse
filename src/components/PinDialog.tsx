@@ -11,6 +11,10 @@ interface PinDialogProps {
   onOpenChange: (open: boolean) => void;
   mode: 'set' | 'verify' | 'change';
   onSuccess: () => void;
+  /** When true, the dialog cannot be dismissed without completing the PIN flow (used for the mandatory post-signup wallet PIN setup). */
+  mandatory?: boolean;
+  title?: string;
+  description?: string;
 }
 
 const PIN_LENGTH = 4;
@@ -61,7 +65,7 @@ function Numpad({ onDigit, onDelete, disabled }: { onDigit: (d: string) => void;
   );
 }
 
-export default function PinDialog({ open, onOpenChange, mode, onSuccess }: PinDialogProps) {
+export default function PinDialog({ open, onOpenChange, mode, onSuccess, mandatory, title, description }: PinDialogProps) {
   const [pin, setPin] = useState('');
   const [currentPin, setCurrentPin] = useState('');
   const [confirmPin, setConfirmPin] = useState('');
@@ -149,14 +153,19 @@ export default function PinDialog({ open, onOpenChange, mode, onSuccess }: PinDi
   };
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-sm glass-strong rounded-2xl p-6">
+    <Dialog open={open} onOpenChange={mandatory ? undefined : onOpenChange}>
+      <DialogContent
+        className="sm:max-w-sm glass-strong rounded-2xl p-6"
+        hideClose={mandatory}
+        onEscapeKeyDown={mandatory ? (e) => e.preventDefault() : undefined}
+        onPointerDownOutside={mandatory ? (e) => e.preventDefault() : undefined}
+      >
         <DialogHeader className="text-center">
           <div className="mx-auto w-16 h-16 rounded-2xl bg-primary/10 flex items-center justify-center mb-3">
             {mode === 'verify' ? <Fingerprint className="w-8 h-8 text-primary" /> : <ShieldCheck className="w-8 h-8 text-primary" />}
           </div>
-          <DialogTitle className="text-lg font-bold">{titles[step]}</DialogTitle>
-          <DialogDescription className="text-sm">{descs[step]}</DialogDescription>
+          <DialogTitle className="text-lg font-bold">{title || titles[step]}</DialogTitle>
+          <DialogDescription className="text-sm">{description || descs[step]}</DialogDescription>
         </DialogHeader>
 
         <PinDots value={activePin} error={error} />
@@ -169,9 +178,11 @@ export default function PinDialog({ open, onOpenChange, mode, onSuccess }: PinDi
           <Numpad onDigit={handleDigit} onDelete={handleDelete} disabled={loading} />
         )}
 
-        <button onClick={() => onOpenChange(false)} className="mt-4 text-sm text-muted-foreground hover:text-foreground text-center w-full transition-colors">
-          Cancel
-        </button>
+        {!mandatory && (
+          <button onClick={() => onOpenChange(false)} className="mt-4 text-sm text-muted-foreground hover:text-foreground text-center w-full transition-colors">
+            Cancel
+          </button>
+        )}
       </DialogContent>
     </Dialog>
   );

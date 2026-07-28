@@ -67,11 +67,10 @@ router.post('/auth/register-otp', async (req, res) => {
     const code = String(Math.floor(100000 + Math.random() * 900000));
     const expiresAt = new Date(Date.now() + 5 * 60 * 1000);
 
-    // Save temporary OTP record (using dummy or unlinked userId if needed)
+    // Registration OTPs aren't linked to a User yet (the account doesn't exist until signup completes)
     const otp = await prisma.otpCode.create({
       data: {
         code,
-        userId: 'temp-registration',
         purpose: `Register:${lowerEmail}`,
         status: 'Active',
         attempts: 0,
@@ -170,6 +169,7 @@ router.post('/auth/signup', async (req, res) => {
     const token = generateToken(user);
     res.json({
       token,
+      requiresPinSetup: true,
       user: {
         id: user.id,
         email: user.email,
@@ -188,10 +188,10 @@ router.post('/auth/signup', async (req, res) => {
   }
 });
 
-// Login by Email OR Student ID
+// Login by Email OR Student ID (Password + Wallet PIN once a PIN has been set)
 router.post('/auth/login', async (req, res) => {
   try {
-    const { emailOrStudentId, password } = req.body;
+    const { emailOrStudentId, password, pin } = req.body;
     const identifier = req.body.email || req.body.emailOrStudentId;
     if (!identifier || !password) return res.status(400).json({ message: 'Email/Student ID and password are required' });
 
@@ -210,9 +210,143 @@ router.post('/auth/login', async (req, res) => {
     const valid = await bcrypt.compare(password, user.password);
     if (!valid) return res.status(401).json({ message: 'Invalid Email/Student ID or password' });
 
+    // Wallet PIN is required as the third login factor once the student has set one
+    if (user.pinSet && user.pinHash) {
+      if (user.pinLockedUntil && new Date(user.pinLockedUntil) > new Date()) {
+        const mins = Math.ceil((new Date(user.pinLockedUntil).getTime() - Date.now()) / 60000);
+        return res.status(429).json({ message: `Wallet PIN locked. Try again in ${mins} minutes.` });
+      }
+      if (!pin) {
+        return res.status(200).json({ requiresPin: true, message: 'Enter your 4-digit Wallet PIN to continue.' });
+      }
+      const pinHash = await hashPin(pin, user.pinSalt || '');
+      if (pinHash !== user.pinHash) {
+        const attempts = (user.pinAttempts || 0) + 1;
+        const updates: any = { pinAttempts: attempts };
+        if (attempts >= 5) updates.pinLockedUntil = new Date(Date.now() + 30 * 60 * 1000);
+        await prisma.user.update({ where: { id: user.id }, data: updates });
+        return res.status(401).json({ requiresPin: true, message: `Incorrect Wallet PIN. ${Math.max(0, 5 - attempts)} attempts remaining.` });
+      }
+      if (user.pinAttempts) await prisma.user.update({ where: { id: user.id }, data: { pinAttempts: 0 } });
+    }
+
     const token = generateToken(user);
     res.json({
       token,
+      requiresPinSetup: !user.pinSet,
+      user: {
+        id: user.id,
+        email: user.email,
+        fullName: user.fullName,
+        role: user.role,
+        studentId: user.studentId,
+        department: user.department,
+        batch: user.batch,
+        phone: user.phone,
+        status: user.status,
+        pinSet: user.pinSet || false,
+      },
+    });
+  } catch (err: any) {
+    res.status(500).json({ message: err.message });
+  }
+});
+
+// Google Sign-Up / Sign-In — restricted to verified @std.ewubd.edu Google accounts
+router.post('/auth/google', async (req, res) => {
+  try {
+    const { credential, pin } = req.body;
+    if (!credential) return res.status(400).json({ message: 'Missing Google credential.' });
+    if (!process.env.GOOGLE_CLIENT_ID) {
+      return res.status(500).json({ message: 'Google Sign-In is not configured on the server yet.' });
+    }
+
+    const { OAuth2Client } = await import('google-auth-library');
+    const googleClient = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
+    let payload;
+    try {
+      const ticket = await googleClient.verifyIdToken({ idToken: credential, audience: process.env.GOOGLE_CLIENT_ID });
+      payload = ticket.getPayload();
+    } catch {
+      return res.status(401).json({ message: 'Invalid or expired Google sign-in. Please try again.' });
+    }
+
+    if (!payload?.email || !payload.email_verified) {
+      return res.status(401).json({ message: 'Your Google email could not be verified.' });
+    }
+
+    const lowerEmail = payload.email.toLowerCase().trim();
+    if (!lowerEmail.endsWith('@std.ewubd.edu')) {
+      return res.status(403).json({ message: 'Google Sign-Up is restricted to @std.ewubd.edu student accounts only.' });
+    }
+
+    let user = await prisma.user.findUnique({ where: { email: lowerEmail } });
+
+    if (!user) {
+      const emailPrefix = lowerEmail.split('@')[0];
+      const studentIdMatch = emailPrefix.match(/^\d{4}-\d-\d{2}-\d{3}$/) ? emailPrefix : undefined;
+      if (studentIdMatch) {
+        const existingSid = await prisma.user.findUnique({ where: { studentId: studentIdMatch } });
+        if (existingSid) return res.status(400).json({ message: `Student ID ${studentIdMatch} is already registered.` });
+      }
+
+      user = await prisma.user.create({
+        data: {
+          email: lowerEmail,
+          fullName: payload.name || emailPrefix,
+          studentId: studentIdMatch,
+          role: 'Student',
+          status: 'Active',
+          authProvider: 'google',
+          googleId: payload.sub,
+          profilePicture: payload.picture || undefined,
+        },
+      });
+
+      await prisma.wallet.create({
+        data: { walletId: `W-${user.id.slice(0, 8)}`, ownerId: user.id, balance: 0, dailyTransferLimit: 10000, dailyTransferred: 0 },
+      });
+
+      try {
+        await sendEmail(lowerEmail, 'Welcome to Smart Campus! — EWU Digital Wallet', [
+          { type: 'text', content: `<strong>Dear ${user.fullName},</strong>\n\nYour Smart Campus student account has been created via Google Sign-Up!\n\n<strong>Email:</strong> ${lowerEmail}` },
+          { type: 'divider' },
+          { type: 'text', content: '🎓 East West University — Smart Campus Digital Wallet' },
+        ]);
+      } catch { /* best-effort */ }
+    } else {
+      if (user.status === 'Suspended') {
+        return res.status(403).json({ message: 'Account is suspended. Please contact the Admin Office.' });
+      }
+      if (!user.googleId) {
+        user = await prisma.user.update({ where: { id: user.id }, data: { googleId: payload.sub } });
+      }
+    }
+
+    // Same Wallet PIN rule as password login
+    if (user.pinSet && user.pinHash) {
+      if (user.pinLockedUntil && new Date(user.pinLockedUntil) > new Date()) {
+        const mins = Math.ceil((new Date(user.pinLockedUntil).getTime() - Date.now()) / 60000);
+        return res.status(429).json({ message: `Wallet PIN locked. Try again in ${mins} minutes.` });
+      }
+      if (!pin) {
+        return res.status(200).json({ requiresPin: true, message: 'Enter your 4-digit Wallet PIN to continue.' });
+      }
+      const pinHash = await hashPin(pin, user.pinSalt || '');
+      if (pinHash !== user.pinHash) {
+        const attempts = (user.pinAttempts || 0) + 1;
+        const updates: any = { pinAttempts: attempts };
+        if (attempts >= 5) updates.pinLockedUntil = new Date(Date.now() + 30 * 60 * 1000);
+        await prisma.user.update({ where: { id: user.id }, data: updates });
+        return res.status(401).json({ requiresPin: true, message: `Incorrect Wallet PIN. ${Math.max(0, 5 - attempts)} attempts remaining.` });
+      }
+      if (user.pinAttempts) await prisma.user.update({ where: { id: user.id }, data: { pinAttempts: 0 } });
+    }
+
+    const token = generateToken(user);
+    res.json({
+      token,
+      requiresPinSetup: !user.pinSet,
       user: {
         id: user.id,
         email: user.email,
