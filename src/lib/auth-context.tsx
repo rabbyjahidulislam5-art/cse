@@ -3,7 +3,6 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { GraduationCap, Eye, EyeOff, Lock, Mail, User, Phone, CheckCircle2, AlertCircle, ShieldCheck, ArrowLeft, RefreshCw, KeyRound, Sparkles, ShieldAlert } from 'lucide-react';
 import { GoogleLogin, type CredentialResponse } from '@react-oauth/google';
 import { toast } from 'sonner';
-import PinDialog from '@/components/PinDialog';
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:4000/api';
 
@@ -107,23 +106,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [showPassword, setShowPassword] = useState(false);
   const [rememberMe, setRememberMe] = useState(true);
   const [acceptTerms, setAcceptTerms] = useState(true);
-  const [loginPin, setLoginPin] = useState('');
 
   // OTP state
   const [otpCode, setOtpCode] = useState('');
   const [otpId, setOtpId] = useState('');
   const [timerSeconds, setTimerSeconds] = useState(300);
 
-  // Google Sign-In: when the account already has a Wallet PIN, we need one more step to collect it
-  const [googlePinStep, setGooglePinStep] = useState<{ credential: string } | null>(null);
-  const [googlePin, setGooglePin] = useState('');
   const [googleLoading, setGoogleLoading] = useState(false);
 
   const [error, setError] = useState('');
   const [formLoading, setFormLoading] = useState(false);
-
-  // Mandatory Wallet PIN setup — shown as a blocking overlay right after signup/login until a PIN exists
-  const needsPinSetup = !!user && !user.pinSet;
 
   useEffect(() => {
     const saved = localStorage.getItem('auth_token');
@@ -194,54 +186,42 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   };
 
-  // Handle Login — Email/Student ID + Password, plus Wallet PIN once one has been set
+  // Handle Login — Email/Student ID + (Password OR Wallet PIN, whichever matches)
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setFormLoading(true);
     setError('');
     try {
-      const data = await safeAuthCall('/auth/login', { emailOrStudentId, password, pin: loginPin || undefined });
-      if (data.requiresPin) {
-        setError('This account has a Wallet PIN set — enter it below to continue.');
-        return;
-      }
+      const data = await safeAuthCall('/auth/login', { emailOrStudentId, password });
       if (rememberMe) {
         localStorage.setItem('auth_token', data.token);
         localStorage.setItem('auth_user', JSON.stringify(data.user));
       }
       setToken(data.token);
       setUser(data.user);
-      setLoginPin('');
       setShowAuth(false);
-      toast.success(data.requiresPinSetup ? `Welcome, ${data.user.fullName || 'Student'}! Set a Wallet PIN to secure your account.` : `Welcome back, ${data.user.fullName || 'Student'}!`);
+      toast.success(`Welcome back, ${data.user.fullName || 'Student'}!`);
     } catch (err: any) {
-      setError(err.message || 'Invalid credentials');
+      setError(err.message || 'Invalid Password or Wallet PIN.');
     } finally {
       setFormLoading(false);
     }
   };
 
-  // Handle Google Sign-In / Sign-Up — restricted server-side to verified @std.ewubd.edu accounts
-  const handleGoogleAuth = async (response: CredentialResponse, pin?: string) => {
-    const credential = response.credential || googlePinStep?.credential;
-    if (!credential) return;
+  // Handle Google Sign-In / Sign-Up — restricted server-side to verified @std.ewubd.edu accounts.
+  // Existing accounts (however they were created) are matched by verified email and signed in; new accounts are created automatically.
+  const handleGoogleAuth = async (response: CredentialResponse) => {
+    if (!response.credential) return;
     setGoogleLoading(true);
     setError('');
     try {
-      const data = await safeAuthCall('/auth/google', { credential, pin });
-      if (data.requiresPin) {
-        setGooglePinStep({ credential });
-        setError('This account has a Wallet PIN set — enter it below to continue.');
-        return;
-      }
+      const data = await safeAuthCall('/auth/google', { credential: response.credential });
       localStorage.setItem('auth_token', data.token);
       localStorage.setItem('auth_user', JSON.stringify(data.user));
       setToken(data.token);
       setUser(data.user);
-      setGooglePinStep(null);
-      setGooglePin('');
       setShowAuth(false);
-      toast.success(data.requiresPinSetup ? `Welcome, ${data.user.fullName || 'Student'}! Set a Wallet PIN to secure your account.` : `Welcome back, ${data.user.fullName || 'Student'}!`);
+      toast.success(`Welcome, ${data.user.fullName || 'Student'}!`);
     } catch (err: any) {
       setError(err.message || 'Google Sign-In failed');
     } finally {
@@ -315,7 +295,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setToken(data.token);
       setUser(data.user);
       setShowAuth(false);
-      toast.success('Account created! Now set a Wallet PIN to secure your account.');
+      toast.success('Account created successfully! You can set a Wallet PIN anytime from Wallet Settings.');
     } catch (err: any) {
       setError(err.message || 'OTP verification failed');
     } finally {
@@ -379,10 +359,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const passwordStrength = evaluatePasswordStrength(password);
 
   // Back button — local to this auth card only. Steps back through the auth flow; never touches app/router navigation.
-  const canGoBack = !!googlePinStep || authView !== 'login';
+  const canGoBack = authView !== 'login';
   const handleBack = () => {
     setError('');
-    if (googlePinStep) { setGooglePinStep(null); setGooglePin(''); return; }
     if (authView === 'verify-register') { setAuthView('signup'); return; }
     if (authView === 'verify-forgot') { setAuthView('forgot'); return; }
     if (authView === 'forgot') { setAuthView('login'); return; }
@@ -440,40 +419,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
               )}
             </AnimatePresence>
 
-            {/* GOOGLE SIGN-IN — WALLET PIN STEP */}
-            {googlePinStep && (
-              <form
-                onSubmit={e => { e.preventDefault(); if (googlePin.length === 4) handleGoogleAuth({ credential: googlePinStep.credential } as CredentialResponse, googlePin); }}
-                className="space-y-5"
-              >
-                <div className="text-center space-y-1 bg-accent/30 p-4 rounded-2xl border border-border/60">
-                  <KeyRound className="w-8 h-8 text-primary mx-auto mb-2" />
-                  <h3 className="text-sm font-bold text-foreground">Enter Your Wallet PIN</h3>
-                  <p className="text-xs text-muted-foreground">This Google account already has a Wallet PIN set. Enter it to finish signing in.</p>
-                </div>
-                <input
-                  type="password"
-                  inputMode="numeric"
-                  maxLength={4}
-                  autoFocus
-                  value={googlePin}
-                  onChange={e => setGooglePin(e.target.value.replace(/\D/g, '').slice(0, 4))}
-                  placeholder="••••"
-                  className="w-full h-14 text-center font-mono text-3xl tracking-[12px] font-black rounded-2xl bg-accent/50 border border-border/80 focus:border-primary text-foreground"
-                />
-                <button
-                  type="submit"
-                  disabled={googleLoading || googlePin.length !== 4}
-                  className="w-full h-12 rounded-xl gradient-primary text-primary-foreground font-bold text-sm shadow-xl shadow-primary/20 hover:shadow-primary/30 transition-all disabled:opacity-50 flex items-center justify-center gap-2"
-                >
-                  {googleLoading ? <RefreshCw className="w-4 h-4 animate-spin" /> : <ShieldCheck className="w-4 h-4" />}
-                  {googleLoading ? 'Verifying...' : 'Unlock Wallet'}
-                </button>
-              </form>
-            )}
-
             {/* LOGIN FORM */}
-            {authView === 'login' && !googlePinStep && (
+            {authView === 'login' && (
               <form onSubmit={handleLogin} className="space-y-4">
                 <div>
                   <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider block mb-1.5">
@@ -495,7 +442,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
                 <div>
                   <div className="flex justify-between items-center mb-1.5">
                     <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
-                      Password
+                      Password or Wallet PIN
                     </label>
                     <button
                       type="button"
@@ -512,7 +459,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
                       required
                       value={password}
                       onChange={e => setPassword(e.target.value)}
-                      placeholder="••••••••"
+                      placeholder="Enter your Password or 4-digit Wallet PIN"
                       className="w-full h-11 rounded-xl bg-accent/40 border border-border/60 pl-10 pr-10 text-sm text-foreground placeholder:text-muted-foreground focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20 transition-all"
                     />
                     <button
@@ -522,24 +469,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
                     >
                       {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                     </button>
-                  </div>
-                </div>
-
-                <div>
-                  <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider block mb-1.5">
-                    Wallet PIN <span className="text-muted-foreground font-normal normal-case text-[11px]">(leave blank if you haven't set one yet)</span>
-                  </label>
-                  <div className="relative">
-                    <KeyRound className="w-4 h-4 text-muted-foreground absolute left-3.5 top-3.5" />
-                    <input
-                      type="password"
-                      inputMode="numeric"
-                      maxLength={4}
-                      value={loginPin}
-                      onChange={e => setLoginPin(e.target.value.replace(/\D/g, '').slice(0, 4))}
-                      placeholder="4-digit PIN"
-                      className="w-full h-11 rounded-xl bg-accent/40 border border-border/60 pl-10 pr-4 text-sm text-foreground placeholder:text-muted-foreground focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20 transition-all tracking-[6px] font-mono"
-                    />
                   </div>
                 </div>
 
@@ -577,7 +506,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             )}
 
             {/* REGISTRATION FORM */}
-            {authView === 'signup' && !googlePinStep && (
+            {authView === 'signup' && (
               <form onSubmit={handleRegisterOtpRequest} className="space-y-3.5">
                 <div>
                   <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider block mb-1">
@@ -895,21 +824,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   return (
     <AuthContext.Provider value={{ user, isLoading, loginWithRedirect, logout, token }}>
       {children}
-      {needsPinSetup && (
-        <PinDialog
-          open
-          mandatory
-          mode="set"
-          title="Secure Your Wallet"
-          description="Create a 4-digit Wallet PIN. You'll need it for every future login and to authorize payments."
-          onOpenChange={() => {}}
-          onSuccess={() => {
-            const updated = { ...user!, pinSet: true };
-            setUser(updated);
-            localStorage.setItem('auth_user', JSON.stringify(updated));
-          }}
-        />
-      )}
     </AuthContext.Provider>
   );
 }

@@ -169,7 +169,6 @@ router.post('/auth/signup', async (req, res) => {
     const token = generateToken(user);
     res.json({
       token,
-      requiresPinSetup: true,
       user: {
         id: user.id,
         email: user.email,
@@ -188,12 +187,12 @@ router.post('/auth/signup', async (req, res) => {
   }
 });
 
-// Login by Email OR Student ID (Password + Wallet PIN once a PIN has been set)
+// Login by Email OR Student ID — the second field accepts EITHER the account Password OR the 4-digit Wallet PIN
 router.post('/auth/login', async (req, res) => {
   try {
-    const { emailOrStudentId, password, pin } = req.body;
+    const { emailOrStudentId, password } = req.body;
     const identifier = req.body.email || req.body.emailOrStudentId;
-    if (!identifier || !password) return res.status(400).json({ message: 'Email/Student ID and password are required' });
+    if (!identifier || !password) return res.status(400).json({ message: 'Email/Student ID and Password or Wallet PIN are required' });
 
     const trimmed = identifier.trim();
     let user = await prisma.user.findUnique({ where: { email: trimmed.toLowerCase() } });
@@ -201,39 +200,36 @@ router.post('/auth/login', async (req, res) => {
       user = await prisma.user.findUnique({ where: { studentId: trimmed } });
     }
 
-    if (!user || !user.password) return res.status(401).json({ message: 'Invalid Email/Student ID or password' });
+    if (!user) return res.status(401).json({ message: 'Invalid Password or Wallet PIN.' });
 
     if (user.status === 'Suspended') {
       return res.status(403).json({ message: 'Account is suspended. Please contact the Admin Office.' });
     }
 
-    const valid = await bcrypt.compare(password, user.password);
-    if (!valid) return res.status(401).json({ message: 'Invalid Email/Student ID or password' });
+    let authenticated = user.password ? await bcrypt.compare(password, user.password) : false;
 
-    // Wallet PIN is required as the third login factor once the student has set one
-    if (user.pinSet && user.pinHash) {
+    if (!authenticated && user.pinSet && user.pinHash && /^\d{4}$/.test(password)) {
       if (user.pinLockedUntil && new Date(user.pinLockedUntil) > new Date()) {
         const mins = Math.ceil((new Date(user.pinLockedUntil).getTime() - Date.now()) / 60000);
-        return res.status(429).json({ message: `Wallet PIN locked. Try again in ${mins} minutes.` });
+        return res.status(429).json({ message: `Too many attempts. Try again in ${mins} minutes.` });
       }
-      if (!pin) {
-        return res.status(200).json({ requiresPin: true, message: 'Enter your 4-digit Wallet PIN to continue.' });
-      }
-      const pinHash = await hashPin(pin, user.pinSalt || '');
-      if (pinHash !== user.pinHash) {
+      const pinHash = await hashPin(password, user.pinSalt || '');
+      if (pinHash === user.pinHash) {
+        authenticated = true;
+        if (user.pinAttempts) await prisma.user.update({ where: { id: user.id }, data: { pinAttempts: 0 } });
+      } else {
         const attempts = (user.pinAttempts || 0) + 1;
         const updates: any = { pinAttempts: attempts };
         if (attempts >= 5) updates.pinLockedUntil = new Date(Date.now() + 30 * 60 * 1000);
         await prisma.user.update({ where: { id: user.id }, data: updates });
-        return res.status(401).json({ requiresPin: true, message: `Incorrect Wallet PIN. ${Math.max(0, 5 - attempts)} attempts remaining.` });
       }
-      if (user.pinAttempts) await prisma.user.update({ where: { id: user.id }, data: { pinAttempts: 0 } });
     }
+
+    if (!authenticated) return res.status(401).json({ message: 'Invalid Password or Wallet PIN.' });
 
     const token = generateToken(user);
     res.json({
       token,
-      requiresPinSetup: !user.pinSet,
       user: {
         id: user.id,
         email: user.email,
@@ -252,10 +248,11 @@ router.post('/auth/login', async (req, res) => {
   }
 });
 
-// Google Sign-Up / Sign-In — restricted to verified @std.ewubd.edu Google accounts
+// Google Sign-Up / Sign-In — restricted to verified @std.ewubd.edu Google accounts.
+// Finds an existing account by verified email first (never creates a duplicate); creates one only if none exists.
 router.post('/auth/google', async (req, res) => {
   try {
-    const { credential, pin } = req.body;
+    const { credential } = req.body;
     if (!credential) return res.status(400).json({ message: 'Missing Google credential.' });
     if (!process.env.GOOGLE_CLIENT_ID) {
       return res.status(500).json({ message: 'Google Sign-In is not configured on the server yet.' });
@@ -323,30 +320,9 @@ router.post('/auth/google', async (req, res) => {
       }
     }
 
-    // Same Wallet PIN rule as password login
-    if (user.pinSet && user.pinHash) {
-      if (user.pinLockedUntil && new Date(user.pinLockedUntil) > new Date()) {
-        const mins = Math.ceil((new Date(user.pinLockedUntil).getTime() - Date.now()) / 60000);
-        return res.status(429).json({ message: `Wallet PIN locked. Try again in ${mins} minutes.` });
-      }
-      if (!pin) {
-        return res.status(200).json({ requiresPin: true, message: 'Enter your 4-digit Wallet PIN to continue.' });
-      }
-      const pinHash = await hashPin(pin, user.pinSalt || '');
-      if (pinHash !== user.pinHash) {
-        const attempts = (user.pinAttempts || 0) + 1;
-        const updates: any = { pinAttempts: attempts };
-        if (attempts >= 5) updates.pinLockedUntil = new Date(Date.now() + 30 * 60 * 1000);
-        await prisma.user.update({ where: { id: user.id }, data: updates });
-        return res.status(401).json({ requiresPin: true, message: `Incorrect Wallet PIN. ${Math.max(0, 5 - attempts)} attempts remaining.` });
-      }
-      if (user.pinAttempts) await prisma.user.update({ where: { id: user.id }, data: { pinAttempts: 0 } });
-    }
-
     const token = generateToken(user);
     res.json({
       token,
-      requiresPinSetup: !user.pinSet,
       user: {
         id: user.id,
         email: user.email,
