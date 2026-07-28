@@ -1,114 +1,134 @@
-import nodemailer, { type Transporter } from 'nodemailer';
-import type SMTPPool from 'nodemailer/lib/smtp-pool';
-import dns from 'dns';
+import { OAuth2Client } from 'google-auth-library';
 
-// `family` and `servername` are honored by nodemailer at runtime (forwarded through to
-// net/tls.connect and used for SNI respectively) but aren't part of the @types/nodemailer surface.
-type TransportOptions = SMTPPool.Options & { family?: number; servername?: string };
+// Raw SMTP (any provider, any port, any Nodemailer config) cannot work from this server: Render's
+// free-tier web services have blocked ALL outbound traffic to SMTP ports 25/465/587 since
+// 2025-09-26 (https://render.com/changelog/free-web-services-will-no-longer-allow-outbound-traffic-to-smtp-ports).
+// That's an infrastructure-level firewall rule enforced before a packet ever reaches Gmail — it's
+// why every previous fix here (DNS resolution, forcing IPv4, pinning a literal IP to bypass
+// nodemailer's resolver, switching 587->465) failed identically with ETIMEDOUT at the raw
+// TCP-connect stage (`command: 'CONN'`, before EHLO/TLS/AUTH). Nodemailer's Gmail "OAuth2" auth
+// mode does NOT help either — it still opens a raw SMTP socket on the same blocked ports; only
+// changing the *auth method*, not the *transport*, so it hits the identical firewall block.
+//
+// The only way to send through a real Gmail account from here is Gmail's own REST API
+// (https://gmail.googleapis.com), which is plain HTTPS on port 443 — a port Render's free tier
+// does not block. This trades SMTP for OAuth2 + HTTPS, but keeps using the actual Gmail account
+// (not a third-party provider like SendGrid/Resend/Mailgun).
+//
+// Setup (one-time, cannot be done from code — see server/src/get-gmail-token.ts):
+//   1. Google Cloud Console: enable the "Gmail API" for a project, create an OAuth 2.0 Client ID
+//      of type "Desktop app" (Desktop clients support the localhost-loopback consent flow without
+//      pre-registering a redirect URI).
+//   2. Run `npx tsx src/get-gmail-token.ts <CLIENT_ID> <CLIENT_SECRET>` locally, open the printed
+//      URL, sign in with the Gmail account to send FROM, approve the "Send email on your behalf"
+//      permission. The script prints a refresh token.
+//   3. Set GMAIL_SENDER_ADDRESS, GMAIL_OAUTH_CLIENT_ID, GMAIL_OAUTH_CLIENT_SECRET, and
+//      GMAIL_OAUTH_REFRESH_TOKEN in Render's environment.
+const GMAIL_SENDER = process.env.GMAIL_SENDER_ADDRESS;
+const CLIENT_ID = process.env.GMAIL_OAUTH_CLIENT_ID;
+const CLIENT_SECRET = process.env.GMAIL_OAUTH_CLIENT_SECRET;
+const REFRESH_TOKEN = process.env.GMAIL_OAUTH_REFRESH_TOKEN;
 
-const SMTP_HOSTNAME = process.env.SMTP_HOST || 'smtp.gmail.com';
-const SMTP_PORT = parseInt(process.env.SMTP_PORT || '465');
-const SMTP_SECURE = SMTP_PORT === 465; // implicit TLS on 465, STARTTLS on 587/others
+const CONFIGURED = !!(GMAIL_SENDER && CLIENT_ID && CLIENT_SECRET && REFRESH_TOKEN);
 
-// nodemailer 9's own hostname resolver (lib/shared/index.js resolveHostname) resolves BOTH IPv4
-// and IPv6 addresses for SMTP_HOST and picks one AT RANDOM — `family: 4` does NOT filter that
-// choice (confirmed by reading the source; it concatenates ipv4+ipv6 results and does
-// `addresses[Math.floor(Math.random() * addresses.length)]`). That's why Render logs showed two
-// different failures on the same config: a plain timeout on some boots (random IPv4 pick) and an
-// explicit `ENETUNREACH ...:587` on others (random IPv6 pick — Render's containers have no real
-// IPv6 route at all). Passing a literal IP as `host` makes nodemailer's resolver a no-op (it
-// special-cases `net.isIP(host)`), so we resolve the hostname to a real IPv4 address ourselves via
-// Node's DNS resolver and hand nodemailer that literal address instead — this guarantees IPv4,
-// regardless of nodemailer's internal (buggy) family selection. `servername` is set explicitly
-// so TLS/SNI and certificate validation still target the real hostname, not the raw IP.
-let transporter: Transporter | null = null;
-let transporterReady: Promise<void> = Promise.resolve();
-
-function buildTransporter(ipv4Address: string): Transporter {
-  const transportConfig: TransportOptions = {
-    host: ipv4Address,
-    servername: SMTP_HOSTNAME,
-    port: SMTP_PORT,
-    secure: SMTP_SECURE,
-    auth: {
-      user: process.env.SMTP_USER,
-      pass: process.env.SMTP_PASS,
-    },
-    pool: true,
-    maxConnections: 5,
-    maxMessages: 100,
-    connectionTimeout: 15_000,
-    greetingTimeout: 15_000,
-    socketTimeout: 20_000,
-  };
-  return nodemailer.createTransport(transportConfig as SMTPPool.Options);
+// google-auth-library caches the access token internally and only calls out to Google to refresh
+// it once it's actually expired, so repeated getAccessToken() calls across requests are cheap.
+let oauth2Client: OAuth2Client | null = null;
+if (CONFIGURED) {
+  oauth2Client = new OAuth2Client(CLIENT_ID, CLIENT_SECRET);
+  oauth2Client.setCredentials({ refresh_token: REFRESH_TOKEN });
+} else {
+  console.warn('[Email] Gmail API not configured (GMAIL_SENDER_ADDRESS / GMAIL_OAUTH_CLIENT_ID / GMAIL_OAUTH_CLIENT_SECRET / GMAIL_OAUTH_REFRESH_TOKEN missing) — email sending will fail until configured.');
 }
 
-async function initTransporter(): Promise<void> {
+// One-time check at boot (not per-request) so an invalid/expired refresh token is visible in the
+// logs immediately instead of surfacing late on a student's first registration attempt.
+async function verifyAtStartup() {
+  if (!oauth2Client) return;
   try {
-    // dns.lookup() (OS-level getaddrinfo) rather than dns.resolve4() (raw DNS-server query, which
-    // needs a directly reachable nameserver and can fail in restrictive/VPN'd networks even when
-    // normal resolution works fine) — this is the same call used to confirm family:4 behavior
-    // during the original profiling.
-    const addresses = await dns.promises.lookup(SMTP_HOSTNAME, { family: 4, all: true });
-    if (!addresses.length) throw new Error(`No IPv4 addresses found for ${SMTP_HOSTNAME}`);
-    const chosen = addresses[Math.floor(Math.random() * addresses.length)].address;
-    transporter = buildTransporter(chosen);
-
-    if (process.env.SMTP_USER && process.env.SMTP_PASS) {
-      await transporter.verify();
-      console.log(`[Email] SMTP transporter verified and ready (${SMTP_HOSTNAME} -> ${chosen}:${SMTP_PORT}, IPv4-pinned).`);
-    } else {
-      console.warn('[Email] SMTP_USER/SMTP_PASS not set — email sending will fail until configured.');
-    }
+    const stage = 'oauth-token-refresh';
+    const { token } = await oauth2Client.getAccessToken();
+    if (!token) throw new Error(`[stage=${stage}] no access token returned`);
+    console.log(`[Email] Gmail API OAuth token refresh succeeded at startup — ready (sender: ${GMAIL_SENDER}).`);
   } catch (err: any) {
-    console.error('[Email] SMTP transporter setup FAILED at startup:', err.message);
+    console.error('[Email] Gmail API setup FAILED at startup (stage=oauth-token-refresh):', err.message);
   }
 }
-transporterReady = initTransporter();
-
-// Gmail's SMTP front-end IPs can rotate over a long-running process — re-resolve periodically so
-// a long-lived server doesn't end up pinned to a retired address. Cheap relative to email volume.
-const REFRESH_INTERVAL_MS = 30 * 60 * 1000;
-setInterval(() => {
-  const previous = transporter;
-  transporterReady = initTransporter().then(() => {
-    if (previous && previous !== transporter) previous.close();
-  });
-}, REFRESH_INTERVAL_MS).unref();
+verifyAtStartup();
 
 interface EmailBody {
   type: 'text' | 'divider';
   content?: string;
 }
 
+function encodeSubject(subject: string): string {
+  // RFC 2047 encoded-word — subjects here contain non-ASCII characters (e.g. an em dash), which a
+  // raw header value can't carry safely.
+  return `=?UTF-8?B?${Buffer.from(subject, 'utf-8').toString('base64')}?=`;
+}
+
+function buildRawMessage(to: string, from: string, subject: string, html: string): string {
+  const mime = [
+    `From: "Smart Campus" <${from}>`,
+    `To: ${to}`,
+    `Subject: ${encodeSubject(subject)}`,
+    'MIME-Version: 1.0',
+    'Content-Type: text/html; charset="UTF-8"',
+    '',
+    html,
+  ].join('\r\n');
+
+  // Gmail API requires base64url (RFC 4648 §5), not standard base64.
+  return Buffer.from(mime, 'utf-8')
+    .toString('base64')
+    .replace(/\+/g, '-')
+    .replace(/\//g, '_')
+    .replace(/=+$/, '');
+}
+
 // Throws on failure — callers decide whether a failed send is critical (OTP: must surface
 // to the user) or best-effort (welcome/receipt notifications: safe to catch and ignore).
 export async function sendEmail(to: string, subject: string, body: EmailBody[]) {
-  if (!process.env.SMTP_USER || !process.env.SMTP_PASS) {
-    throw new Error('Email service is not configured (SMTP_USER/SMTP_PASS missing on the server).');
-  }
-
-  await transporterReady.catch(() => {});
-  if (!transporter) {
-    throw new Error('Email transporter failed to initialize (DNS resolution or SMTP setup failed at startup — check server logs).');
+  if (!oauth2Client || !GMAIL_SENDER) {
+    throw new Error('Email service is not configured (Gmail API OAuth credentials missing on the server).');
   }
 
   const htmlParts = body.map(b => {
     if (b.type === 'divider') return '<hr style="border:none;border-top:1px solid #333;margin:16px 0;" />';
     return `<div style="white-space:pre-line;">${b.content || ''}</div>`;
   });
+  const html = `<div style="font-family:'Inter',sans-serif;color:#e0e0e0;background:#0a0a0f;padding:24px;border-radius:12px;">${htmlParts.join('')}</div>`;
 
+  let stage = 'oauth-token-refresh';
   try {
-    await transporter.sendMail({
-      from: `"Smart Campus" <${process.env.SMTP_USER}>`,
-      to,
-      subject,
-      html: `<div style="font-family:'Inter',sans-serif;color:#e0e0e0;background:#0a0a0f;padding:24px;border-radius:12px;">${htmlParts.join('')}</div>`,
+    const tokenStart = Date.now();
+    const { token } = await oauth2Client.getAccessToken();
+    if (!token) throw new Error('no access token returned');
+    console.log(`[Email] [${stage}] OK in ${Date.now() - tokenStart}ms`);
+
+    stage = 'gmail-api-send';
+    const sendStart = Date.now();
+    const raw = buildRawMessage(to, GMAIL_SENDER, subject, html);
+    const res = await fetch('https://gmail.googleapis.com/gmail/v1/users/me/messages/send', {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${token}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ raw }),
     });
+    const elapsed = Date.now() - sendStart;
+
+    if (!res.ok) {
+      const errBody = await res.text();
+      throw new Error(`Gmail API responded ${res.status} ${res.statusText} in ${elapsed}ms: ${errBody}`);
+    }
+
+    const result = (await res.json()) as { id?: string };
+    console.log(`[Email] [${stage}] OK in ${elapsed}ms (messageId: ${result.id})`);
     console.log(`[Email] Sent: ${subject} → ${to}`);
   } catch (err: any) {
-    console.error(`[Email] Failed: ${subject} → ${to}`, err);
-    throw new Error(`Failed to send email to ${to}: ${err.message || 'SMTP error'}`);
+    console.error(`[Email] Failed at stage=${stage}: ${subject} → ${to}`, err);
+    throw new Error(`Failed to send email to ${to} (stage=${stage}): ${err.message || 'Gmail API error'}`);
   }
 }

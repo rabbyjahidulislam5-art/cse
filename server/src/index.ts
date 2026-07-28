@@ -47,9 +47,9 @@ async function hashPin(pin: string, salt: string): Promise<string> {
 // ─── AUTH ROUTES ───
 
 // How long we're willing to hold the HTTP response open waiting for the OTP email to actually
-// send before responding anyway. Resend (see server/src/lib/email.ts) sends over HTTPS and
-// normally completes in well under a second — this budget is a safety net against a slow or
-// unreachable Resend API, not something normal sends are expected to hit.
+// send before responding anyway. The Gmail API (see server/src/lib/email.ts) sends over HTTPS
+// and normally completes in well under a second — this budget is a safety net against a slow
+// OAuth refresh or unreachable Gmail API, not something normal sends are expected to hit.
 const OTP_EMAIL_RESPONSE_BUDGET_MS = 6000;
 
 // Send OTP for student registration
