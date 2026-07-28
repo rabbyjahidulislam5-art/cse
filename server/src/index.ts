@@ -423,6 +423,8 @@ router.post('/auth/forgot-password/reset', async (req, res) => {
       return res.status(400).json({ message: `Incorrect OTP. ${5 - attempts} attempts remaining.` });
     }
 
+    if (!otp.userId) return res.status(400).json({ message: 'Invalid or expired OTP.' });
+
     const hashed = await bcrypt.hash(newPassword, 10);
     await prisma.user.update({ where: { id: otp.userId }, data: { password: hashed } });
     await prisma.otpCode.update({ where: { id: otp.id }, data: { status: 'Used' } });
