@@ -193,6 +193,7 @@ export default function ShopDetailPage() {
           ]}
           actions={[
             { label: 'Back to Shop', onClick: resetPay, variant: 'outline' },
+            ...(payMode === 'later' ? [{ label: 'View in Dues', onClick: () => navigate('/student/dues'), variant: 'outline' as const }] : []),
             { label: 'Done', onClick: () => navigate('/student') },
           ]}
         />

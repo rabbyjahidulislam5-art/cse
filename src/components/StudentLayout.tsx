@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Outlet, NavLink, useNavigate, useLocation } from 'react-router-dom';
-import { GraduationCap, Home, Store, FileWarning, History, UserCircle, Bell, ScanLine, LogOut, Settings, ScrollText } from 'lucide-react';
+import { GraduationCap, Home, Store, FileWarning, History, UserCircle, Bell, ScanLine, LogOut, Settings, ScrollText, CreditCard } from 'lucide-react';
 import { useAuth } from '@/lib/auth-context';
 import { UserProvider, useUser } from '@/lib/user-context';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -14,6 +14,7 @@ const navItems = [
   { to: '/student/scan', icon: ScanLine, label: 'Scan' },
   { to: '/student/shops', icon: Store, label: 'Shops' },
   { to: '/student/dues', icon: FileWarning, label: 'Dues' },
+  { to: '/student/payments', icon: CreditCard, label: 'Payments' },
   { to: '/student/ledger', icon: History, label: 'Ledger' },
   { to: '/student/disputes', icon: ScrollText, label: 'Disputes' },
 ];

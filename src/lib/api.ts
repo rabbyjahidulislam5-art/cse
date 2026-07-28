@@ -81,6 +81,7 @@ export type GetTransactionsOutputType = {
   }>;
   hasMore: boolean;
   total: number;
+  statusCounts?: Record<string, number>;
 };
 
 export type GetNotificationsOutputType = {

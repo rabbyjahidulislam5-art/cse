@@ -1,10 +1,11 @@
 import { useState, useEffect } from 'react';
 import { useSearchParams, useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
-import { CheckCircle2, XCircle, Clock, Loader2, Home, RotateCcw, Receipt } from 'lucide-react';
+import { CheckCircle2, XCircle, Clock, Loader2, Home, RotateCcw, Receipt, ScrollText, LayoutGrid } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { validateSSLPayment } from '@/lib/api';
 import { useUser } from '@/lib/user-context';
+import DisputeWizard from '@/components/disputes/DisputeWizard';
 
 export default function PaymentResultPage() {
   const [searchParams] = useSearchParams();
@@ -15,6 +16,7 @@ export default function PaymentResultPage() {
 
   const [validating, setValidating] = useState(true);
   const [result, setResult] = useState<{ status: 'valid' | 'failed' | 'pending'; message: string } | null>(null);
+  const [wizardOpen, setWizardOpen] = useState(false);
 
   useEffect(() => {
     if (!ref || !user) return;
@@ -82,12 +84,28 @@ export default function PaymentResultPage() {
           </Button>
         )}
         {result?.status === 'valid' && (
-          <Button variant="outline" onClick={() => navigate(`/student/receipt?txId=${ref}`)}>
-            <Receipt className="w-4 h-4 mr-2" /> Download Receipt
-          </Button>
+          <>
+            <Button variant="outline" onClick={() => navigate(`/student/receipt?txId=${ref}`)}>
+              <Receipt className="w-4 h-4 mr-2" /> Download Receipt
+            </Button>
+            <Button variant="outline" onClick={() => navigate('/student/payments')}>
+              <LayoutGrid className="w-4 h-4 mr-2" /> Payments Dashboard
+            </Button>
+            <Button variant="destructive" onClick={() => setWizardOpen(true)}>
+              <ScrollText className="w-4 h-4 mr-2" /> Raise Dispute
+            </Button>
+          </>
         )}
         <Button onClick={() => navigate('/student')}><Home className="w-4 h-4 mr-2" /> Go to Dashboard</Button>
       </motion.div>
+
+      {ref && (
+        <DisputeWizard
+          open={wizardOpen}
+          onOpenChange={setWizardOpen}
+          transactionId={ref}
+        />
+      )}
     </div>
   );
 }

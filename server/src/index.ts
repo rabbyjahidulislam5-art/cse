@@ -749,15 +749,30 @@ router.post('/fines/dispute', authMiddleware, async (req: AuthRequest, res) => {
 router.post('/transactions', authMiddleware, async (req: AuthRequest, res) => {
   try {
     const userId = req.user!.id;
-    const { type, direction, limit = 50, offset = 0 } = req.body;
+    const { type, direction, status, gatewayOnly, limit = 50, offset = 0 } = req.body;
     const where: any = { userId };
     if (type && type !== 'all') where.type = type;
     if (direction && direction !== 'all') where.direction = direction;
+    if (Array.isArray(status) && status.length) where.status = { in: status };
+    else if (status && status !== 'all') where.status = status;
+    // Payments Dashboard: restrict to real external gateway payments (SSLCommerz, bKash, Nagad,
+    // Rocket withdrawals, etc.), excluding internal wallet-to-wallet transfers — those are tagged
+    // gateway: 'Wallet' rather than null, so a plain not-null check isn't enough to exclude them.
+    if (gatewayOnly) where.gateway = { not: null, notIn: ['Wallet'] };
 
     const [records, total] = await Promise.all([
       prisma.transaction.findMany({ where, take: limit, skip: offset, orderBy: { createdAt: 'desc' } }),
       prisma.transaction.count({ where }),
     ]);
+
+    // Payments Dashboard: per-status counts across all gateway payments (ignoring the status
+    // filter itself, so tab badges stay accurate regardless of which tab is active).
+    let statusCounts: Record<string, number> | undefined;
+    if (gatewayOnly) {
+      const { status: _ignored, ...countWhere } = where;
+      const grouped = await prisma.transaction.groupBy({ by: ['status'], where: countWhere, _count: { status: true } });
+      statusCounts = grouped.reduce((acc, g) => { acc[g.status] = g._count.status; return acc; }, {} as Record<string, number>);
+    }
 
     res.json({
       transactions: records.map(t => ({
@@ -767,6 +782,8 @@ router.post('/transactions', authMiddleware, async (req: AuthRequest, res) => {
         createdAt: t.createdAt.toISOString(),
       })),
       total,
+      hasMore: offset + records.length < total,
+      ...(statusCounts ? { statusCounts } : {}),
     });
   } catch (err: any) {
     res.status(500).json({ message: err.message });

@@ -288,7 +288,8 @@ export default function WithdrawPage() {
               { label: 'Status', value: 'Pending Admin Approval' },
             ]}
             actions={[
-              { label: 'Return to Home', onClick: () => navigate('/student') }
+              { label: 'Track in Payments Dashboard', onClick: () => navigate('/student/payments'), variant: 'outline' },
+              { label: 'Return to Home', onClick: () => navigate('/student') },
             ]}
           />
         )}

@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
-import { ScanLine, FileWarning, ArrowRightLeft, Store, PlusCircle, GraduationCap, ShieldAlert, ArrowRight, RotateCcw, Lock, TrendingUp, TrendingDown, Receipt, ArrowUpRight, Wallet, ScrollText } from 'lucide-react';
+import { ScanLine, FileWarning, ArrowRightLeft, Store, PlusCircle, GraduationCap, ShieldAlert, ArrowRight, RotateCcw, Lock, TrendingUp, TrendingDown, Receipt, ArrowUpRight, Wallet, ScrollText, CreditCard } from 'lucide-react';
 import { Skeleton } from '@/components/ui/skeleton';
 import WalletCard from '@/components/WalletCard';
 import PinDialog from '@/components/PinDialog';
@@ -69,6 +69,7 @@ export default function HomePage() {
     { label: 'Transfer', icon: ArrowRightLeft, onClick: () => navigate('/student/transfer'), color: 'from-[hsl(var(--chart-3))]/15 to-[hsl(var(--chart-3))]/5', iconColor: 'text-[hsl(var(--chart-3))]' },
     { label: 'Withdraw', icon: ArrowUpRight, onClick: () => navigate('/student/withdraw'), color: 'from-[hsl(var(--chart-4))]/15 to-[hsl(var(--chart-4))]/5', iconColor: 'text-[hsl(var(--chart-4))]' },
     { label: 'Semester Fee', icon: GraduationCap, onClick: () => setSemesterFeeOpen(true), color: 'from-secondary/15 to-secondary/5', iconColor: 'text-secondary' },
+    { label: 'Payments', icon: CreditCard, onClick: () => navigate('/student/payments'), color: 'from-primary/15 to-primary/5', iconColor: 'text-primary' },
     { label: 'Financial Disputes', icon: ScrollText, onClick: () => navigate('/student/disputes'), color: 'from-destructive/15 to-destructive/5', iconColor: 'text-destructive' },
   ];
 

@@ -27,6 +27,7 @@ import WithdrawPage from './pages/student/WithdrawPage';
 import PaymentResultPage from './pages/student/PaymentResultPage';
 import NotificationsPage from './pages/student/NotificationsPage';
 import ReceiptPage from './pages/student/ReceiptPage';
+import PaymentsDashboardPage from './pages/student/PaymentsDashboardPage';
 import DisputesPage from './pages/student/DisputesPage';
 import DisputeDetailPage from './pages/student/DisputeDetailPage';
 
@@ -80,6 +81,7 @@ export default function App() {
           <Route path="shops/:shopId" element={<ShopDetailPage />} />
           <Route path="dues" element={<DuesPage />} />
           <Route path="ledger" element={<LedgerPage />} />
+          <Route path="payments" element={<PaymentsDashboardPage />} />
           <Route path="profile" element={<ProfilePage />} />
           <Route path="scan" element={<QrScannerPage />} />
           <Route path="transfer" element={<TransferPage />} />

@@ -1,11 +1,12 @@
 import { useState, useEffect } from 'react';
 import { useSearchParams, useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
-import { ArrowLeft, Download, Loader2, FileText, Share2, ExternalLink } from 'lucide-react';
+import { ArrowLeft, Download, Loader2, FileText, Share2, ExternalLink, ScrollText } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { toast } from 'sonner';
 import { getReceipt } from '@/lib/api';
 import { FadeIn } from '@/components/PageTransition';
+import DisputeWizard from '@/components/disputes/DisputeWizard';
 
 export default function ReceiptPage() {
   const [searchParams] = useSearchParams();
@@ -13,6 +14,8 @@ export default function ReceiptPage() {
   const txId = searchParams.get('txId') || '';
   const [loading, setLoading] = useState(false);
   const [pdfUrl, setPdfUrl] = useState('');
+  const [receiptTx, setReceiptTx] = useState<{ id: string; reference: string; amount: number; type: string; status: string } | null>(null);
+  const [wizardOpen, setWizardOpen] = useState(false);
 
   const handleGenerate = async () => {
     if (!txId) { toast.error('No transaction ID'); return; }
@@ -20,6 +23,7 @@ export default function ReceiptPage() {
     try {
       const res = await getReceipt({ transactionId: txId });
       setPdfUrl(res.url);
+      setReceiptTx({ id: res.id, reference: res.reference, amount: res.amount, type: res.type, status: res.status });
     } catch (e: any) { toast.error(e.message || 'Failed to generate receipt'); }
     finally { setLoading(false); }
   };
@@ -87,8 +91,22 @@ export default function ReceiptPage() {
                 Back to Ledger
               </Button>
             </div>
+            {receiptTx?.status === 'Success' && (
+              <Button variant="destructive" className="w-full font-semibold" onClick={() => setWizardOpen(true)}>
+                <ScrollText className="w-4 h-4 mr-2" /> Raise Dispute
+              </Button>
+            )}
           </div>
         </FadeIn>
+      )}
+
+      {receiptTx && (
+        <DisputeWizard
+          open={wizardOpen}
+          onOpenChange={setWizardOpen}
+          transactionId={receiptTx.id}
+          transactionSummary={{ reference: receiptTx.reference, amount: receiptTx.amount, type: receiptTx.type }}
+        />
       )}
     </div>
   );

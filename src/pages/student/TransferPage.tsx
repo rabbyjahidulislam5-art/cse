@@ -9,11 +9,13 @@ import { Label } from '@/components/ui/label';
 import PinDialog from '@/components/PinDialog';
 import OtpDialog from '@/components/OtpDialog';
 import SuccessScreen from '@/components/SuccessScreen';
+import DisputeWizard from '@/components/disputes/DisputeWizard';
 import { toast } from 'sonner';
 import { transferMoney } from '@/lib/api';
 import { useUser } from '@/lib/user-context';
 import { formatCurrency } from '@/lib/mock-data';
 import { FadeIn } from '@/components/PageTransition';
+import { ScrollText } from 'lucide-react';
 
 type Step = 'recipient' | 'amount' | 'review' | 'processing' | 'success';
 
@@ -26,7 +28,8 @@ export default function TransferPage() {
   const [note, setNote] = useState('');
   const [pinOpen, setPinOpen] = useState(false);
   const [otpOpen, setOtpOpen] = useState(false);
-  const [success, setSuccess] = useState<{ recipientName: string; amount: number; newBalance: number } | null>(null);
+  const [wizardOpen, setWizardOpen] = useState(false);
+  const [success, setSuccess] = useState<{ transactionId: string; recipientName: string; amount: number; newBalance: number } | null>(null);
 
   const amt = parseFloat(amount) || 0;
   const isLarge = amt >= 5000;
@@ -56,7 +59,7 @@ export default function TransferPage() {
     setStep('processing');
     try {
       const res = await transferMoney({ recipientIdentifier: recipient.trim(), amount: amt, note: note.trim() || undefined });
-      setSuccess({ recipientName: res.recipientName, amount: amt, newBalance: res.newBalance });
+      setSuccess({ transactionId: res.transactionId, recipientName: res.recipientName, amount: amt, newBalance: res.newBalance });
       setStep('success');
       refreshDashboard();
     } catch (e: any) {
@@ -204,6 +207,7 @@ export default function TransferPage() {
             ]}
             actions={[
               { label: 'New Transfer', onClick: reset, variant: 'outline' },
+              { label: 'Raise Dispute', onClick: () => setWizardOpen(true), variant: 'outline' },
               { label: 'Done', onClick: () => navigate('/student') },
             ]}
           />
@@ -212,6 +216,14 @@ export default function TransferPage() {
 
       <PinDialog open={pinOpen} onOpenChange={setPinOpen} mode="verify" verifyLength={user?.pinLength || 4} onSuccess={onPinVerified} />
       <OtpDialog open={otpOpen} onOpenChange={setOtpOpen} purpose="Transfer" onSuccess={executeTransfer} />
+      {success && (
+        <DisputeWizard
+          open={wizardOpen}
+          onOpenChange={setWizardOpen}
+          transactionId={success.transactionId}
+          transactionSummary={{ reference: success.transactionId, amount: success.amount, type: 'Transfer Sent' }}
+        />
+      )}
     </div>
   );
 }
