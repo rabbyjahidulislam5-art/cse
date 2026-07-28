@@ -46,8 +46,20 @@ async function hashPin(pin: string, salt: string): Promise<string> {
 
 // ─── AUTH ROUTES ───
 
+// How long we're willing to hold the HTTP response open waiting for the OTP email to actually
+// send before responding anyway. With the pooled/IPv4/timeout-bounded transporter (see
+// server/src/lib/email.ts) a send normally takes ~1-3s (warm connection) or up to ~5-6s (cold,
+// first send after boot) — 6s gives real sends room to finish and still return the true
+// success/failure to the student in the common case, without ever reproducing the old 30-60s hang.
+const OTP_EMAIL_RESPONSE_BUDGET_MS = 6000;
+
 // Send OTP for student registration
 router.post('/auth/register-otp', async (req, res) => {
+  const timings: Record<string, number | string> = {};
+  const requestStart = Date.now();
+  let stepStart = requestStart;
+  const mark = (label: string) => { timings[label] = Date.now() - stepStart; stepStart = Date.now(); };
+
   try {
     const { email } = req.body;
     if (!email) return res.status(400).json({ message: 'Email is required' });
@@ -56,21 +68,25 @@ router.post('/auth/register-otp', async (req, res) => {
     if (!lowerEmail.endsWith('@std.ewubd.edu')) {
       return res.status(400).json({ message: 'Registration is restricted to @std.ewubd.edu email addresses only.' });
     }
-
-    const existing = await prisma.user.findUnique({ where: { email: lowerEmail } });
-    if (existing) return res.status(400).json({ message: 'An account with this email already exists.' });
+    mark('validation');
 
     // Extract studentId from email prefix if applicable (e.g. 2023-2-60-053)
     const emailPrefix = lowerEmail.split('@')[0];
     const studentIdMatch = emailPrefix.match(/^\d{4}-\d-\d{2}-\d{3}$/) ? emailPrefix : undefined;
-    if (studentIdMatch) {
-      const existingSid = await prisma.user.findUnique({ where: { studentId: studentIdMatch } });
-      if (existingSid) return res.status(400).json({ message: `Student ID ${studentIdMatch} is already registered.` });
-    }
 
-    // Invalidate existing active OTPs for this email
+    // These two lookups don't depend on each other — run them concurrently instead of in series.
+    const [existing, existingSid] = await Promise.all([
+      prisma.user.findUnique({ where: { email: lowerEmail } }),
+      studentIdMatch ? prisma.user.findUnique({ where: { studentId: studentIdMatch } }) : Promise.resolve(null),
+    ]);
+    mark('database');
+
+    if (existing) return res.status(400).json({ message: 'An account with this email already exists.' });
+    if (studentIdMatch && existingSid) return res.status(400).json({ message: `Student ID ${studentIdMatch} is already registered.` });
+
     const code = String(Math.floor(100000 + Math.random() * 900000));
     const expiresAt = new Date(Date.now() + 5 * 60 * 1000);
+    mark('otpGenerate');
 
     // Registration OTPs aren't linked to a User yet (the account doesn't exist until signup completes)
     const otp = await prisma.otpCode.create({
@@ -82,19 +98,50 @@ router.post('/auth/register-otp', async (req, res) => {
         expiresAt,
       },
     });
+    mark('otpSave');
 
-    try {
-      await sendEmail(lowerEmail, 'Verification Code — Smart Campus EWU', [
-        { type: 'text', content: `<strong>Welcome to Smart Campus!</strong>\n\nYour registration verification code is:\n\n<strong style="font-size: 28px; letter-spacing: 8px; color: #f59e0b;">${code}</strong>\n\nThis code is valid for 5 minutes.\nIf you did not request this code, please ignore this email.` },
-        { type: 'divider' },
-        { type: 'text', content: '🎓 East West University — Smart Campus Digital Wallet' },
-      ]);
-    } catch (emailErr: any) {
-      // Don't leave a dangling OTP the student never received
-      await prisma.otpCode.delete({ where: { id: otp.id } }).catch(() => {});
-      return res.status(502).json({ message: `Could not send the verification email: ${emailErr.message} Please check the server's email configuration.` });
+    const emailPromise = sendEmail(lowerEmail, 'Verification Code — Smart Campus EWU', [
+      { type: 'text', content: `<strong>Welcome to Smart Campus!</strong>\n\nYour registration verification code is:\n\n<strong style="font-size: 28px; letter-spacing: 8px; color: #f59e0b;">${code}</strong>\n\nThis code is valid for 5 minutes.\nIf you did not request this code, please ignore this email.` },
+      { type: 'divider' },
+      { type: 'text', content: '🎓 East West University — Smart Campus Digital Wallet' },
+    ]).then(
+      () => ({ ok: true as const }),
+      (err: any) => ({ ok: false as const, err }),
+    );
+
+    const TIMED_OUT = Symbol('timed-out');
+    const result = await Promise.race([
+      emailPromise,
+      new Promise<typeof TIMED_OUT>(resolve => setTimeout(() => resolve(TIMED_OUT), OTP_EMAIL_RESPONSE_BUDGET_MS)),
+    ]);
+
+    if (result === TIMED_OUT) {
+      // Shouldn't happen after the transporter fix — but if the network has an unusually bad
+      // moment, don't make the student stare at "Sending OTP..." for it. Respond now; if the
+      // send ultimately fails, delete the OTP so a stale/undelivered code can't be used, and the
+      // student's "Resend Code" click gets a fresh, fully synchronous attempt with a real error.
+      timings.emailSend = `>${OTP_EMAIL_RESPONSE_BUDGET_MS} (responded early, continuing in background)`;
+      console.warn(`[register-otp] Email send exceeded ${OTP_EMAIL_RESPONSE_BUDGET_MS}ms budget for ${lowerEmail} — responding early`);
+      emailPromise.then(r => {
+        if (!r.ok) {
+          console.error(`[register-otp] Background email send ultimately FAILED for ${lowerEmail}:`, r.err.message);
+          prisma.otpCode.delete({ where: { id: otp.id } }).catch(() => {});
+        } else {
+          console.log(`[register-otp] Background email send for ${lowerEmail} succeeded after the response was already sent.`);
+        }
+      });
+    } else {
+      mark('emailSend');
+      if (!result.ok) {
+        await prisma.otpCode.delete({ where: { id: otp.id } }).catch(() => {});
+        timings.total = Date.now() - requestStart;
+        console.log(`[register-otp] TIMINGS (failed) for ${lowerEmail}:`, timings);
+        return res.status(502).json({ message: `Could not send the verification email: ${result.err.message} Please check the server's email configuration.` });
+      }
     }
 
+    timings.total = Date.now() - requestStart;
+    console.log(`[register-otp] TIMINGS for ${lowerEmail}:`, timings);
     res.json({ success: true, message: 'OTP sent to your EWU email (valid for 5 minutes)', otpId: otp.id, studentId: studentIdMatch });
   } catch (err: any) {
     res.status(500).json({ message: err.message });
@@ -354,18 +401,29 @@ router.post('/auth/google', async (req, res) => {
 
 // Forgot Password — Request OTP
 router.post('/auth/forgot-password/otp', async (req, res) => {
+  const timings: Record<string, number | string> = {};
+  const requestStart = Date.now();
+  let stepStart = requestStart;
+  const mark = (label: string) => { timings[label] = Date.now() - stepStart; stepStart = Date.now(); };
+
   try {
     const { identifier } = req.body;
     if (!identifier) return res.status(400).json({ message: 'Email or Student ID is required' });
 
     const trimmed = identifier.trim();
-    let user = await prisma.user.findUnique({ where: { email: trimmed.toLowerCase() } });
-    if (!user) user = await prisma.user.findUnique({ where: { studentId: trimmed } });
+    // These two lookups don't depend on each other — run them concurrently instead of in series.
+    const [byEmail, byStudentId] = await Promise.all([
+      prisma.user.findUnique({ where: { email: trimmed.toLowerCase() } }),
+      prisma.user.findUnique({ where: { studentId: trimmed } }),
+    ]);
+    const user = byEmail || byStudentId;
+    mark('database');
 
     if (!user || !user.email) return res.status(404).json({ message: 'No account found with this Email or Student ID.' });
 
     const code = String(Math.floor(100000 + Math.random() * 900000));
     const expiresAt = new Date(Date.now() + 5 * 60 * 1000);
+    mark('otpGenerate');
 
     const otp = await prisma.otpCode.create({
       data: {
@@ -377,18 +435,46 @@ router.post('/auth/forgot-password/otp', async (req, res) => {
         expiresAt,
       },
     });
+    mark('otpSave');
 
-    try {
-      await sendEmail(user.email, 'Password Reset OTP — Smart Campus', [
-        { type: 'text', content: `<strong>Hi ${user.fullName || 'Student'},</strong>\n\nYou requested a password reset. Your verification code is:\n\n<strong style="font-size: 28px; letter-spacing: 8px; color: #f59e0b;">${code}</strong>\n\nThis code expires in 5 minutes.` },
-        { type: 'divider' },
-        { type: 'text', content: '🎓 East West University — Smart Campus Digital Wallet' },
-      ]);
-    } catch (emailErr: any) {
-      await prisma.otpCode.delete({ where: { id: otp.id } }).catch(() => {});
-      return res.status(502).json({ message: `Could not send the reset email: ${emailErr.message} Please check the server's email configuration.` });
+    const emailPromise = sendEmail(user.email, 'Password Reset OTP — Smart Campus', [
+      { type: 'text', content: `<strong>Hi ${user.fullName || 'Student'},</strong>\n\nYou requested a password reset. Your verification code is:\n\n<strong style="font-size: 28px; letter-spacing: 8px; color: #f59e0b;">${code}</strong>\n\nThis code expires in 5 minutes.` },
+      { type: 'divider' },
+      { type: 'text', content: '🎓 East West University — Smart Campus Digital Wallet' },
+    ]).then(
+      () => ({ ok: true as const }),
+      (err: any) => ({ ok: false as const, err }),
+    );
+
+    const TIMED_OUT = Symbol('timed-out');
+    const result = await Promise.race([
+      emailPromise,
+      new Promise<typeof TIMED_OUT>(resolve => setTimeout(() => resolve(TIMED_OUT), OTP_EMAIL_RESPONSE_BUDGET_MS)),
+    ]);
+
+    if (result === TIMED_OUT) {
+      timings.emailSend = `>${OTP_EMAIL_RESPONSE_BUDGET_MS} (responded early, continuing in background)`;
+      console.warn(`[forgot-password/otp] Email send exceeded ${OTP_EMAIL_RESPONSE_BUDGET_MS}ms budget for ${user.email} — responding early`);
+      emailPromise.then(r => {
+        if (!r.ok) {
+          console.error(`[forgot-password/otp] Background email send ultimately FAILED for ${user.email}:`, r.err.message);
+          prisma.otpCode.delete({ where: { id: otp.id } }).catch(() => {});
+        } else {
+          console.log(`[forgot-password/otp] Background email send for ${user.email} succeeded after the response was already sent.`);
+        }
+      });
+    } else {
+      mark('emailSend');
+      if (!result.ok) {
+        await prisma.otpCode.delete({ where: { id: otp.id } }).catch(() => {});
+        timings.total = Date.now() - requestStart;
+        console.log(`[forgot-password/otp] TIMINGS (failed) for ${user.email}:`, timings);
+        return res.status(502).json({ message: `Could not send the reset email: ${result.err.message} Please check the server's email configuration.` });
+      }
     }
 
+    timings.total = Date.now() - requestStart;
+    console.log(`[forgot-password/otp] TIMINGS for ${user.email}:`, timings);
     res.json({ success: true, message: `OTP sent to your email (${user.email})`, otpId: otp.id, email: user.email });
   } catch (err: any) {
     res.status(500).json({ message: err.message });
@@ -894,36 +980,74 @@ router.post('/pin/verify', authMiddleware, async (req: AuthRequest, res) => {
 
 // ─── OTP ───
 router.post('/otp/send', authMiddleware, async (req: AuthRequest, res) => {
+  const timings: Record<string, number | string> = {};
+  const requestStart = Date.now();
+  let stepStart = requestStart;
+  const mark = (label: string) => { timings[label] = Date.now() - stepStart; stepStart = Date.now(); };
+
   try {
     const userId = req.user!.id;
     const { purpose } = req.body;
+    // authMiddleware already loaded this user's record for this request — no need to fetch it again.
+    const userEmail = req.user!.email;
+    const userFullName = req.user!.fullName;
+    if (!userEmail) return res.status(400).json({ message: 'No email on file for this account.' });
 
     const activeOtps = await prisma.otpCode.findMany({ where: { userId, status: 'Active' }, take: 10 });
     if (activeOtps.length >= 5) return res.status(429).json({ message: 'Too many active OTPs.' });
 
-    for (const old of activeOtps.filter(o => o.purpose === purpose)) {
-      await prisma.otpCode.update({ where: { id: old.id }, data: { status: 'Expired' } });
-    }
+    await Promise.all(
+      activeOtps.filter(o => o.purpose === purpose).map(old =>
+        prisma.otpCode.update({ where: { id: old.id }, data: { status: 'Expired' } })
+      ),
+    );
+    mark('database');
 
     const code = String(Math.floor(100000 + Math.random() * 900000));
     const expiresAt = new Date(Date.now() + 5 * 60 * 1000);
+    mark('otpGenerate');
 
     const otp = await prisma.otpCode.create({ data: { code, userId, purpose, status: 'Active', attempts: 0, expiresAt } });
     await prisma.auditLog.create({ data: { action: 'OTP Generated', actorId: userId, entityType: 'OTP', entityId: otp.id, details: `Purpose: ${purpose}` } });
+    mark('otpSave');
 
-    const user = await prisma.user.findUnique({ where: { id: userId } });
-    if (!user?.email) return res.status(400).json({ message: 'No email on file for this account.' });
+    const emailPromise = sendEmail(userEmail, 'Your OTP Code — Smart Campus', [
+      { type: 'text', content: `<strong>Hi ${userFullName || 'Student'},</strong>\n\nYour verification code is:\n\n<strong style="font-size: 24px; letter-spacing: 8px;">${code}</strong>\n\nThis code expires in 5 minutes.\n<strong>Purpose:</strong> ${purpose}` },
+      { type: 'divider' }, { type: 'text', content: '🎓 Smart Campus — Your University Wallet' },
+    ]).then(
+      () => ({ ok: true as const }),
+      (err: any) => ({ ok: false as const, err }),
+    );
 
-    try {
-      await sendEmail(user.email, 'Your OTP Code — Smart Campus', [
-        { type: 'text', content: `<strong>Hi ${user.fullName || 'Student'},</strong>\n\nYour verification code is:\n\n<strong style="font-size: 24px; letter-spacing: 8px;">${code}</strong>\n\nThis code expires in 5 minutes.\n<strong>Purpose:</strong> ${purpose}` },
-        { type: 'divider' }, { type: 'text', content: '🎓 Smart Campus — Your University Wallet' },
-      ]);
-    } catch (emailErr: any) {
-      await prisma.otpCode.delete({ where: { id: otp.id } }).catch(() => {});
-      return res.status(502).json({ message: `Could not send the verification email: ${emailErr.message} Please check the server's email configuration.` });
+    const TIMED_OUT = Symbol('timed-out');
+    const result = await Promise.race([
+      emailPromise,
+      new Promise<typeof TIMED_OUT>(resolve => setTimeout(() => resolve(TIMED_OUT), OTP_EMAIL_RESPONSE_BUDGET_MS)),
+    ]);
+
+    if (result === TIMED_OUT) {
+      timings.emailSend = `>${OTP_EMAIL_RESPONSE_BUDGET_MS} (responded early, continuing in background)`;
+      console.warn(`[otp/send] Email send exceeded ${OTP_EMAIL_RESPONSE_BUDGET_MS}ms budget for ${userEmail} — responding early`);
+      emailPromise.then(r => {
+        if (!r.ok) {
+          console.error(`[otp/send] Background email send ultimately FAILED for ${userEmail}:`, r.err.message);
+          prisma.otpCode.delete({ where: { id: otp.id } }).catch(() => {});
+        } else {
+          console.log(`[otp/send] Background email send for ${userEmail} succeeded after the response was already sent.`);
+        }
+      });
+    } else {
+      mark('emailSend');
+      if (!result.ok) {
+        await prisma.otpCode.delete({ where: { id: otp.id } }).catch(() => {});
+        timings.total = Date.now() - requestStart;
+        console.log(`[otp/send] TIMINGS (failed) for ${userEmail}:`, timings);
+        return res.status(502).json({ message: `Could not send the verification email: ${result.err.message} Please check the server's email configuration.` });
+      }
     }
 
+    timings.total = Date.now() - requestStart;
+    console.log(`[otp/send] TIMINGS for ${userEmail}:`, timings);
     res.json({ success: true, message: `OTP sent to your email for ${purpose} (valid for 5 minutes)`, otpId: otp.id, expiresAt: expiresAt.toISOString() });
   } catch (err: any) {
     res.status(500).json({ message: err.message });

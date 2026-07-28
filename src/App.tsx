@@ -3,12 +3,10 @@ import { GoogleOAuthProvider } from '@react-oauth/google';
 import { Toaster } from '@/components/ui/sonner';
 import { AuthProvider } from '@/lib/auth-context';
 
-const GOOGLE_CLIENT_ID = import.meta.env.VITE_GOOGLE_CLIENT_ID as string | undefined;
+// Always non-empty in a correctly configured build — see src/lib/google-auth-config.ts for
+// the runtime check that surfaces a real error dialog when it isn't.
+const GOOGLE_CLIENT_ID = (import.meta.env.VITE_GOOGLE_CLIENT_ID as string | undefined) || '';
 
-function OptionalGoogleOAuthProvider({ children }: { children: React.ReactNode }) {
-  if (!GOOGLE_CLIENT_ID) return <>{children}</>;
-  return <GoogleOAuthProvider clientId={GOOGLE_CLIENT_ID}>{children}</GoogleOAuthProvider>;
-}
 import LandingPage from './pages/LandingPage';
 import StudentLayout from './components/StudentLayout';
 import AdminLayout from './components/AdminLayout';
@@ -59,7 +57,7 @@ import ShopSalesLedgerPage from './pages/shop/ShopSalesLedgerPage';
 
 export default function App() {
   return (
-    <OptionalGoogleOAuthProvider>
+    <GoogleOAuthProvider clientId={GOOGLE_CLIENT_ID} locale="en">
     <AuthProvider>
     <BrowserRouter>
       <Routes>
@@ -121,6 +119,6 @@ export default function App() {
       <Toaster />
     </BrowserRouter>
     </AuthProvider>
-    </OptionalGoogleOAuthProvider>
+    </GoogleOAuthProvider>
   );
 }

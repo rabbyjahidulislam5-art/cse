@@ -1,8 +1,19 @@
-import { createContext, useContext, useState, useEffect, useCallback, type ReactNode } from 'react';
+import { createContext, useContext, useState, useEffect, useRef, useCallback, type ReactNode } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { GraduationCap, Eye, EyeOff, Lock, Mail, User, Phone, CheckCircle2, AlertCircle, ShieldCheck, ArrowLeft, RefreshCw, KeyRound, Sparkles, ShieldAlert } from 'lucide-react';
 import { GoogleLogin, type CredentialResponse } from '@react-oauth/google';
 import { toast } from 'sonner';
+import { getGoogleClientId, isValidGoogleClientId } from '@/lib/google-auth-config';
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  DialogFooter,
+  DialogClose,
+} from '@/components/ui/dialog';
+import { Button } from '@/components/ui/button';
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:4000/api';
 
@@ -64,17 +75,115 @@ function GoogleAuthDivider() {
   );
 }
 
-function GoogleAuthButton({ onSuccess, loading }: { onSuccess: (r: CredentialResponse) => void; loading?: boolean }) {
-  const clientId = import.meta.env.VITE_GOOGLE_CLIENT_ID as string | undefined;
-  if (!clientId) {
-    return (
-      <div className="text-center text-[11px] text-muted-foreground bg-accent/30 border border-border/50 rounded-xl py-2.5 px-3 flex items-center justify-center gap-1.5">
-        <ShieldAlert className="w-3.5 h-3.5" /> Google Sign-In isn't configured yet
-      </div>
-    );
-  }
+function GoogleIcon({ className }: { className?: string }) {
   return (
-    <div className={`flex justify-center [&>div]:w-full ${loading ? 'opacity-50 pointer-events-none' : ''}`}>
+    <svg className={className} viewBox="0 0 48 48" aria-hidden="true">
+      <path fill="#FFC107" d="M43.6 20.5H42V20H24v8h11.3c-1.6 4.6-6 8-11.3 8-6.6 0-12-5.4-12-12s5.4-12 12-12c3.1 0 5.8 1.1 8 3l6-6C34.6 5.1 29.6 3 24 3 12.4 3 3 12.4 3 24s9.4 21 21 21 21-9.4 21-21c0-1.2-.1-2.4-.4-3.5z" />
+      <path fill="#FF3D00" d="M6.3 14.7l6.6 4.8C14.6 15.6 18.9 13 24 13c3.1 0 5.8 1.1 8 3l6-6C34.6 6.1 29.6 4 24 4 16.3 4 9.6 8.3 6.3 14.7z" />
+      <path fill="#4CAF50" d="M24 44c5.5 0 10.4-1.9 14.2-5.1l-6.6-5.4c-2 1.5-4.6 2.5-7.6 2.5-5.3 0-9.7-3.4-11.3-8.1l-6.6 5.1C9.5 39.6 16.2 44 24 44z" />
+      <path fill="#1976D2" d="M43.6 20.5H42V20H24v8h11.3c-.8 2.3-2.2 4.2-4.1 5.6l6.6 5.4C41.4 35.7 44 30.4 44 24c0-1.2-.1-2.4-.4-3.5z" />
+    </svg>
+  );
+}
+
+// The client ID is baked in at Vite build time — checking on mount catches a build that never
+// embedded it (missing env var in the hosting dashboard, or the browser serving a stale bundle
+// from before the var was added) instead of silently rendering a broken button.
+function useGoogleAuthConfig() {
+  const [status, setStatus] = useState<'checking' | 'ready' | 'error'>('checking');
+  const [reason, setReason] = useState('');
+
+  useEffect(() => {
+    const clientId = getGoogleClientId();
+    if (!clientId) {
+      setReason('VITE_GOOGLE_CLIENT_ID is missing from this build. It was not set in the hosting provider\'s environment variables when the frontend was last built and deployed.');
+      setStatus('error');
+      return;
+    }
+    if (!isValidGoogleClientId(clientId)) {
+      setReason('VITE_GOOGLE_CLIENT_ID is set but does not look like a valid Google OAuth client ID.');
+      setStatus('error');
+      return;
+    }
+    setStatus('ready');
+  }, []);
+
+  return { status, reason };
+}
+
+// Google's button takes a fixed pixel width (no %/auto) — measuring the actual card width here
+// (capped at 400px, matching the max-w-lg auth card's content column) is what makes it match the
+// Sign In button's width and stay responsive on mobile, instead of a hardcoded "320" clipping or
+// leaving gutters on different screen sizes.
+function useMeasuredWidth(max: number) {
+  const ref = useRef<HTMLDivElement>(null);
+  const [width, setWidth] = useState(max);
+
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const update = () => setWidth(Math.max(200, Math.min(max, Math.floor(el.getBoundingClientRect().width))));
+    update();
+    const observer = new ResizeObserver(update);
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [max]);
+
+  return { ref, width };
+}
+
+function GoogleAuthButtonSkeleton() {
+  return (
+    <div className="h-10 w-full max-w-[400px] mx-auto rounded-full bg-accent/40 border border-border/50 animate-pulse flex items-center justify-center gap-2">
+      <GoogleIcon className="w-4 h-4 opacity-40" />
+      <div className="h-3 w-28 rounded bg-border/60" />
+    </div>
+  );
+}
+
+function GoogleAuthErrorButton({ reason }: { reason: string }) {
+  const [dialogOpen, setDialogOpen] = useState(false);
+  return (
+    <>
+      <button
+        type="button"
+        onClick={() => setDialogOpen(true)}
+        className="h-10 w-full max-w-[400px] mx-auto rounded-full bg-[#131314] border border-[#8e918f] text-white text-sm font-medium flex items-center justify-center gap-2.5 hover:bg-[#1b1b1b] transition-colors"
+      >
+        <GoogleIcon className="w-[18px] h-[18px]" />
+        Continue with Google
+      </button>
+      <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <ShieldAlert className="w-4.5 h-4.5 text-destructive" /> Google Sign-In Unavailable
+            </DialogTitle>
+            <DialogDescription>{reason}</DialogDescription>
+          </DialogHeader>
+          <p className="text-xs text-muted-foreground">
+            Please use your Password or Wallet PIN instead, or contact support if this persists.
+          </p>
+          <DialogFooter>
+            <DialogClose asChild>
+              <Button variant="outline">Close</Button>
+            </DialogClose>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </>
+  );
+}
+
+function GoogleAuthButton({ onSuccess, loading }: { onSuccess: (r: CredentialResponse) => void; loading?: boolean }) {
+  const { status, reason } = useGoogleAuthConfig();
+  const { ref, width } = useMeasuredWidth(400);
+
+  if (status === 'checking') return <GoogleAuthButtonSkeleton />;
+  if (status === 'error') return <GoogleAuthErrorButton reason={reason} />;
+
+  return (
+    <div ref={ref} className={`flex justify-center w-full ${loading ? 'opacity-50 pointer-events-none' : ''}`}>
       <GoogleLogin
         onSuccess={onSuccess}
         onError={() => toast.error('Google Sign-In failed. Please try again.')}
@@ -82,7 +191,8 @@ function GoogleAuthButton({ onSuccess, loading }: { onSuccess: (r: CredentialRes
         shape="pill"
         size="large"
         text="continue_with"
-        width="320"
+        logo_alignment="center"
+        width={width}
       />
     </div>
   );
