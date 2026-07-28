@@ -6,6 +6,7 @@ import { Skeleton } from '@/components/ui/skeleton';
 import WalletCard from '@/components/WalletCard';
 import PinDialog from '@/components/PinDialog';
 import AddMoneyModal from '@/components/AddMoneyModal';
+import SemesterFeeModal from '@/components/SemesterFeeModal';
 import { useUser } from '@/lib/user-context';
 import { getStudentDashboard, type GetStudentDashboardOutputType } from '@/lib/api';
 import { formatCurrency } from '@/lib/mock-data';
@@ -54,6 +55,7 @@ export default function HomePage() {
   const { user, wallet, loading, refreshDashboard } = useUser();
   const [pinOpen, setPinOpen] = useState(false);
   const [addMoneyOpen, setAddMoneyOpen] = useState(false);
+  const [semesterFeeOpen, setSemesterFeeOpen] = useState(false);
   const [recentTx, setRecentTx] = useState<TxType[]>([]);
 
   useEffect(() => {
@@ -66,6 +68,7 @@ export default function HomePage() {
     { label: 'Add Money', icon: PlusCircle, onClick: () => setAddMoneyOpen(true), color: 'from-primary/15 to-primary/5', iconColor: 'text-primary' },
     { label: 'Transfer', icon: ArrowRightLeft, onClick: () => navigate('/student/transfer'), color: 'from-[hsl(var(--chart-3))]/15 to-[hsl(var(--chart-3))]/5', iconColor: 'text-[hsl(var(--chart-3))]' },
     { label: 'Withdraw', icon: ArrowUpRight, onClick: () => navigate('/student/withdraw'), color: 'from-[hsl(var(--chart-4))]/15 to-[hsl(var(--chart-4))]/5', iconColor: 'text-[hsl(var(--chart-4))]' },
+    { label: 'Semester Fee', icon: GraduationCap, onClick: () => setSemesterFeeOpen(true), color: 'from-secondary/15 to-secondary/5', iconColor: 'text-secondary' },
   ];
 
   if (loading) {
@@ -117,7 +120,7 @@ export default function HomePage() {
           />
         </FadeIn>
         <FadeIn delay={0.15} className="lg:col-span-2">
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 h-full">
+          <div className="grid grid-cols-3 sm:grid-cols-5 gap-3 h-full">
             {quickActions.map((qa, i) => (
               <motion.button
                 key={qa.label}
@@ -160,6 +163,7 @@ export default function HomePage() {
 
       <PinDialog open={pinOpen} onOpenChange={setPinOpen} mode="set" onSuccess={() => refreshDashboard()} />
       <AddMoneyModal open={addMoneyOpen} onOpenChange={setAddMoneyOpen} />
+      <SemesterFeeModal open={semesterFeeOpen} onOpenChange={setSemesterFeeOpen} />
     </div>
   );
 }

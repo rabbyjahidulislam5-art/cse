@@ -264,6 +264,33 @@ export const initWalletTopUp = (input: { amount: number; otpId?: string }) =>
 export const withdrawFromWallet = (input: { amount: number; mobileNumber: string; provider?: string }) =>
   apiCall<{ success: boolean; newBalance: number; transactionId: string; reference: string; message: string }>('/wallet/withdraw', input);
 
+export type SemesterFeeLookupOutputType = {
+  found: boolean;
+  student?: { fullName: string; studentId: string; department: string; batch: string };
+  totalDue: number;
+  feeCount: number;
+  fees: Array<{ id: string; label: string; amount: number; dueDate: string }>;
+};
+
+export type PaySemesterFeeOutputType = {
+  success: boolean;
+  method: 'wallet' | 'sslcommerz';
+  amount: number;
+  reference?: string;
+  transactionRef?: string;
+  sessionKey?: string;
+  newBalance?: number;
+  paidByName?: string;
+  studentName?: string;
+  gatewayUrl?: string;
+};
+
+export const lookupSemesterFeeStudent = (input: { studentId: string }) =>
+  apiCall<SemesterFeeLookupOutputType>('/semester-fees/lookup', input);
+
+export const paySemesterFee = (input: { studentId: string; method: 'wallet' | 'sslcommerz'; otpId?: string }) =>
+  apiCall<PaySemesterFeeOutputType>('/semester-fees/pay', input);
+
 // Thresholds mirrored from server/src/index.ts's PIN_REQUIRED_THRESHOLD / OTP_REQUIRED_THRESHOLD —
 // used client-side purely for UX (showing the right dialog before the redirect); the server enforces
 // the real gate independently and never trusts these being checked on the client.

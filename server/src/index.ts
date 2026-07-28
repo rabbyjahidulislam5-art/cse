@@ -1502,6 +1502,233 @@ router.post('/payment/ipn', paymentIpnLimiter, async (req, res) => {
   res.status(200).json({ received: true });
 });
 
+// ─── SEMESTER FEE — QUICK PAY (STUDENT ID LOOKUP, SELF OR ON-BEHALF) ───
+// A Home-page shortcut, separate from the tabbed Dues & Fines flow: look up any student by
+// Student ID, see their live pending semester fee total, and settle it — via Campus Wallet
+// (instant, direct deduction) or SSLCommerz (gateway checkout). The payer never has to be the
+// fee owner, so every write below records who actually authorized/paid, not just whose fee it
+// was — and the amount is always recomputed from the live SemesterFee rows server-side, never
+// trusted from the client, so a tampered request can't under/over-pay what's actually owed.
+const semesterFeeLookupLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  limit: 20,
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: (req: AuthRequest) => req.user?.id || req.ip || 'unknown',
+  message: { message: 'Too many lookups. Please wait a moment and try again.' },
+});
+
+async function getPendingSemesterFees(studentDbId: string) {
+  const fees = await prisma.semesterFee.findMany({ where: { studentId: studentDbId, status: 'Pending' }, take: 200 });
+  const total = fees.reduce((s, f) => s + (f.amount || 0), 0);
+  return { fees, total };
+}
+
+router.post('/semester-fees/lookup', authMiddleware, semesterFeeLookupLimiter, async (req: AuthRequest, res) => {
+  try {
+    const studentId = String(req.body?.studentId || '').trim();
+    if (!studentId || studentId.length > 40) {
+      return res.status(400).json({ message: 'Enter a valid Student ID.' });
+    }
+
+    // Scoped to role: 'Student' — this lookup only ever needs to resolve semester-fee-paying
+    // accounts, and it keeps staff/admin accounts (which never carry SemesterFee rows) out of
+    // the response even if a Student ID string happened to collide with one.
+    const student = await prisma.user.findFirst({ where: { studentId, role: 'Student' } });
+    if (!student) return res.status(404).json({ message: 'No student found with this ID.' });
+
+    const { fees, total } = await getPendingSemesterFees(student.id);
+
+    // Only the fields the payer needs to confirm they have the right person — no email, no
+    // internal id, no other account details.
+    res.json({
+      found: true,
+      student: {
+        fullName: student.fullName || 'Student',
+        studentId: student.studentId || '',
+        department: student.department || '',
+        batch: student.batch || '',
+      },
+      totalDue: total,
+      feeCount: fees.length,
+      fees: fees.map(f => ({ id: f.id, label: f.label || 'Semester Fee', amount: f.amount, dueDate: f.dueDate || '' })),
+    });
+  } catch (err: any) {
+    res.status(500).json({ message: err.message });
+  }
+});
+
+router.post('/semester-fees/pay', authMiddleware, paymentInitLimiter, async (req: AuthRequest, res) => {
+  try {
+    const payer = req.user!;
+    const payerId = payer.id;
+    const { studentId, method, otpId } = req.body as { studentId: string; method: 'wallet' | 'sslcommerz'; otpId?: string };
+
+    const cleanStudentId = String(studentId || '').trim();
+    if (!cleanStudentId) return res.status(400).json({ message: 'Student ID is required.' });
+    if (method !== 'wallet' && method !== 'sslcommerz') return res.status(400).json({ message: 'Invalid payment method.' });
+
+    const target = await prisma.user.findFirst({ where: { studentId: cleanStudentId, role: 'Student' } });
+    if (!target) return res.status(404).json({ message: 'No student found with this ID.' });
+
+    // Recomputed fresh, right now — this is the amount that's actually charged, regardless of
+    // anything the client believes the total to be.
+    const { fees, total } = await getPendingSemesterFees(target.id);
+    if (!fees.length || total <= 0) {
+      return res.status(400).json({ message: 'No pending semester fees found for this student.' });
+    }
+
+    const isOnBehalf = target.id !== payerId;
+
+    // Same tiered PIN/OTP authorization as every other payment path in this app — enforced on
+    // the PAYER's freshly-verified PIN/OTP, regardless of whose fee is actually being settled.
+    if (total >= PIN_REQUIRED_THRESHOLD) {
+      const freshPayer = await prisma.user.findUnique({ where: { id: payerId } });
+      const pinFresh = freshPayer?.pinVerifiedAt && (Date.now() - new Date(freshPayer.pinVerifiedAt).getTime()) < AUTH_FRESHNESS_WINDOW_MS;
+      if (!pinFresh) return res.status(403).json({ message: 'Please verify your PIN before this payment.', requiresPin: true });
+
+      if (total >= OTP_REQUIRED_THRESHOLD) {
+        const otp = otpId ? await prisma.otpCode.findUnique({ where: { id: otpId } }) : null;
+        const otpFresh = otp && otp.userId === payerId && otp.status === 'Used' && otp.purpose === 'Large Payment' && (Date.now() - new Date(otp.updatedAt).getTime()) < AUTH_FRESHNESS_WINDOW_MS;
+        if (!otpFresh) return res.status(403).json({ message: 'OTP verification required for this payment.', requiresOtp: true });
+      }
+    }
+
+    const ref = `SEM-${Date.now().toString(36).toUpperCase()}-${Math.random().toString(36).slice(2, 6).toUpperCase()}`;
+    const label = `Semester Fee — ${target.fullName || target.studentId}${isOnBehalf ? ` (paid by ${payer.fullName || payer.email})` : ''}`;
+    const itemsJson = JSON.stringify(fees.map(f => ({ id: f.id, source: 'semester', amount: f.amount, label: f.label })));
+
+    if (method === 'wallet') {
+      const wallet = await prisma.wallet.findFirst({ where: { ownerId: payerId } });
+      if (!wallet || (wallet.balance || 0) < total) {
+        return res.status(400).json({ message: 'Insufficient balance in your wallet' });
+      }
+
+      let newBalance: number;
+      try {
+        newBalance = await prisma.$transaction(async (txClient) => {
+          // Atomic, conditional decrement — guards the race between two concurrent payment
+          // attempts (e.g. two tabs) rather than trusting the balance read above.
+          const walletUpdate = await txClient.wallet.updateMany({
+            where: { id: wallet.id, balance: { gte: total } },
+            data: { balance: { decrement: total } },
+          });
+          if (walletUpdate.count === 0) throw new Error('INSUFFICIENT_BALANCE');
+
+          // Guards the same race on the fee rows — if someone else settled these fees a moment
+          // ago, this update touches 0 rows and we roll the whole transaction back.
+          const feesUpdate = await txClient.semesterFee.updateMany({
+            where: { studentId: target.id, status: 'Pending' },
+            data: { status: 'Paid', reference: ref },
+          });
+          if (feesUpdate.count !== fees.length) throw new Error('FEES_CHANGED');
+
+          await txClient.transaction.create({
+            data: {
+              reference: ref, userId: payerId, type: 'Fee Payment', direction: 'Debit',
+              amount: total, status: 'Success', gateway: 'Wallet', paymentMethod: 'Wallet',
+              purpose: 'semester_fee', itemsJson, description: label,
+              idempotencyKey: `${payerId}-semester_fee-${target.id}-${Date.now()}`,
+            },
+          });
+
+          await txClient.auditLog.create({
+            data: {
+              action: 'Semester Fee Paid (Wallet)', actorId: payerId, entityType: 'SemesterFee', entityId: target.id,
+              details: `Paid ৳${total} for ${target.fullName || target.studentId} (${target.studentId})${isOnBehalf ? ` — on behalf, by ${payer.fullName || payer.email}` : ''}`,
+              ipAddress: req.ip,
+            },
+          });
+
+          const freshWallet = await txClient.wallet.findUnique({ where: { id: wallet.id } });
+          return freshWallet?.balance || 0;
+        });
+      } catch (e: any) {
+        if (e.message === 'FEES_CHANGED') {
+          return res.status(409).json({ message: 'These fees were already settled. Please look up the student again.' });
+        }
+        return res.status(400).json({ message: 'Insufficient balance in your wallet' });
+      }
+
+      try {
+        if (payer.email) {
+          await sendEmail(payer.email, `Payment Successful — ৳${total.toLocaleString()} — Smart Campus`, [
+            { type: 'text', content: `<strong>Hi ${payer.fullName || 'Student'},</strong>\n\nYour semester fee payment was successful.\n\n<strong>Paid For:</strong> ${target.fullName} (${target.studentId})\n<strong>Amount:</strong> ৳${total.toLocaleString()}\n<strong>Reference:</strong> ${ref}\n<strong>Paid By:</strong> ${payer.fullName || payer.email}` },
+            { type: 'divider' }, { type: 'text', content: '🎓 Smart Campus — Your University Wallet' },
+          ]);
+        }
+        if (isOnBehalf && target.email) {
+          await sendEmail(target.email, `Your Semester Fee Was Paid — Smart Campus`, [
+            { type: 'text', content: `<strong>Hi ${target.fullName},</strong>\n\nYour semester fee of ৳${total.toLocaleString()} has been paid by ${payer.fullName || payer.email}.\n\n<strong>Reference:</strong> ${ref}` },
+            { type: 'divider' }, { type: 'text', content: '🎓 Smart Campus' },
+          ]);
+        }
+      } catch { /* best-effort */ }
+
+      return res.json({
+        success: true, method: 'wallet', amount: total, reference: ref, newBalance,
+        paidByName: payer.fullName || payer.email, studentName: target.fullName || target.studentId,
+      });
+    }
+
+    // method === 'sslcommerz'
+    const pendingTxns = await prisma.transaction.findMany({ where: { userId: payerId, status: 'Pending', gateway: 'SSLCommerz' }, take: 5 });
+    if (pendingTxns.length >= 3) return res.status(429).json({ message: 'Too many pending payments. Complete or cancel existing ones first.' });
+
+    const tx = await prisma.transaction.create({
+      data: {
+        reference: ref, userId: payerId, type: SSL_TYPE_MAP.semester_fee, direction: 'Debit',
+        amount: total, status: 'Pending', gateway: 'SSLCommerz',
+        idempotencyKey: `${payerId}-semester_fee-${target.id}-${Date.now()}`,
+        description: label, paymentMethod: 'Online', purpose: 'semester_fee', itemsJson,
+      },
+    });
+
+    const isLive = process.env.SSLCOMMERZ_IS_LIVE === 'true';
+    const SSLCOMMERZ_URL = isLive ? 'https://securepay.sslcommerz.com/gwprocess/v4/api.php' : 'https://sandbox.sslcommerz.com/gwprocess/v4/api.php';
+    const appUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
+    const backendUrl = process.env.BACKEND_URL || `http://localhost:${PORT}`;
+
+    const formData = new URLSearchParams({
+      store_id: process.env.SSLCOMMERZ_STORE_ID || '',
+      store_passwd: process.env.SSLCOMMERZ_STORE_PASSWORD || '',
+      total_amount: total.toString(), currency: 'BDT', tran_id: ref,
+      success_url: `${appUrl}/student/payment-result?status=success&ref=${ref}`,
+      fail_url: `${appUrl}/student/payment-result?status=failed&ref=${ref}`,
+      cancel_url: `${appUrl}/student/payment-result?status=cancelled&ref=${ref}`,
+      // Real server-to-server IPN — confirmSslPayment() re-validates against SSLCommerz's own
+      // Merchant Transaction Validation API before marking anything Paid, exactly like every
+      // other payment purpose in this app.
+      ipn_url: `${backendUrl}/api/payment/ipn`,
+      cus_name: payer.fullName || 'Student',
+      cus_email: payer.email,
+      cus_phone: payer.phone || '01700000000',
+      cus_add1: 'University Campus', cus_city: 'Dhaka', cus_country: 'Bangladesh',
+      shipping_method: 'NO', product_name: label,
+      product_category: 'Payment', product_profile: 'general',
+      value_a: payerId, value_b: 'semester_fee', value_c: ref, value_d: tx.id,
+    });
+
+    const response = await fetch(SSLCOMMERZ_URL, { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: formData.toString() });
+    const data = await response.json() as Record<string, unknown>;
+
+    if (data.status !== 'SUCCESS') {
+      await prisma.transaction.update({ where: { id: tx.id }, data: { status: 'Failed' } });
+      const reason = (data.failedreason as string) || '';
+      let userMessage = reason || 'Payment gateway unavailable.';
+      if (reason.toLowerCase().includes('store credential')) userMessage = 'Payment gateway configuration error. Contact admin.';
+      return res.status(400).json({ message: userMessage });
+    }
+
+    await prisma.transaction.update({ where: { id: tx.id }, data: { gatewayTxnId: data.sessionkey as string } });
+    await prisma.auditLog.create({ data: { action: 'Semester Fee Payment Initiated (SSLCommerz)', actorId: payerId, entityType: 'Transaction', entityId: tx.id, details: `Amount: ৳${total} for ${target.fullName} (${target.studentId})${isOnBehalf ? ' — on behalf' : ''}, Ref: ${ref}`, ipAddress: req.ip } });
+
+    res.json({ success: true, method: 'sslcommerz', gatewayUrl: data.GatewayPageURL as string, transactionRef: ref, sessionKey: data.sessionkey as string, amount: total, studentName: target.fullName || target.studentId });
+  } catch (err: any) {
+    res.status(500).json({ message: err.message });
+  }
+});
+
 // ─── ADMIN ROUTES ───
 router.post('/admin/overview', authMiddleware, requireAdmin, async (req: AuthRequest, res) => {
   try {
