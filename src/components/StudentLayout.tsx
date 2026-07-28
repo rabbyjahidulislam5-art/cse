@@ -1,10 +1,13 @@
+import { useEffect, useState } from 'react';
 import { Outlet, NavLink, useNavigate, useLocation } from 'react-router-dom';
-import { GraduationCap, Home, Store, FileWarning, History, UserCircle, Bell, ScanLine, LogOut, Settings } from 'lucide-react';
+import { GraduationCap, Home, Store, FileWarning, History, UserCircle, Bell, ScanLine, LogOut, Settings, ScrollText } from 'lucide-react';
 import { useAuth } from '@/lib/auth-context';
 import { UserProvider, useUser } from '@/lib/user-context';
 import { Skeleton } from '@/components/ui/skeleton';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger, DropdownMenuSeparator } from '@/components/ui/dropdown-menu';
 import { motion } from 'framer-motion';
+import { getDisputeBadgeCounts } from '@/lib/disputeApi';
+import { useDisputeSocket } from '@/lib/socket';
 
 const navItems = [
   { to: '/student', icon: Home, label: 'Home', end: true },
@@ -12,6 +15,7 @@ const navItems = [
   { to: '/student/shops', icon: Store, label: 'Shops' },
   { to: '/student/dues', icon: FileWarning, label: 'Dues' },
   { to: '/student/ledger', icon: History, label: 'Ledger' },
+  { to: '/student/disputes', icon: ScrollText, label: 'Disputes' },
 ];
 
 function LayoutInner() {
@@ -19,6 +23,19 @@ function LayoutInner() {
   const location = useLocation();
   const { user, loading } = useUser();
   const { logout } = useAuth();
+  const [unreadReplies, setUnreadReplies] = useState(0);
+
+  useEffect(() => {
+    if (!user) return;
+    const fetchBadge = () => getDisputeBadgeCounts().then(r => setUnreadReplies(r.unreadReplies)).catch(() => {});
+    fetchBadge();
+    // Poll as a fallback (socket disconnects, tab was backgrounded, etc.) — the socket below is
+    // what makes the badge update instantly in the common case.
+    const interval = setInterval(fetchBadge, 30000);
+    return () => clearInterval(interval);
+  }, [user]);
+
+  useDisputeSocket(() => setUnreadReplies(c => c + 1));
 
   return (
     <div className="min-h-screen bg-background flex flex-col">
@@ -62,11 +79,17 @@ function LayoutInner() {
           {/* Right controls */}
           <div className="flex items-center gap-2">
             <button
-              onClick={() => navigate('/student/notifications')}
+              onClick={() => navigate('/student/disputes')}
               className="relative p-2.5 rounded-xl hover:bg-accent/80 transition-all duration-200 group"
             >
               <Bell className="w-5 h-5 text-muted-foreground group-hover:text-foreground transition-colors" />
-              <span className="absolute top-2 right-2 w-2 h-2 bg-primary rounded-full ring-2 ring-background" />
+              {unreadReplies > 0 ? (
+                <span className="absolute -top-0.5 -right-0.5 min-w-[16px] h-4 px-1 rounded-full bg-destructive text-[9px] font-bold text-white flex items-center justify-center ring-2 ring-background">
+                  {unreadReplies > 9 ? '9+' : unreadReplies}
+                </span>
+              ) : (
+                <span className="absolute top-2 right-2 w-2 h-2 bg-primary rounded-full ring-2 ring-background" />
+              )}
             </button>
 
             {loading ? <Skeleton className="w-9 h-9 rounded-xl" /> : (

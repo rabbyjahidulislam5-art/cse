@@ -35,43 +35,60 @@ model User {
   bio              String?
   authProvider     String    @default("password")
   googleId         String?   @unique
+  flagged          Boolean   @default(false)
+  flagReason       String?
   createdAt        DateTime  @default(now())
   updatedAt        DateTime  @updatedAt
 
-  wallets       Wallet[]
-  transactions  Transaction[]
-  semesterFees  SemesterFee[]
-  libraryFines  LibraryFine[]
-  adminFines    AdminFine[]
-  payLaterDues  PayLaterDue[]
-  otpCodes      OtpCode[]
-  auditLogs     AuditLog[]
+  wallets      Wallet[]
+  transactions Transaction[]
+  semesterFees SemesterFee[]
+  libraryFines LibraryFine[]
+  adminFines   AdminFine[]
+  payLaterDues PayLaterDue[]
+  otpCodes     OtpCode[]
+  auditLogs    AuditLog[]
+
+  // Financial Dispute & Case Management System
+  receivedTransactions       Transaction[]          @relation("TransactionReceiver")
+  disputesRaised             Dispute[]              @relation("DisputeRaisedBy")
+  disputesAssigned           Dispute[]              @relation("DisputeAssignedTo")
+  disputeMessages            DisputeMessage[]
+  disputeAttachments         DisputeAttachment[]
+  disputeAssignmentsReceived DisputeAssignment[]    @relation("DisputeAssignmentAssignedTo")
+  disputeAssignmentsMade     DisputeAssignment[]    @relation("DisputeAssignmentAssignedBy")
+  refundsInitiated           Refund[]
+  refundApprovals            RefundApproval[]
+  disputeTimelineEvents      DisputeTimeline[]
+  disputeStatusChanges       DisputeStatusHistory[]
+  disputeNotifications       DisputeNotification[]
 }
 
 model Wallet {
-  id                 String    @id @default(cuid())
-  walletId           String    @unique
-  owner              User      @relation(fields: [ownerId], references: [id])
+  id                 String   @id @default(cuid())
+  walletId           String   @unique
+  owner              User     @relation(fields: [ownerId], references: [id])
   ownerId            String
-  balance            Float     @default(0)
-  dailyTransferLimit Float     @default(10000)
-  dailyTransferred   Float     @default(0)
+  balance            Float    @default(0)
+  dailyTransferLimit Float    @default(10000)
+  dailyTransferred   Float    @default(0)
   lastTransferDate   String?
-  createdAt          DateTime  @default(now())
-  updatedAt          DateTime  @updatedAt
+  frozen             Boolean  @default(false)
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
 }
 
 model Transaction {
-  id             String    @id @default(cuid())
-  reference      String    @unique
-  user           User      @relation(fields: [userId], references: [id])
+  id             String   @id @default(cuid())
+  reference      String   @unique
+  user           User     @relation(fields: [userId], references: [id])
   userId         String
   type           String
   direction      String
   amount         Float
-  serviceCharge  Float?    @default(0)
-  status         String    @default("Pending")
-  shop           Shop?     @relation(fields: [shopId], references: [id])
+  serviceCharge  Float?   @default(0)
+  status         String   @default("Pending")
+  shop           Shop?    @relation(fields: [shopId], references: [id])
   shopId         String?
   gateway        String?
   gatewayTxnId   String?
@@ -81,10 +98,26 @@ model Transaction {
   paymentMethod  String?
   purpose        String?
   itemsJson      String?
-  createdAt      DateTime  @default(now())
-  updatedAt      DateTime  @updatedAt
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
 
-  callbacks      PaymentCallback[]
+  callbacks PaymentCallback[]
+
+  // Financial Dispute & Case Management System — additive audit-context columns.
+  // All nullable: populated going forward at each money-movement call site; historical rows
+  // predating this simply have no value here (never backfilled/fabricated).
+  receiver                   User?   @relation("TransactionReceiver", fields: [receiverId], references: [id])
+  receiverId                 String?
+  receiverRoleSnapshot       String?
+  receiverDepartmentSnapshot String?
+  balanceBefore              Float?
+  balanceAfter               Float?
+  ipAddress                  String?
+  deviceInfo                 String?
+
+  disputes          Dispute[]
+  refundsAsOriginal Refund[]  @relation("RefundOriginalTransaction")
+  refundReversalFor Refund?   @relation("RefundReversalTransaction")
 }
 
 model PaymentCallback {
@@ -101,18 +134,19 @@ model PaymentCallback {
 }
 
 model Shop {
-  id           String    @id @default(cuid())
-  name         String
-  category     String
-  rating       Float     @default(0)
-  status       String    @default("Active")
-  qrToken      String?
-  qrSignature  String?
-  location     String?
-  logoUrl      String?
-  merchantId   String?   @unique
-  createdAt    DateTime  @default(now())
-  updatedAt    DateTime  @updatedAt
+  id          String   @id @default(cuid())
+  name        String
+  category    String
+  rating      Float    @default(0)
+  status      String   @default("Active")
+  qrToken     String?
+  qrSignature String?
+  location    String?
+  logoUrl     String?
+  merchantId  String?  @unique
+  flagged     Boolean  @default(false)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
 
   transactions Transaction[]
   payLaterDues PayLaterDue[]
@@ -135,59 +169,59 @@ model Settlement {
 }
 
 model SemesterFee {
-  id        String    @id @default(cuid())
+  id        String   @id @default(cuid())
   label     String?
-  student   User      @relation(fields: [studentId], references: [id])
+  student   User     @relation(fields: [studentId], references: [id])
   studentId String
   amount    Float
   dueDate   String?
-  status    String    @default("Pending")
+  status    String   @default("Pending")
   reference String?
-  createdAt DateTime  @default(now())
-  updatedAt DateTime  @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 }
 
 model LibraryFine {
-  id        String    @id @default(cuid())
+  id        String   @id @default(cuid())
   label     String?
-  student   User      @relation(fields: [studentId], references: [id])
+  student   User     @relation(fields: [studentId], references: [id])
   studentId String
   fineType  String?
   amount    Float
   dueDate   String?
-  status    String    @default("Pending")
+  status    String   @default("Pending")
   reference String?
-  createdAt DateTime  @default(now())
-  updatedAt DateTime  @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 }
 
 model AdminFine {
-  id           String    @id @default(cuid())
+  id           String   @id @default(cuid())
   reason       String?
-  student      User      @relation(fields: [studentId], references: [id])
+  student      User     @relation(fields: [studentId], references: [id])
   studentId    String
   amount       Float
   incidentDate String?
-  status       String    @default("Pending")
+  status       String   @default("Pending")
   reference    String?
-  createdAt    DateTime  @default(now())
-  updatedAt    DateTime  @updatedAt
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
 }
 
 model PayLaterDue {
-  id               String    @id @default(cuid())
+  id               String   @id @default(cuid())
   reference        String?
-  student          User      @relation(fields: [studentId], references: [id])
+  student          User     @relation(fields: [studentId], references: [id])
   studentId        String
-  shop             Shop      @relation(fields: [shopId], references: [id])
+  shop             Shop     @relation(fields: [shopId], references: [id])
   shopId           String
   amount           Float
-  status           String    @default("Pending")
+  status           String   @default("Pending")
   dueDate          String?
   description      String?
   paymentReference String?
-  createdAt        DateTime  @default(now())
-  updatedAt        DateTime  @updatedAt
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
 }
 
 model OtpCode {
@@ -204,13 +238,202 @@ model OtpCode {
 }
 
 model AuditLog {
-  id         String    @id @default(cuid())
+  id         String   @id @default(cuid())
   action     String
-  actor      User?     @relation(fields: [actorId], references: [id])
+  actor      User?    @relation(fields: [actorId], references: [id])
   actorId    String?
   entityType String?
   entityId   String?
   details    String?
   ipAddress  String?
-  createdAt  DateTime  @default(now())
+  createdAt  DateTime @default(now())
+}
+
+// ─── FINANCIAL DISPUTE & CASE MANAGEMENT SYSTEM ───
+//
+// Covers every payment source in the platform (wallet transfer/top-up/withdrawal, semester fee,
+// library fine, admin fine, shop QR payment, SSLCommerz, and future payment modules) via a single
+// dispute-per-transaction model. Deliberately does NOT add a separate "DisputeAudit" table — the
+// existing AuditLog above already serves that purpose platform-wide (entityType: "Dispute"), so
+// there is one immutable security audit trail instead of two competing ones. DisputeTimeline
+// (human-readable case narrative) and DisputeStatusHistory (strict status transitions) remain
+// distinct because they serve different UI/reporting needs than a security audit log does.
+// Every status field is a plain String (matching every other model in this schema, none of which
+// use a native Prisma enum) — valid values are enforced as TS union types in the application code.
+// Nothing here is ever hard-deleted: closing/rejecting/merging a case is a status change, not a
+// row deletion; Dispute.deletedAt exists only for an explicit soft-delete of a case raised in
+// error, never used for normal case resolution.
+
+model Dispute {
+  id            String      @id @default(cuid())
+  caseNumber    String      @unique
+  transaction   Transaction @relation(fields: [transactionId], references: [id])
+  transactionId String
+  raisedBy      User        @relation("DisputeRaisedBy", fields: [raisedById], references: [id])
+  raisedById    String
+  category      String
+  description   String
+  status        String      @default("Open")
+  assignedTo    User?       @relation("DisputeAssignedTo", fields: [assignedToId], references: [id])
+  assignedToId  String?
+  priority      String      @default("Normal")
+  riskScore     Float?
+  slaDueAt      DateTime?
+  frozen        Boolean     @default(false)
+  frozenAt      DateTime?
+  mergedInto    Dispute?    @relation("DisputeMerge", fields: [mergedIntoId], references: [id])
+  mergedIntoId  String?
+  mergedCases   Dispute[]   @relation("DisputeMerge")
+  splitFrom     Dispute?    @relation("DisputeSplit", fields: [splitFromId], references: [id])
+  splitFromId   String?
+  splitCases    Dispute[]   @relation("DisputeSplit")
+  resolvedAt    DateTime?
+  closedAt      DateTime?
+  deletedAt     DateTime?
+  createdAt     DateTime    @default(now())
+  updatedAt     DateTime    @updatedAt
+
+  messages      DisputeMessage[]
+  attachments   DisputeAttachment[]
+  assignments   DisputeAssignment[]
+  refunds       Refund[]
+  timeline      DisputeTimeline[]
+  statusHistory DisputeStatusHistory[]
+  notifications DisputeNotification[]
+}
+
+model DisputeMessage {
+  id         String   @id @default(cuid())
+  dispute    Dispute  @relation(fields: [disputeId], references: [id])
+  disputeId  String
+  author     User     @relation(fields: [authorId], references: [id])
+  authorId   String
+  body       String
+  isInternal Boolean  @default(false)
+  createdAt  DateTime @default(now())
+
+  attachments DisputeAttachment[]
+}
+
+// Real validation today (magic-byte sniffing, extension allowlist, size caps) plus a pluggable
+// async scan-hook (scanStatus) ready for a real AV engine — no such engine is provisioned in this
+// project, so nothing marks a file "clean" without a real scan actually having run.
+model DisputeAttachment {
+  id           String          @id @default(cuid())
+  dispute      Dispute         @relation(fields: [disputeId], references: [id])
+  disputeId    String
+  message      DisputeMessage? @relation(fields: [messageId], references: [id])
+  messageId    String?
+  uploadedBy   User            @relation(fields: [uploadedById], references: [id])
+  uploadedById String
+  originalName String
+  storedName   String
+  mimeType     String
+  sizeBytes    Int
+  sha256       String
+  scanStatus   String          @default("pending")
+  scannedAt    DateTime?
+  createdAt    DateTime        @default(now())
+}
+
+// Append-only assignment history. The *current* assignee lives on Dispute.assignedToId; this
+// table is the immutable trail of every assignment/reassignment for audit purposes.
+model DisputeAssignment {
+  id           String   @id @default(cuid())
+  dispute      Dispute  @relation(fields: [disputeId], references: [id])
+  disputeId    String
+  assignedTo   User     @relation("DisputeAssignmentAssignedTo", fields: [assignedToId], references: [id])
+  assignedToId String
+  assignedBy   User     @relation("DisputeAssignmentAssignedBy", fields: [assignedById], references: [id])
+  assignedById String
+  note         String?
+  createdAt    DateTime @default(now())
+}
+
+model Refund {
+  id                    String       @id @default(cuid())
+  dispute               Dispute      @relation(fields: [disputeId], references: [id])
+  disputeId             String
+  transaction           Transaction  @relation("RefundOriginalTransaction", fields: [transactionId], references: [id])
+  transactionId         String
+  method                String
+  amountType            String
+  amount                Float
+  status                String       @default("Pending")
+  initiatedBy           User         @relation(fields: [initiatedById], references: [id])
+  initiatedById         String
+  // The new Transaction row created to actually move money back (wallet credit / reversal) once
+  // the refund is processed — null until then. Reusing the guarded $transaction pattern from
+  // /semester-fees/pay, never a bypass of the ledger.
+  reversalTransaction   Transaction? @relation("RefundReversalTransaction", fields: [reversalTransactionId], references: [id])
+  reversalTransactionId String?      @unique
+  notes                 String?
+  createdAt             DateTime     @default(now())
+  processedAt           DateTime?
+
+  approvals RefundApproval[]
+}
+
+// High-value refunds require a secondary sign-off beyond the Accounts Officer who initiated it
+// (Admin approval) — every decision on that approval chain is recorded here, never overwritten.
+model RefundApproval {
+  id         String   @id @default(cuid())
+  refund     Refund   @relation(fields: [refundId], references: [id])
+  refundId   String
+  approver   User     @relation(fields: [approverId], references: [id])
+  approverId String
+  decision   String
+  notes      String?
+  decidedAt  DateTime @default(now())
+}
+
+// The human-readable event feed rendered as "Audit Timeline" on both the student's transaction
+// card and the staff case-detail view — distinct from AuditLog (security trail) and
+// DisputeStatusHistory (strict status transitions only).
+model DisputeTimeline {
+  id           String   @id @default(cuid())
+  dispute      Dispute  @relation(fields: [disputeId], references: [id])
+  disputeId    String
+  eventType    String
+  actor        User?    @relation(fields: [actorId], references: [id])
+  actorId      String?
+  summary      String
+  metadataJson String?
+  createdAt    DateTime @default(now())
+}
+
+model DisputeStatusHistory {
+  id          String   @id @default(cuid())
+  dispute     Dispute  @relation(fields: [disputeId], references: [id])
+  disputeId   String
+  fromStatus  String
+  toStatus    String
+  changedBy   User     @relation(fields: [changedById], references: [id])
+  changedById String
+  reason      String?
+  createdAt   DateTime @default(now())
+}
+
+// Scoped to dispute events only (case updates, replies, refund processed/rejected, documents
+// requested) — the existing ad-hoc /notifications feed (Transaction/SemesterFee/LibraryFine
+// derived) is untouched and unrelated to this table.
+model DisputeNotification {
+  id          String    @id @default(cuid())
+  dispute     Dispute?  @relation(fields: [disputeId], references: [id])
+  disputeId   String?
+  recipient   User      @relation(fields: [recipientId], references: [id])
+  recipientId String
+  type        String
+  title       String
+  body        String
+  readAt      DateTime?
+  createdAt   DateTime  @default(now())
+}
+
+// Atomic case-number generator (DSP-2026-000125): a single upsert with `value: {increment: 1}`
+// compiles to one atomic UPDATE, safe under concurrent filers without any new infra (no Redis,
+// no DB sequence object needed).
+model SequenceCounter {
+  id    String @id
+  value Int    @default(0)
 }

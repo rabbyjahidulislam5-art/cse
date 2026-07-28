@@ -1,20 +1,45 @@
 import { Outlet, NavLink, useNavigate } from 'react-router-dom';
-import { LayoutDashboard, QrCode, BellRing, History, LogOut, Store } from 'lucide-react';
+import { LayoutDashboard, QrCode, BellRing, History, LogOut, Store, ScrollText } from 'lucide-react';
 import { useAuth } from '@/lib/auth-context';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger, DropdownMenuSeparator } from '@/components/ui/dropdown-menu';
 import { motion } from 'framer-motion';
-import { useEffect } from 'react';
+import { useEffect, useState, useRef } from 'react';
+import { getDisputeBadgeCounts } from '@/lib/disputeApi';
+import { useDisputeSocket } from '@/lib/socket';
 
 const navItems = [
   { to: '/shop', icon: LayoutDashboard, label: 'Home', end: true },
   { to: '/shop/qr', icon: QrCode, label: 'QR Code' },
   { to: '/shop/notifications', icon: BellRing, label: 'Alerts' },
   { to: '/shop/ledger', icon: History, label: 'Sales' },
+  { to: '/shop/disputes', icon: ScrollText, label: 'Disputes' },
 ];
+
+// A short synthesized beep via the Web Audio API — no external audio asset needed, so there's
+// nothing to fail to load. Fires once per realtime dispute notification (new case / reply).
+function playAlertSound() {
+  try {
+    const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
+    const ctx = new AudioContextClass();
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.type = 'sine';
+    osc.frequency.value = 880;
+    gain.gain.setValueAtTime(0.15, ctx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.4);
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+    osc.start();
+    osc.stop(ctx.currentTime + 0.4);
+    osc.onended = () => ctx.close();
+  } catch { /* audio not available in this environment — non-critical */ }
+}
 
 export default function ShopLayout() {
   const navigate = useNavigate();
   const { user, isLoading, loginWithRedirect, logout } = useAuth();
+  const [pendingCases, setPendingCases] = useState(0);
+  const mounted = useRef(false);
 
   useEffect(() => {
     if (!isLoading && !user) loginWithRedirect({ redirectUrl: window.location.href });
@@ -23,6 +48,20 @@ export default function ShopLayout() {
   useEffect(() => {
     if (user && (user as any).role !== 'Shop Staff') navigate('/', { replace: true });
   }, [user, navigate]);
+
+  const fetchBadge = () => getDisputeBadgeCounts().then(r => setPendingCases(r.pendingCases)).catch(() => {});
+  useEffect(() => {
+    if (!user) return;
+    fetchBadge();
+    mounted.current = true;
+    const interval = setInterval(fetchBadge, 30000);
+    return () => clearInterval(interval);
+  }, [user]);
+
+  useDisputeSocket(() => {
+    fetchBadge();
+    if (mounted.current) playAlertSound();
+  });
 
   if (isLoading || !user) return null;
 
@@ -47,7 +86,12 @@ export default function ShopLayout() {
                 {({ isActive }) => (
                   <>
                     {isActive && <motion.div layoutId="shop-nav" className="absolute inset-0 gradient-primary rounded-lg shadow-lg shadow-primary/20" transition={{ type: 'spring', stiffness: 400, damping: 30 }} />}
-                    <span className="relative z-10 flex items-center gap-2"><item.icon className="w-4 h-4" /> {item.label}</span>
+                    <span className="relative z-10 flex items-center gap-2">
+                      <item.icon className="w-4 h-4" /> {item.label}
+                      {item.label === 'Disputes' && pendingCases > 0 && (
+                        <span className="min-w-[16px] h-4 px-1 rounded-full bg-destructive text-[9px] font-bold text-white flex items-center justify-center">{pendingCases > 99 ? '99+' : pendingCases}</span>
+                      )}
+                    </span>
                   </>
                 )}
               </NavLink>
@@ -85,7 +129,12 @@ export default function ShopLayout() {
               {({ isActive }) => (
                 <>
                   {isActive && <motion.div layoutId="shop-mobile" className="absolute -top-1 left-1/2 -translate-x-1/2 w-8 h-1 rounded-full gradient-primary" transition={{ type: 'spring', stiffness: 400, damping: 30 }} />}
-                  <item.icon className={`w-5 h-5 transition-all ${isActive ? 'scale-110' : ''}`} />
+                  <div className="relative">
+                    <item.icon className={`w-5 h-5 transition-all ${isActive ? 'scale-110' : ''}`} />
+                    {item.label === 'Disputes' && pendingCases > 0 && (
+                      <span className="absolute -top-1 -right-1.5 min-w-[14px] h-3.5 px-0.5 rounded-full bg-destructive text-[8px] font-bold text-white flex items-center justify-center">{pendingCases > 9 ? '9+' : pendingCases}</span>
+                    )}
+                  </div>
                   <span className="text-[10px] font-semibold">{item.label}</span>
                 </>
               )}

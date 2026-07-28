@@ -29,6 +29,7 @@
     "react-router-dom": "^7.6.1",
     "react-webcam": "^7.2.0",
     "recharts": "^3.10.1",
+    "socket.io-client": "^4.8.3",
     "sonner": "^2.0.3",
     "tailwind-merge": "^3.3.0",
     "use-debounce": "^10.1.1"

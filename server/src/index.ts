@@ -12,6 +12,14 @@ import rateLimit from 'express-rate-limit';
 import prisma from './lib/prisma';
 import { authMiddleware, generateToken, requireRole, AuthRequest } from './lib/auth';
 import { sendEmail } from './lib/email';
+import http from 'http';
+import studentDisputeRouter from './routes/disputes/student';
+import accountsDisputeRouter from './routes/disputes/accounts';
+import adminDisputeRouter from './routes/disputes/admin';
+import libraryDisputeRouter from './routes/disputes/library';
+import shopDisputeRouter from './routes/disputes/shop';
+import { disputeNotificationsRouter } from './routes/disputes/shared';
+import { attachRealtime } from './lib/realtime';
 
 // Abuse backstops for the two payment-confirmation entry points. Render's free tier runs a
 // single instance, so in-memory rate limiting (express-rate-limit's default store) is sufficient
@@ -34,6 +42,11 @@ const paymentIpnLimiter = rateLimit({
 
 const app = express();
 const PORT = process.env.PORT || 4000;
+
+// Render sits in front of this app as a reverse proxy — without this, req.ip reflects the proxy
+// hop rather than the real client, which the Financial Dispute module relies on for IP capture on
+// every transaction and audit log entry.
+app.set('trust proxy', 1);
 
 // Middleware
 app.use(helmet({ crossOriginResourcePolicy: false }));
@@ -888,6 +901,7 @@ router.post('/transfer', authMiddleware, async (req: AuthRequest, res) => {
 
     const senderWallet = await prisma.wallet.findFirst({ where: { ownerId: senderId } });
     if (!senderWallet) return res.status(404).json({ message: 'Sender wallet not found' });
+    if (senderWallet.frozen) return res.status(403).json({ message: 'Your wallet is frozen. Contact support.' });
     if ((senderWallet.balance || 0) < amount) return res.status(400).json({ message: 'Insufficient balance' });
 
     const today = new Date().toISOString().split('T')[0];
@@ -908,11 +922,23 @@ router.post('/transfer', authMiddleware, async (req: AuthRequest, res) => {
     await prisma.wallet.update({ where: { id: senderWallet.id }, data: { balance: senderNewBalance, dailyTransferred: dailyTransferred + amount, lastTransferDate: today } });
     await prisma.wallet.update({ where: { id: recipientWallet.id }, data: { balance: recipientNewBalance } });
 
+    // Financial Dispute module — additive audit-context fields (receiver/balance/ip/device),
+    // captured for both legs of the transfer; no existing field or control flow changed above.
+    const deviceInfo = (req.headers['user-agent'] as string | undefined)?.slice(0, 300);
     const sendTx = await prisma.transaction.create({
-      data: { reference: ref, userId: senderId, type: 'Transfer Sent', direction: 'Debit', amount, status: 'Success', gateway: 'Wallet', description: `Transfer to ${recipient.fullName || recipient.email}${note ? ` — ${note}` : ''}` },
+      data: {
+        reference: ref, userId: senderId, type: 'Transfer Sent', direction: 'Debit', amount, status: 'Success', gateway: 'Wallet',
+        description: `Transfer to ${recipient.fullName || recipient.email}${note ? ` — ${note}` : ''}`,
+        receiverId: recipient.id, receiverRoleSnapshot: recipient.role, receiverDepartmentSnapshot: recipient.department,
+        balanceBefore: senderWallet.balance || 0, balanceAfter: senderNewBalance, ipAddress: req.ip, deviceInfo,
+      },
     });
     await prisma.transaction.create({
-      data: { reference: `${ref}-R`, userId: recipient.id, type: 'Transfer Received', direction: 'Credit', amount, status: 'Success', gateway: 'Wallet', description: `Transfer from ${req.user!.fullName || 'sender'}${note ? ` — ${note}` : ''}` },
+      data: {
+        reference: `${ref}-R`, userId: recipient.id, type: 'Transfer Received', direction: 'Credit', amount, status: 'Success', gateway: 'Wallet',
+        description: `Transfer from ${req.user!.fullName || 'sender'}${note ? ` — ${note}` : ''}`,
+        balanceBefore: recipientWallet.balance || 0, balanceAfter: recipientNewBalance, ipAddress: req.ip, deviceInfo,
+      },
     });
 
     await prisma.auditLog.create({ data: { action: 'Wallet Transfer', actorId: senderId, entityType: 'Wallet', entityId: senderWallet.id, details: `Sent ৳${amount} to ${recipient.fullName || recipient.email} (${ref})`, ipAddress: req.ip } });
@@ -966,6 +992,7 @@ router.post('/wallet/withdraw', authMiddleware, async (req: AuthRequest, res) =>
     }
 
     const wallet = await prisma.wallet.findFirst({ where: { ownerId: userId } });
+    if (wallet?.frozen) return res.status(403).json({ message: 'Your wallet is frozen. Contact support.' });
     if (!wallet || (wallet.balance || 0) < withdrawAmt) {
       return res.status(400).json({ message: 'Insufficient wallet balance.' });
     }
@@ -985,6 +1012,11 @@ router.post('/wallet/withdraw', authMiddleware, async (req: AuthRequest, res) =>
         gateway: provider,
         paymentMethod: provider,
         description: `Withdrawal via ${provider} (${cleanMobile})`,
+        // Financial Dispute module — additive audit-context fields.
+        balanceBefore: wallet.balance || 0,
+        balanceAfter: newBalance,
+        ipAddress: req.ip,
+        deviceInfo: (req.headers['user-agent'] as string | undefined)?.slice(0, 300),
       },
     });
 
@@ -1260,7 +1292,7 @@ function sslValidationUrl() {
 
 // The single source of truth for "did this payment actually succeed". Called by both the real
 // IPN webhook and the browser's post-redirect status check — never by client-supplied status alone.
-async function confirmSslPayment(reference: string, source: 'ipn' | 'browser-validate', rawPayload: unknown, ip?: string) {
+async function confirmSslPayment(reference: string, source: 'ipn' | 'browser-validate', rawPayload: unknown, ip?: string, deviceInfo?: string) {
   const tx = await prisma.transaction.findFirst({ where: { reference } });
   if (!tx) {
     await prisma.paymentCallback.create({ data: { reference, source, rawPayload: JSON.stringify(rawPayload), verified: false, ipAddress: ip } }).catch(() => {});
@@ -1309,7 +1341,16 @@ async function confirmSslPayment(reference: string, source: 'ipn' | 'browser-val
 
     const cardType = (element?.card_type as string) || '';
     const payMethod = cardType.includes('bkash') ? 'bKash' : cardType.includes('nagad') ? 'Nagad' : cardType.includes('rocket') ? 'Rocket' : cardType.includes('visa') || cardType.includes('master') ? 'Card' : (cardType || 'Online');
-    await prisma.transaction.update({ where: { id: tx.id }, data: { status: 'Success', gatewayTxnId: validId, bankTxnId: bankTranId, paymentMethod: payMethod } });
+    await prisma.transaction.update({
+      where: { id: tx.id },
+      data: {
+        status: 'Success', gatewayTxnId: validId, bankTxnId: bankTranId, paymentMethod: payMethod,
+        // Financial Dispute module — additive audit-context fields. deviceInfo is only trustworthy
+        // as "the customer's browser" when this call came from the browser's own status check —
+        // the IPN's user-agent would just be SSLCommerz's server, not the student.
+        ipAddress: ip, deviceInfo: source === 'browser-validate' ? (deviceInfo || null) : null,
+      },
+    });
 
     let items: PayItem[] = [];
     try { items = tx.itemsJson ? JSON.parse(tx.itemsJson) : []; } catch { items = []; }
@@ -1318,11 +1359,15 @@ async function confirmSslPayment(reference: string, source: 'ipn' | 'browser-val
     // Wallet top-up: credit the user's wallet balance now that SSLCommerz has confirmed the payment.
     if (tx.purpose === 'wallet_topup') {
       const wallet = await prisma.wallet.findFirst({ where: { ownerId: tx.userId } });
+      const balanceBefore = wallet?.balance || 0;
       if (wallet) {
         await prisma.wallet.update({ where: { id: wallet.id }, data: { balance: { increment: amount } } });
       } else {
         await prisma.wallet.create({ data: { walletId: `W-${tx.userId.slice(0, 8)}`, ownerId: tx.userId, balance: amount } });
       }
+      // Financial Dispute module — captured as a follow-up update since the credited amount isn't
+      // known until this branch runs, after the main status update above.
+      await prisma.transaction.update({ where: { id: tx.id }, data: { balanceBefore, balanceAfter: balanceBefore + amount } }).catch(() => {});
     }
 
     await prisma.auditLog.create({ data: { action: 'SSLCommerz Payment Verified', actorId: tx.userId, entityType: 'Transaction', entityId: tx.id, details: `Amount: ৳${amount}, Purpose: ${tx.purpose}, Val ID: ${validId}, Source: ${source}`, ipAddress: ip } }).catch(() => {});
@@ -1365,6 +1410,10 @@ router.post('/payment/init', authMiddleware, paymentInitLimiter, async (req: Aut
     }
     if (isTopUp && (!topUpAmount || topUpAmount < 50)) {
       return res.status(400).json({ message: 'Minimum top-up amount is ৳50.' });
+    }
+    if (isTopUp) {
+      const existingWallet = await prisma.wallet.findFirst({ where: { ownerId: userId } });
+      if (existingWallet?.frozen) return res.status(403).json({ message: 'Your wallet is frozen. Contact support.' });
     }
     if (isTopUp && topUpAmount > 50000) {
       return res.status(400).json({ message: 'Maximum top-up amount is ৳50,000.' });
@@ -1482,7 +1531,7 @@ router.post('/payment/validate', authMiddleware, async (req: AuthRequest, res) =
   try {
     const { transactionRef } = req.body;
     if (!transactionRef) return res.status(400).json({ message: 'Missing transaction reference.' });
-    const result = await confirmSslPayment(transactionRef, 'browser-validate', req.body, req.ip);
+    const result = await confirmSslPayment(transactionRef, 'browser-validate', req.body, req.ip, (req.headers['user-agent'] as string | undefined)?.slice(0, 300));
     res.json(result);
   } catch (err: any) {
     res.status(500).json({ message: err.message });
@@ -1600,6 +1649,7 @@ router.post('/semester-fees/pay', authMiddleware, paymentInitLimiter, async (req
 
     if (method === 'wallet') {
       const wallet = await prisma.wallet.findFirst({ where: { ownerId: payerId } });
+      if (wallet?.frozen) return res.status(403).json({ message: 'Your wallet is frozen. Contact support.' });
       if (!wallet || (wallet.balance || 0) < total) {
         return res.status(400).json({ message: 'Insufficient balance in your wallet' });
       }
@@ -1623,12 +1673,23 @@ router.post('/semester-fees/pay', authMiddleware, paymentInitLimiter, async (req
           });
           if (feesUpdate.count !== fees.length) throw new Error('FEES_CHANGED');
 
+          // Financial Dispute module — fetched here (before the Transaction row is written) so the
+          // post-decrement balance can be captured on the row itself; additive to the existing flow.
+          const freshWallet = await txClient.wallet.findUnique({ where: { id: wallet.id } });
+
           await txClient.transaction.create({
             data: {
               reference: ref, userId: payerId, type: 'Fee Payment', direction: 'Debit',
               amount: total, status: 'Success', gateway: 'Wallet', paymentMethod: 'Wallet',
               purpose: 'semester_fee', itemsJson, description: label,
               idempotencyKey: `${payerId}-semester_fee-${target.id}-${Date.now()}`,
+              receiverId: isOnBehalf ? target.id : undefined,
+              receiverRoleSnapshot: isOnBehalf ? (target.role || 'Student') : undefined,
+              receiverDepartmentSnapshot: isOnBehalf ? (target.department || undefined) : undefined,
+              balanceBefore: wallet.balance || 0,
+              balanceAfter: freshWallet?.balance ?? null,
+              ipAddress: req.ip,
+              deviceInfo: (req.headers['user-agent'] as string | undefined)?.slice(0, 300),
             },
           });
 
@@ -1640,7 +1701,6 @@ router.post('/semester-fees/pay', authMiddleware, paymentInitLimiter, async (req
             },
           });
 
-          const freshWallet = await txClient.wallet.findUnique({ where: { id: wallet.id } });
           return freshWallet?.balance || 0;
         });
       } catch (e: any) {
@@ -1681,6 +1741,11 @@ router.post('/semester-fees/pay', authMiddleware, paymentInitLimiter, async (req
         amount: total, status: 'Pending', gateway: 'SSLCommerz',
         idempotencyKey: `${payerId}-semester_fee-${target.id}-${Date.now()}`,
         description: label, paymentMethod: 'Online', purpose: 'semester_fee', itemsJson,
+        // Financial Dispute module — known at creation time (unlike the generic SSL flow), so
+        // captured here rather than guessed later when the payment is confirmed.
+        receiverId: isOnBehalf ? target.id : undefined,
+        receiverRoleSnapshot: isOnBehalf ? (target.role || 'Student') : undefined,
+        receiverDepartmentSnapshot: isOnBehalf ? (target.department || undefined) : undefined,
       },
     });
 
@@ -2273,11 +2338,33 @@ router.get('/health', (_req, res) => res.json({ status: 'ok', timestamp: new Dat
 app.use('/api', router);
 app.use('/', router);
 
+// Financial Dispute & Case Management System — separate router files (server/src/routes/disputes/)
+// so this module doesn't grow index.ts further; mounted with the same /api + / double-mount
+// convention as the router above. Existing routes above are untouched.
+app.use('/api', studentDisputeRouter);
+app.use('/', studentDisputeRouter);
+app.use('/api', accountsDisputeRouter);
+app.use('/', accountsDisputeRouter);
+app.use('/api', adminDisputeRouter);
+app.use('/', adminDisputeRouter);
+app.use('/api', libraryDisputeRouter);
+app.use('/', libraryDisputeRouter);
+app.use('/api', shopDisputeRouter);
+app.use('/', shopDisputeRouter);
+app.use('/api', disputeNotificationsRouter);
+app.use('/', disputeNotificationsRouter);
+
 // Fallback JSON 404 handler (ensures HTML is NEVER returned)
 app.use((_req, res) => {
   res.status(404).json({ message: 'API endpoint not found. Please check endpoint URL.' });
 });
 
-app.listen(PORT, () => {
+// Socket.IO needs the raw HTTP server (not just the Express app) to attach its WebSocket upgrade
+// handling — this is the one required change to how the server *starts listening*; no
+// request-handling logic changes.
+const httpServer = http.createServer(app);
+attachRealtime(httpServer);
+
+httpServer.listen(PORT, () => {
   console.log(`🎓 Smart Campus API running on port ${PORT}`);
 });

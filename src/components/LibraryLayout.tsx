@@ -1,9 +1,11 @@
 import { Outlet, NavLink, useNavigate } from 'react-router-dom';
-import { LayoutDashboard, Search, BookX, CheckCircle2, ClipboardCheck, LogOut, BookOpen } from 'lucide-react';
+import { LayoutDashboard, Search, BookX, CheckCircle2, ClipboardCheck, LogOut, BookOpen, ScrollText } from 'lucide-react';
 import { useAuth } from '@/lib/auth-context';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger, DropdownMenuSeparator } from '@/components/ui/dropdown-menu';
 import { motion } from 'framer-motion';
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
+import { getDisputeBadgeCounts } from '@/lib/disputeApi';
+import { useDisputeSocket } from '@/lib/socket';
 
 const navItems = [
   { to: '/library', icon: LayoutDashboard, label: 'Home', end: true },
@@ -11,11 +13,13 @@ const navItems = [
   { to: '/library/fines/assign', icon: BookX, label: 'Impose' },
   { to: '/library/fines/waive', icon: CheckCircle2, label: 'Waiver' },
   { to: '/library/clearance', icon: ClipboardCheck, label: 'Clearance' },
+  { to: '/library/disputes', icon: ScrollText, label: 'Disputes' },
 ];
 
 export default function LibraryLayout() {
   const navigate = useNavigate();
   const { user, isLoading, loginWithRedirect, logout } = useAuth();
+  const [pendingCases, setPendingCases] = useState(0);
 
   useEffect(() => {
     if (!isLoading && !user) loginWithRedirect({ redirectUrl: window.location.href });
@@ -24,6 +28,15 @@ export default function LibraryLayout() {
   useEffect(() => {
     if (user && (user as any).role !== 'Library') navigate('/', { replace: true });
   }, [user, navigate]);
+
+  const fetchBadge = () => getDisputeBadgeCounts().then(r => setPendingCases(r.pendingCases)).catch(() => {});
+  useEffect(() => {
+    if (!user) return;
+    fetchBadge();
+    const interval = setInterval(fetchBadge, 30000);
+    return () => clearInterval(interval);
+  }, [user]);
+  useDisputeSocket(() => fetchBadge());
 
   if (isLoading || !user) return null;
 
@@ -48,7 +61,12 @@ export default function LibraryLayout() {
                 {({ isActive }) => (
                   <>
                     {isActive && <motion.div layoutId="lib-nav" className="absolute inset-0 gradient-primary rounded-lg shadow-lg shadow-primary/20" transition={{ type: 'spring', stiffness: 400, damping: 30 }} />}
-                    <span className="relative z-10 flex items-center gap-2"><item.icon className="w-4 h-4" /> {item.label}</span>
+                    <span className="relative z-10 flex items-center gap-2">
+                      <item.icon className="w-4 h-4" /> {item.label}
+                      {item.label === 'Disputes' && pendingCases > 0 && (
+                        <span className="min-w-[16px] h-4 px-1 rounded-full bg-destructive text-[9px] font-bold text-white flex items-center justify-center">{pendingCases > 99 ? '99+' : pendingCases}</span>
+                      )}
+                    </span>
                   </>
                 )}
               </NavLink>
@@ -86,7 +104,12 @@ export default function LibraryLayout() {
               {({ isActive }) => (
                 <>
                   {isActive && <motion.div layoutId="lib-mobile" className="absolute -top-1 left-1/2 -translate-x-1/2 w-8 h-1 rounded-full gradient-primary" transition={{ type: 'spring', stiffness: 400, damping: 30 }} />}
-                  <item.icon className={`w-5 h-5 transition-all ${isActive ? 'scale-110' : ''}`} />
+                  <div className="relative">
+                    <item.icon className={`w-5 h-5 transition-all ${isActive ? 'scale-110' : ''}`} />
+                    {item.label === 'Disputes' && pendingCases > 0 && (
+                      <span className="absolute -top-1 -right-1.5 min-w-[14px] h-3.5 px-0.5 rounded-full bg-destructive text-[8px] font-bold text-white flex items-center justify-center">{pendingCases > 9 ? '9+' : pendingCases}</span>
+                    )}
+                  </div>
                   <span className="text-[10px] font-semibold">{item.label}</span>
                 </>
               )}

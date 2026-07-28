@@ -1,17 +1,20 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, Fragment } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { motion } from 'framer-motion';
+import { motion, AnimatePresence } from 'framer-motion';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
 import StatusBadge from '@/components/StatusBadge';
-import { Search, Store, PlusCircle, GraduationCap, ShieldAlert, Receipt, RotateCcw, FileWarning, ChevronLeft, ChevronRight, ArrowRightLeft, Download, TrendingUp, TrendingDown } from 'lucide-react';
+import { Search, Store, PlusCircle, GraduationCap, ShieldAlert, Receipt, RotateCcw, FileWarning, ChevronLeft, ChevronRight, ChevronDown, ArrowRightLeft, Download, TrendingUp, TrendingDown } from 'lucide-react';
 import { getTransactions, type GetTransactionsOutputType } from '@/lib/api';
 import { useUser } from '@/lib/user-context';
 import { formatCurrency, TYPE_LABELS } from '@/lib/mock-data';
 import { useDebouncedCallback } from 'use-debounce';
 import { FadeIn } from '@/components/PageTransition';
+import TransactionDetailCard from '@/components/disputes/TransactionDetailCard';
+import DisputeWizard from '@/components/disputes/DisputeWizard';
+import type { TransactionDetail } from '@/lib/disputeApi';
 
 type TxType = GetTransactionsOutputType['transactions'][0];
 
@@ -33,6 +36,8 @@ export default function LedgerPage() {
   const [transactions, setTransactions] = useState<TxType[]>([]);
   const [hasMore, setHasMore] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [wizardTx, setWizardTx] = useState<{ id: string; reference: string; amount: number; type: string } | null>(null);
 
   const fetchTxns = (s: string, type: string, pg: number) => {
     if (!user) return;
@@ -45,6 +50,12 @@ export default function LedgerPage() {
   const debouncedSearch = useDebouncedCallback((val: string) => { setPage(0); fetchTxns(val, typeFilter, 0); }, 400);
 
   useEffect(() => { if (user) fetchTxns(search, typeFilter, page); }, [user, typeFilter, page]);
+
+  const toggleExpand = (id: string) => setExpandedId(prev => (prev === id ? null : id));
+
+  const handleRaiseDispute = (detail: TransactionDetail) => {
+    setWizardTx({ id: detail.transaction.id, reference: detail.transaction.reference, amount: detail.transaction.amount, type: detail.transaction.type });
+  };
 
   return (
     <div className="container mx-auto px-4 sm:px-6 py-6 max-w-5xl">
@@ -94,32 +105,48 @@ export default function LedgerPage() {
                 {transactions.map((tx, i) => {
                   const Icon = typeIcons[tx.type] || Store;
                   const isCredit = tx.direction === 'Credit';
+                  const expanded = expandedId === tx.id;
                   return (
-                    <motion.tr key={tx.id} initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: i * 0.03 }}
-                      className="border-t border-border/30 hover:bg-accent/30 transition-colors">
-                      <td className="px-4 py-3.5">
-                        <div className={`w-9 h-9 rounded-xl flex items-center justify-center ${isCredit ? 'bg-[hsl(var(--chart-3))]/10' : 'bg-accent'}`}>
-                          <Icon className={`w-4 h-4 ${isCredit ? 'text-[hsl(var(--chart-3))]' : 'text-muted-foreground'}`} />
-                        </div>
-                      </td>
-                      <td className="px-4 py-3.5">
-                        <div className="text-foreground font-medium">{tx.description || tx.type}</div>
-                        <div className="text-[11px] text-muted-foreground">{tx.type}{tx.paymentMethod ? ` · ${tx.paymentMethod}` : tx.gateway ? ` · ${tx.gateway === 'SSLCommerz' ? 'Online' : tx.gateway}` : ''}</div>
-                      </td>
-                      <td className="px-4 py-3.5 text-muted-foreground text-xs font-mono">{tx.reference}</td>
-                      <td className={`px-4 py-3.5 text-right font-bold tabular-nums ${isCredit ? 'text-[hsl(var(--chart-3))]' : 'text-foreground'}`}>
-                        <span className="flex items-center justify-end gap-1">
-                          {isCredit ? <TrendingUp className="w-3 h-3" /> : <TrendingDown className="w-3 h-3 text-muted-foreground" />}
-                          {isCredit ? '+' : '−'}{formatCurrency(tx.amount)}
-                        </span>
-                      </td>
-                      <td className="px-4 py-3.5 text-center"><StatusBadge status={tx.status.toLowerCase()} /></td>
-                      <td className="px-4 py-3.5">
-                        <button onClick={() => navigate(`/student/receipt?txId=${tx.id}`)} className="p-2 rounded-lg hover:bg-accent transition-colors" title="Receipt">
-                          <Download className="w-3.5 h-3.5 text-muted-foreground" />
-                        </button>
-                      </td>
-                    </motion.tr>
+                    <Fragment key={tx.id}>
+                      <motion.tr initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: i * 0.03 }}
+                        onClick={() => tx.status === 'Success' && toggleExpand(tx.id)}
+                        className={`border-t border-border/30 hover:bg-accent/30 transition-colors ${tx.status === 'Success' ? 'cursor-pointer' : ''}`}>
+                        <td className="px-4 py-3.5">
+                          <div className={`w-9 h-9 rounded-xl flex items-center justify-center ${isCredit ? 'bg-[hsl(var(--chart-3))]/10' : 'bg-accent'}`}>
+                            <Icon className={`w-4 h-4 ${isCredit ? 'text-[hsl(var(--chart-3))]' : 'text-muted-foreground'}`} />
+                          </div>
+                        </td>
+                        <td className="px-4 py-3.5">
+                          <div className="text-foreground font-medium flex items-center gap-1.5">
+                            {tx.description || tx.type}
+                            {tx.status === 'Success' && <ChevronDown className={`w-3.5 h-3.5 text-muted-foreground transition-transform ${expanded ? 'rotate-180' : ''}`} />}
+                          </div>
+                          <div className="text-[11px] text-muted-foreground">{tx.type}{tx.paymentMethod ? ` · ${tx.paymentMethod}` : tx.gateway ? ` · ${tx.gateway === 'SSLCommerz' ? 'Online' : tx.gateway}` : ''}</div>
+                        </td>
+                        <td className="px-4 py-3.5 text-muted-foreground text-xs font-mono">{tx.reference}</td>
+                        <td className={`px-4 py-3.5 text-right font-bold tabular-nums ${isCredit ? 'text-[hsl(var(--chart-3))]' : 'text-foreground'}`}>
+                          <span className="flex items-center justify-end gap-1">
+                            {isCredit ? <TrendingUp className="w-3 h-3" /> : <TrendingDown className="w-3 h-3 text-muted-foreground" />}
+                            {isCredit ? '+' : '−'}{formatCurrency(tx.amount)}
+                          </span>
+                        </td>
+                        <td className="px-4 py-3.5 text-center"><StatusBadge status={tx.status.toLowerCase()} /></td>
+                        <td className="px-4 py-3.5">
+                          <button onClick={(e) => { e.stopPropagation(); navigate(`/student/receipt?txId=${tx.id}`); }} className="p-2 rounded-lg hover:bg-accent transition-colors" title="Receipt">
+                            <Download className="w-3.5 h-3.5 text-muted-foreground" />
+                          </button>
+                        </td>
+                      </motion.tr>
+                      {expanded && (
+                        <tr>
+                          <td colSpan={6} className="px-4 pb-4">
+                            <AnimatePresence>
+                              <TransactionDetailCard transactionId={tx.id} onRaiseDispute={handleRaiseDispute} />
+                            </AnimatePresence>
+                          </td>
+                        </tr>
+                      )}
+                    </Fragment>
                   );
                 })}
               </tbody>
@@ -131,27 +158,34 @@ export default function LedgerPage() {
             {transactions.map((tx, i) => {
               const Icon = typeIcons[tx.type] || Store;
               const isCredit = tx.direction === 'Credit';
+              const expanded = expandedId === tx.id;
               return (
-                <motion.button key={tx.id} initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.03 }}
-                  onClick={() => navigate(`/student/receipt?txId=${tx.id}`)}
-                  className="p-4 rounded-xl border border-border/60 bg-card text-left hover:border-primary/20 transition-colors">
-                  <div className="flex items-center justify-between mb-2">
-                    <div className="flex items-center gap-2.5">
-                      <div className={`w-9 h-9 rounded-xl flex items-center justify-center ${isCredit ? 'bg-[hsl(var(--chart-3))]/10' : 'bg-accent'}`}>
-                        <Icon className={`w-4 h-4 ${isCredit ? 'text-[hsl(var(--chart-3))]' : 'text-muted-foreground'}`} />
+                <div key={tx.id}>
+                  <motion.button initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.03 }}
+                    onClick={() => tx.status === 'Success' ? toggleExpand(tx.id) : navigate(`/student/receipt?txId=${tx.id}`)}
+                    className="w-full p-4 rounded-xl border border-border/60 bg-card text-left hover:border-primary/20 transition-colors">
+                    <div className="flex items-center justify-between mb-2">
+                      <div className="flex items-center gap-2.5">
+                        <div className={`w-9 h-9 rounded-xl flex items-center justify-center ${isCredit ? 'bg-[hsl(var(--chart-3))]/10' : 'bg-accent'}`}>
+                          <Icon className={`w-4 h-4 ${isCredit ? 'text-[hsl(var(--chart-3))]' : 'text-muted-foreground'}`} />
+                        </div>
+                        <div>
+                          <div className="text-sm font-semibold text-foreground">{tx.description || tx.type}</div>
+                          <div className="text-[10px] text-muted-foreground font-mono">{tx.reference}</div>
+                        </div>
                       </div>
-                      <div>
-                        <div className="text-sm font-semibold text-foreground">{tx.description || tx.type}</div>
-                        <div className="text-[10px] text-muted-foreground font-mono">{tx.reference}</div>
-                      </div>
+                      <StatusBadge status={tx.status.toLowerCase()} />
                     </div>
-                    <StatusBadge status={tx.status.toLowerCase()} />
-                  </div>
-                  <div className={`text-right font-bold text-sm tabular-nums flex items-center justify-end gap-1 ${isCredit ? 'text-[hsl(var(--chart-3))]' : 'text-foreground'}`}>
-                    {isCredit ? <TrendingUp className="w-3 h-3" /> : <TrendingDown className="w-3 h-3 text-muted-foreground" />}
-                    {isCredit ? '+' : '−'}{formatCurrency(tx.amount)}
-                  </div>
-                </motion.button>
+                    <div className="flex items-center justify-between">
+                      <div className={`font-bold text-sm tabular-nums flex items-center gap-1 ${isCredit ? 'text-[hsl(var(--chart-3))]' : 'text-foreground'}`}>
+                        {isCredit ? <TrendingUp className="w-3 h-3" /> : <TrendingDown className="w-3 h-3 text-muted-foreground" />}
+                        {isCredit ? '+' : '−'}{formatCurrency(tx.amount)}
+                      </div>
+                      {tx.status === 'Success' && <ChevronDown className={`w-3.5 h-3.5 text-muted-foreground transition-transform ${expanded ? 'rotate-180' : ''}`} />}
+                    </div>
+                  </motion.button>
+                  {expanded && <AnimatePresence><TransactionDetailCard transactionId={tx.id} onRaiseDispute={handleRaiseDispute} /></AnimatePresence>}
+                </div>
               );
             })}
           </div>
@@ -169,6 +203,16 @@ export default function LedgerPage() {
             </div>
           </div>
         </>
+      )}
+
+      {wizardTx && (
+        <DisputeWizard
+          open={!!wizardTx}
+          onOpenChange={(v) => !v && setWizardTx(null)}
+          transactionId={wizardTx.id}
+          transactionSummary={wizardTx}
+          onSubmitted={() => fetchTxns(search, typeFilter, page)}
+        />
       )}
     </div>
   );

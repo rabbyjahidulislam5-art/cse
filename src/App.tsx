@@ -27,6 +27,8 @@ import WithdrawPage from './pages/student/WithdrawPage';
 import PaymentResultPage from './pages/student/PaymentResultPage';
 import NotificationsPage from './pages/student/NotificationsPage';
 import ReceiptPage from './pages/student/ReceiptPage';
+import DisputesPage from './pages/student/DisputesPage';
+import DisputeDetailPage from './pages/student/DisputeDetailPage';
 
 // Admin pages
 import AdminHomePage from './pages/admin/AdminHomePage';
@@ -34,6 +36,8 @@ import ShopManagementPage from './pages/admin/ShopManagementPage';
 import FinesPage from './pages/admin/FinesPage';
 import AuditLogsPage from './pages/admin/AuditLogsPage';
 import StaffAccountsPage from './pages/admin/StaffAccountsPage';
+import DisputeOversightPage from './pages/admin/DisputeOversightPage';
+import AdminDisputeDetailPage from './pages/admin/AdminDisputeDetailPage';
 
 // Library pages
 import LibraryHomePage from './pages/library/LibraryHomePage';
@@ -41,18 +45,25 @@ import StudentLookupPage from './pages/library/StudentLookupPage';
 import FineImpositionPage from './pages/library/FineImpositionPage';
 import FineWaiverPage from './pages/library/FineWaiverPage';
 import ClearanceStatusPage from './pages/library/ClearanceStatusPage';
+import LibraryDisputesPage from './pages/library/LibraryDisputesPage';
+import LibraryDisputeDetailPage from './pages/library/LibraryDisputeDetailPage';
 
 // Accounts pages
 import AccountsHomePage from './pages/accounts/AccountsHomePage';
 import SemesterFeePushPage from './pages/accounts/SemesterFeePushPage';
 import FeeAdjustmentsPage from './pages/accounts/FeeAdjustmentsPage';
 import CollectionAnalyticsPage from './pages/accounts/CollectionAnalyticsPage';
+import DisputesDashboardPage from './pages/accounts/DisputesDashboardPage';
+import DisputeCaseDetailPage from './pages/accounts/DisputeCaseDetailPage';
+import DisputeReportsPage from './pages/accounts/DisputeReportsPage';
 
 // Shop pages
 import ShopHomePage from './pages/shop/ShopHomePage';
 import ShopQrPage from './pages/shop/ShopQrPage';
 import ShopNotificationsPage from './pages/shop/ShopNotificationsPage';
 import ShopSalesLedgerPage from './pages/shop/ShopSalesLedgerPage';
+import ShopDisputesPage from './pages/shop/ShopDisputesPage';
+import ShopDisputeDetailPage from './pages/shop/ShopDisputeDetailPage';
 
 export default function App() {
   return (
@@ -76,6 +87,8 @@ export default function App() {
           <Route path="payment-result" element={<PaymentResultPage />} />
           <Route path="notifications" element={<NotificationsPage />} />
           <Route path="receipt" element={<ReceiptPage />} />
+          <Route path="disputes" element={<DisputesPage />} />
+          <Route path="disputes/detail" element={<DisputeDetailPage />} />
         </Route>
 
         {/* Admin Office Dashboard */}
@@ -85,6 +98,8 @@ export default function App() {
           <Route path="fines" element={<FinesPage />} />
           <Route path="audit" element={<AuditLogsPage />} />
           <Route path="staff" element={<StaffAccountsPage />} />
+          <Route path="disputes" element={<DisputeOversightPage />} />
+          <Route path="disputes/detail" element={<AdminDisputeDetailPage />} />
         </Route>
 
         {/* Library Dashboard */}
@@ -94,6 +109,8 @@ export default function App() {
           <Route path="fines/assign" element={<FineImpositionPage />} />
           <Route path="fines/waive" element={<FineWaiverPage />} />
           <Route path="clearance" element={<ClearanceStatusPage />} />
+          <Route path="disputes" element={<LibraryDisputesPage />} />
+          <Route path="disputes/detail" element={<LibraryDisputeDetailPage />} />
         </Route>
 
         {/* Accounts Office Dashboard */}
@@ -102,6 +119,9 @@ export default function App() {
           <Route path="fee-push" element={<SemesterFeePushPage />} />
           <Route path="adjustments" element={<FeeAdjustmentsPage />} />
           <Route path="analytics" element={<CollectionAnalyticsPage />} />
+          <Route path="disputes" element={<DisputesDashboardPage />} />
+          <Route path="disputes/detail" element={<DisputeCaseDetailPage />} />
+          <Route path="disputes/reports" element={<DisputeReportsPage />} />
         </Route>
 
         {/* Shop Dashboard */}
@@ -110,6 +130,8 @@ export default function App() {
           <Route path="qr" element={<ShopQrPage />} />
           <Route path="notifications" element={<ShopNotificationsPage />} />
           <Route path="ledger" element={<ShopSalesLedgerPage />} />
+          <Route path="disputes" element={<ShopDisputesPage />} />
+          <Route path="disputes/detail" element={<ShopDisputeDetailPage />} />
         </Route>
 
         <Route path="*" element={<Navigate to="/" replace />} />
