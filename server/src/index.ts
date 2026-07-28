@@ -47,10 +47,9 @@ async function hashPin(pin: string, salt: string): Promise<string> {
 // ─── AUTH ROUTES ───
 
 // How long we're willing to hold the HTTP response open waiting for the OTP email to actually
-// send before responding anyway. With the pooled/IPv4/timeout-bounded transporter (see
-// server/src/lib/email.ts) a send normally takes ~1-3s (warm connection) or up to ~5-6s (cold,
-// first send after boot) — 6s gives real sends room to finish and still return the true
-// success/failure to the student in the common case, without ever reproducing the old 30-60s hang.
+// send before responding anyway. Resend (see server/src/lib/email.ts) sends over HTTPS and
+// normally completes in well under a second — this budget is a safety net against a slow or
+// unreachable Resend API, not something normal sends are expected to hit.
 const OTP_EMAIL_RESPONSE_BUDGET_MS = 6000;
 
 // Send OTP for student registration
