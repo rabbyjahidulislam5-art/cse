@@ -1,44 +1,81 @@
-import nodemailer from 'nodemailer';
+import nodemailer, { type Transporter } from 'nodemailer';
 import type SMTPPool from 'nodemailer/lib/smtp-pool';
+import dns from 'dns';
 
-// `family` (force IPv4) is honored by nodemailer at runtime — it's forwarded straight through to
-// net.connect — but isn't part of the @types/nodemailer Options surface.
-type TransportOptions = SMTPPool.Options & { family?: number };
+// `family` and `servername` are honored by nodemailer at runtime (forwarded through to
+// net/tls.connect and used for SNI respectively) but aren't part of the @types/nodemailer surface.
+type TransportOptions = SMTPPool.Options & { family?: number; servername?: string };
 
-// `nodemailer.createTransport()` doesn't throw if auth is missing — it only fails when a send is
-// actually attempted — so this is safe to construct even before SMTP_USER/SMTP_PASS are set.
-const transportConfig: TransportOptions = {
-  host: process.env.SMTP_HOST || 'smtp.gmail.com',
-  port: parseInt(process.env.SMTP_PORT || '587'),
-  secure: false,
-  auth: {
-    user: process.env.SMTP_USER,
-    pass: process.env.SMTP_PASS,
-  },
-  family: 4,
-  pool: true,
-  maxConnections: 5,
-  maxMessages: 100,
-  // Note: a prior Render deploy failed every send with ETIMEDOUT at the raw TCP-connect stage
-  // (before EHLO/AUTH), even with family:4 forced — that looked like Render's network being
-  // unable to reach smtp.gmail.com:587 at all, independent of which account's credentials were
-  // used. If that recurs with these credentials, these timeouts bound how long a request waits
-  // (paired with OTP_EMAIL_RESPONSE_BUDGET_MS in index.ts) rather than hanging for minutes.
-  connectionTimeout: 15_000,
-  greetingTimeout: 15_000,
-  socketTimeout: 20_000,
-};
-const transporter = nodemailer.createTransport(transportConfig as SMTPPool.Options);
+const SMTP_HOSTNAME = process.env.SMTP_HOST || 'smtp.gmail.com';
+const SMTP_PORT = parseInt(process.env.SMTP_PORT || '465');
+const SMTP_SECURE = SMTP_PORT === 465; // implicit TLS on 465, STARTTLS on 587/others
 
-// One-time check at boot (not per-request) so a broken SMTP config is visible in the logs
-// immediately instead of surfacing late on a student's first registration attempt.
-if (process.env.SMTP_USER && process.env.SMTP_PASS) {
-  transporter.verify()
-    .then(() => console.log('[Email] SMTP transporter verified and ready.'))
-    .catch(err => console.error('[Email] SMTP transporter verification FAILED at startup:', err.message));
-} else {
-  console.warn('[Email] SMTP_USER/SMTP_PASS not set — email sending will fail until configured.');
+// nodemailer 9's own hostname resolver (lib/shared/index.js resolveHostname) resolves BOTH IPv4
+// and IPv6 addresses for SMTP_HOST and picks one AT RANDOM — `family: 4` does NOT filter that
+// choice (confirmed by reading the source; it concatenates ipv4+ipv6 results and does
+// `addresses[Math.floor(Math.random() * addresses.length)]`). That's why Render logs showed two
+// different failures on the same config: a plain timeout on some boots (random IPv4 pick) and an
+// explicit `ENETUNREACH ...:587` on others (random IPv6 pick — Render's containers have no real
+// IPv6 route at all). Passing a literal IP as `host` makes nodemailer's resolver a no-op (it
+// special-cases `net.isIP(host)`), so we resolve the hostname to a real IPv4 address ourselves via
+// Node's DNS resolver and hand nodemailer that literal address instead — this guarantees IPv4,
+// regardless of nodemailer's internal (buggy) family selection. `servername` is set explicitly
+// so TLS/SNI and certificate validation still target the real hostname, not the raw IP.
+let transporter: Transporter | null = null;
+let transporterReady: Promise<void> = Promise.resolve();
+
+function buildTransporter(ipv4Address: string): Transporter {
+  const transportConfig: TransportOptions = {
+    host: ipv4Address,
+    servername: SMTP_HOSTNAME,
+    port: SMTP_PORT,
+    secure: SMTP_SECURE,
+    auth: {
+      user: process.env.SMTP_USER,
+      pass: process.env.SMTP_PASS,
+    },
+    pool: true,
+    maxConnections: 5,
+    maxMessages: 100,
+    connectionTimeout: 15_000,
+    greetingTimeout: 15_000,
+    socketTimeout: 20_000,
+  };
+  return nodemailer.createTransport(transportConfig as SMTPPool.Options);
 }
+
+async function initTransporter(): Promise<void> {
+  try {
+    // dns.lookup() (OS-level getaddrinfo) rather than dns.resolve4() (raw DNS-server query, which
+    // needs a directly reachable nameserver and can fail in restrictive/VPN'd networks even when
+    // normal resolution works fine) — this is the same call used to confirm family:4 behavior
+    // during the original profiling.
+    const addresses = await dns.promises.lookup(SMTP_HOSTNAME, { family: 4, all: true });
+    if (!addresses.length) throw new Error(`No IPv4 addresses found for ${SMTP_HOSTNAME}`);
+    const chosen = addresses[Math.floor(Math.random() * addresses.length)].address;
+    transporter = buildTransporter(chosen);
+
+    if (process.env.SMTP_USER && process.env.SMTP_PASS) {
+      await transporter.verify();
+      console.log(`[Email] SMTP transporter verified and ready (${SMTP_HOSTNAME} -> ${chosen}:${SMTP_PORT}, IPv4-pinned).`);
+    } else {
+      console.warn('[Email] SMTP_USER/SMTP_PASS not set — email sending will fail until configured.');
+    }
+  } catch (err: any) {
+    console.error('[Email] SMTP transporter setup FAILED at startup:', err.message);
+  }
+}
+transporterReady = initTransporter();
+
+// Gmail's SMTP front-end IPs can rotate over a long-running process — re-resolve periodically so
+// a long-lived server doesn't end up pinned to a retired address. Cheap relative to email volume.
+const REFRESH_INTERVAL_MS = 30 * 60 * 1000;
+setInterval(() => {
+  const previous = transporter;
+  transporterReady = initTransporter().then(() => {
+    if (previous && previous !== transporter) previous.close();
+  });
+}, REFRESH_INTERVAL_MS).unref();
 
 interface EmailBody {
   type: 'text' | 'divider';
@@ -50,6 +87,11 @@ interface EmailBody {
 export async function sendEmail(to: string, subject: string, body: EmailBody[]) {
   if (!process.env.SMTP_USER || !process.env.SMTP_PASS) {
     throw new Error('Email service is not configured (SMTP_USER/SMTP_PASS missing on the server).');
+  }
+
+  await transporterReady.catch(() => {});
+  if (!transporter) {
+    throw new Error('Email transporter failed to initialize (DNS resolution or SMTP setup failed at startup — check server logs).');
   }
 
   const htmlParts = body.map(b => {
