@@ -4,7 +4,12 @@ import { Resend } from 'resend';
 // at the TCP-connect stage from Render, even after forcing IPv4 and pooling connections — Render's
 // outbound network can't reliably reach smtp.gmail.com:587 at all. Resend sends over HTTPS, which
 // isn't subject to that class of port blocking.
-const resend = new Resend(process.env.RESEND_API_KEY);
+//
+// `new Resend(key)` throws synchronously if `key` is falsy — and this module is imported at the
+// top of index.ts, so an unset RESEND_API_KEY would otherwise crash the *entire* server at boot,
+// not just email sending. Guard it the same way the old SMTP config was guarded: degrade to a
+// clear per-request error instead of taking the whole app down.
+const resend = process.env.RESEND_API_KEY ? new Resend(process.env.RESEND_API_KEY) : null;
 
 // Sandbox sender until a custom domain is verified in Resend's dashboard — until then, Resend
 // only delivers to the email address the account was signed up with (anti-abuse restriction on
@@ -28,7 +33,7 @@ interface EmailBody {
 // Throws on failure — callers decide whether a failed send is critical (OTP: must surface
 // to the user) or best-effort (welcome/receipt notifications: safe to catch and ignore).
 export async function sendEmail(to: string, subject: string, body: EmailBody[]) {
-  if (!process.env.RESEND_API_KEY) {
+  if (!resend) {
     throw new Error('Email service is not configured (RESEND_API_KEY missing on the server).');
   }
 
