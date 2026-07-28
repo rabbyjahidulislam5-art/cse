@@ -1,12 +1,14 @@
 import { useEffect, useState } from 'react';
 import { motion } from 'framer-motion';
-import { Wallet, Eye, EyeOff, TrendingUp } from 'lucide-react';
+import { Wallet, Eye, EyeOff, TrendingUp, PlusCircle, ArrowUpRight } from 'lucide-react';
 
 interface WalletCardProps {
   balance: number;
+  onAddMoney?: () => void;
+  onWithdraw?: () => void;
 }
 
-export default function WalletCard({ balance }: WalletCardProps) {
+export default function WalletCard({ balance, onAddMoney, onWithdraw }: WalletCardProps) {
   const [displayed, setDisplayed] = useState(0);
   const [hidden, setHidden] = useState(false);
 
@@ -30,15 +32,15 @@ export default function WalletCard({ balance }: WalletCardProps) {
       initial={{ opacity: 0, scale: 0.95 }}
       animate={{ opacity: 1, scale: 1 }}
       transition={{ duration: 0.4 }}
-      className="relative overflow-hidden rounded-2xl p-6 sm:p-7"
+      className="relative overflow-hidden rounded-2xl p-6 sm:p-7 flex flex-col justify-between"
       style={{
         background: 'linear-gradient(135deg, hsl(42, 82%, 52%) 0%, hsl(38, 85%, 42%) 50%, hsl(32, 80%, 35%) 100%)',
       }}
     >
       {/* Decorative elements */}
-      <div className="absolute top-0 right-0 w-48 h-48 rounded-full bg-white/[0.06] -translate-y-1/3 translate-x-1/4" />
-      <div className="absolute bottom-0 left-0 w-32 h-32 rounded-full bg-white/[0.04] translate-y-1/2 -translate-x-1/4" />
-      <div className="absolute top-1/2 right-1/4 w-20 h-20 rounded-full bg-white/[0.03]" />
+      <div className="absolute top-0 right-0 w-48 h-48 rounded-full bg-white/[0.06] -translate-y-1/3 translate-x-1/4 pointer-events-none" />
+      <div className="absolute bottom-0 left-0 w-32 h-32 rounded-full bg-white/[0.04] translate-y-1/2 -translate-x-1/4 pointer-events-none" />
+      <div className="absolute top-1/2 right-1/4 w-20 h-20 rounded-full bg-white/[0.03] pointer-events-none" />
 
       {/* Card chip */}
       <div className="absolute top-6 right-6 sm:top-7 sm:right-7">
@@ -47,8 +49,8 @@ export default function WalletCard({ balance }: WalletCardProps) {
         </div>
       </div>
 
-      <div className="relative z-10">
-        <div className="flex items-center gap-2 mb-4">
+      <div className="relative z-10 mb-4">
+        <div className="flex items-center gap-2 mb-3">
           <Wallet className="w-4.5 h-4.5 text-primary-foreground/60" />
           <span className="text-sm text-primary-foreground/60 font-medium tracking-wide uppercase text-[11px]">Campus Wallet</span>
         </div>
@@ -67,6 +69,29 @@ export default function WalletCard({ balance }: WalletCardProps) {
           <span className="text-[11px] text-primary-foreground/50 font-medium">Available Balance</span>
         </div>
       </div>
+
+      {(onAddMoney || onWithdraw) && (
+        <div className="relative z-10 flex gap-2 pt-2">
+          {onAddMoney && (
+            <button
+              onClick={onAddMoney}
+              className="flex-1 flex items-center justify-center gap-1.5 py-2 px-3 rounded-xl bg-white/15 hover:bg-white/25 text-white font-semibold text-xs transition-colors backdrop-blur-sm"
+            >
+              <PlusCircle className="w-3.5 h-3.5" />
+              Add Money
+            </button>
+          )}
+          {onWithdraw && (
+            <button
+              onClick={onWithdraw}
+              className="flex-1 flex items-center justify-center gap-1.5 py-2 px-3 rounded-xl bg-black/20 hover:bg-black/30 text-white/90 font-semibold text-xs transition-colors backdrop-blur-sm"
+            >
+              <ArrowUpRight className="w-3.5 h-3.5" />
+              Withdraw
+            </button>
+          )}
+        </div>
+      )}
     </motion.div>
   );
 }

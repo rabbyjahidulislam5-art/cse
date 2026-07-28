@@ -1,10 +1,11 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
-import { ScanLine, FileWarning, ArrowRightLeft, Store, PlusCircle, GraduationCap, ShieldAlert, ArrowRight, RotateCcw, Lock, TrendingUp, TrendingDown, Receipt } from 'lucide-react';
+import { ScanLine, FileWarning, ArrowRightLeft, Store, PlusCircle, GraduationCap, ShieldAlert, ArrowRight, RotateCcw, Lock, TrendingUp, TrendingDown, Receipt, ArrowUpRight, Wallet } from 'lucide-react';
 import { Skeleton } from '@/components/ui/skeleton';
 import WalletCard from '@/components/WalletCard';
 import PinDialog from '@/components/PinDialog';
+import AddMoneyModal from '@/components/AddMoneyModal';
 import { useUser } from '@/lib/user-context';
 import { getStudentDashboard, type GetStudentDashboardOutputType } from '@/lib/api';
 import { formatCurrency } from '@/lib/mock-data';
@@ -15,14 +16,8 @@ type TxType = GetStudentDashboardOutputType['recentTransactions'][0];
 const typeIcons: Record<string, typeof Store> = {
   'Shop Payment': Store, 'Deposit': PlusCircle, 'Fee Payment': GraduationCap,
   'Fine Payment': ShieldAlert, 'Refund': RotateCcw, 'Mass Payment': FileWarning,
-  'Top Up': Receipt, 'Transfer Sent': ArrowRightLeft, 'Transfer Received': PlusCircle,
+  'Top Up': Receipt, 'Withdrawal': ArrowUpRight, 'Transfer Sent': ArrowRightLeft, 'Transfer Received': PlusCircle,
 };
-
-const quickActions = [
-  { label: 'Scan & Pay', icon: ScanLine, path: '/student/scan', color: 'from-secondary/15 to-secondary/5', iconColor: 'text-secondary' },
-  { label: 'Transfer', icon: ArrowRightLeft, path: '/student/transfer', color: 'from-[hsl(var(--chart-3))]/15 to-[hsl(var(--chart-3))]/5', iconColor: 'text-[hsl(var(--chart-3))]' },
-  { label: 'Dues', icon: FileWarning, path: '/student/dues', color: 'from-[hsl(var(--chart-4))]/15 to-[hsl(var(--chart-4))]/5', iconColor: 'text-[hsl(var(--chart-4))]' },
-];
 
 function TransactionRow({ tx, onReceipt, index }: { tx: TxType; onReceipt: (id: string) => void; index: number }) {
   const Icon = typeIcons[tx.type] || Store;
@@ -58,12 +53,20 @@ export default function HomePage() {
   const navigate = useNavigate();
   const { user, wallet, loading, refreshDashboard } = useUser();
   const [pinOpen, setPinOpen] = useState(false);
+  const [addMoneyOpen, setAddMoneyOpen] = useState(false);
   const [recentTx, setRecentTx] = useState<TxType[]>([]);
 
   useEffect(() => {
     if (!user) return;
     getStudentDashboard({}).then(data => setRecentTx(data.recentTransactions));
   }, [user]);
+
+  const quickActions = [
+    { label: 'Scan & Pay', icon: ScanLine, onClick: () => navigate('/student/scan'), color: 'from-secondary/15 to-secondary/5', iconColor: 'text-secondary' },
+    { label: 'Add Money', icon: PlusCircle, onClick: () => setAddMoneyOpen(true), color: 'from-primary/15 to-primary/5', iconColor: 'text-primary' },
+    { label: 'Transfer', icon: ArrowRightLeft, onClick: () => navigate('/student/transfer'), color: 'from-[hsl(var(--chart-3))]/15 to-[hsl(var(--chart-3))]/5', iconColor: 'text-[hsl(var(--chart-3))]' },
+    { label: 'Withdraw', icon: ArrowUpRight, onClick: () => navigate('/student/withdraw'), color: 'from-[hsl(var(--chart-4))]/15 to-[hsl(var(--chart-4))]/5', iconColor: 'text-[hsl(var(--chart-4))]' },
+  ];
 
   if (loading) {
     return (
@@ -107,20 +110,24 @@ export default function HomePage() {
       {/* Wallet + Quick Actions */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 sm:gap-6 mb-8">
         <FadeIn delay={0.1}>
-          <WalletCard balance={wallet?.balance || 0} />
+          <WalletCard
+            balance={wallet?.balance || 0}
+            onAddMoney={() => setAddMoneyOpen(true)}
+            onWithdraw={() => navigate('/student/withdraw')}
+          />
         </FadeIn>
         <FadeIn delay={0.15} className="lg:col-span-2">
-          <div className="grid grid-cols-3 gap-3 h-full">
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 h-full">
             {quickActions.map((qa, i) => (
               <motion.button
                 key={qa.label}
                 initial={{ opacity: 0, y: 16 }}
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ delay: 0.2 + i * 0.06 }}
-                onClick={() => navigate(qa.path)}
-                className="flex flex-col items-center justify-center gap-3 p-5 rounded-2xl border border-border/60 bg-card hover:border-primary/20 transition-all group active:scale-[0.97]"
+                onClick={qa.onClick}
+                className="flex flex-col items-center justify-center gap-3 p-4 sm:p-5 rounded-2xl border border-border/60 bg-card hover:border-primary/20 transition-all group active:scale-[0.97]"
               >
-                <div className={`w-12 h-12 rounded-xl bg-gradient-to-br ${qa.color} flex items-center justify-center group-hover:scale-105 transition-transform`}>
+                <div className={`w-11 h-11 rounded-xl bg-gradient-to-br ${qa.color} flex items-center justify-center group-hover:scale-105 transition-transform`}>
                   <qa.icon className={`w-5 h-5 ${qa.iconColor}`} />
                 </div>
                 <span className="text-xs font-semibold text-foreground">{qa.label}</span>
@@ -152,6 +159,7 @@ export default function HomePage() {
       </FadeIn>
 
       <PinDialog open={pinOpen} onOpenChange={setPinOpen} mode="set" onSuccess={() => refreshDashboard()} />
+      <AddMoneyModal open={addMoneyOpen} onOpenChange={setAddMoneyOpen} />
     </div>
   );
 }

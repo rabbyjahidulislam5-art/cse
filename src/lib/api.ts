@@ -247,10 +247,22 @@ export const payShop = (input: { shopId: string; shopName: string; amount: numbe
 export const validateQrMerchant = (input: { qrData: string }) =>
   apiCall<ValidateQrMerchantOutputType>('/shops/validate-qr', input);
 
-export type SslPayItem = { id: string; source: 'semester' | 'library' | 'admin' | 'payLater' | 'shop'; amount: number; label: string };
+export type SslPayItem = { id: string; source: 'semester' | 'library' | 'admin' | 'payLater' | 'shop' | 'wallet'; amount: number; label: string };
 
-export const initSSLPayment = (input: { items: SslPayItem[]; purpose: 'semester_fee' | 'library_fine' | 'admin_fine' | 'pay_later' | 'shop_payment' | 'mass_pay'; itemLabel?: string; otpId?: string }) =>
+export const initSSLPayment = (input: { items: SslPayItem[]; purpose: 'semester_fee' | 'library_fine' | 'admin_fine' | 'pay_later' | 'shop_payment' | 'mass_pay' | 'wallet_topup'; itemLabel?: string; amount?: number; otpId?: string }) =>
   apiCall<{ gatewayUrl: string; transactionRef: string; sessionKey: string }>('/payment/init', input);
+
+export const initWalletTopUp = (input: { amount: number; otpId?: string }) =>
+  apiCall<{ gatewayUrl: string; transactionRef: string; sessionKey: string }>('/payment/init', {
+    purpose: 'wallet_topup',
+    amount: input.amount,
+    items: [],
+    itemLabel: `Wallet Top-Up — ৳${input.amount.toLocaleString()}`,
+    otpId: input.otpId,
+  });
+
+export const withdrawFromWallet = (input: { amount: number; mobileNumber: string; provider?: string }) =>
+  apiCall<{ success: boolean; newBalance: number; transactionId: string; reference: string; message: string }>('/wallet/withdraw', input);
 
 // Thresholds mirrored from server/src/index.ts's PIN_REQUIRED_THRESHOLD / OTP_REQUIRED_THRESHOLD —
 // used client-side purely for UX (showing the right dialog before the redirect); the server enforces

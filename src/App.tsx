@@ -23,6 +23,7 @@ import LedgerPage from './pages/student/LedgerPage';
 import ProfilePage from './pages/student/ProfilePage';
 import QrScannerPage from './pages/student/QrScannerPage';
 import TransferPage from './pages/student/TransferPage';
+import WithdrawPage from './pages/student/WithdrawPage';
 import PaymentResultPage from './pages/student/PaymentResultPage';
 import NotificationsPage from './pages/student/NotificationsPage';
 import ReceiptPage from './pages/student/ReceiptPage';
@@ -71,6 +72,7 @@ export default function App() {
           <Route path="profile" element={<ProfilePage />} />
           <Route path="scan" element={<QrScannerPage />} />
           <Route path="transfer" element={<TransferPage />} />
+          <Route path="withdraw" element={<WithdrawPage />} />
           <Route path="payment-result" element={<PaymentResultPage />} />
           <Route path="notifications" element={<NotificationsPage />} />
           <Route path="receipt" element={<ReceiptPage />} />
