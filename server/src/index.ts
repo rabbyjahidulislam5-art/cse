@@ -16,7 +16,11 @@ const PORT = process.env.PORT || 4000;
 
 // Middleware
 app.use(helmet({ crossOriginResourcePolicy: false }));
-app.use(cors({ origin: '*', credentials: true }));
+// Auth is Bearer-token only (JWT in the Authorization header) — no cookies are ever set or read,
+// so `credentials: true` here was inconsistent with an open `origin: '*'` (browsers reject that
+// combination for credentialed requests). Since no request ever uses `credentials: 'include'`,
+// this was harmless in practice, but corrected for a technically-valid CORS configuration.
+app.use(cors({ origin: '*', credentials: false }));
 app.use(express.json({ limit: '10mb' }));
 app.use('/uploads', express.static(path.join(__dirname, '../uploads')));
 
@@ -79,11 +83,17 @@ router.post('/auth/register-otp', async (req, res) => {
       },
     });
 
-    await sendEmail(lowerEmail, 'Verification Code — Smart Campus EWU', [
-      { type: 'text', content: `<strong>Welcome to Smart Campus!</strong>\n\nYour registration verification code is:\n\n<strong style="font-size: 28px; letter-spacing: 8px; color: #f59e0b;">${code}</strong>\n\nThis code is valid for 5 minutes.\nIf you did not request this code, please ignore this email.` },
-      { type: 'divider' },
-      { type: 'text', content: '🎓 East West University — Smart Campus Digital Wallet' },
-    ]);
+    try {
+      await sendEmail(lowerEmail, 'Verification Code — Smart Campus EWU', [
+        { type: 'text', content: `<strong>Welcome to Smart Campus!</strong>\n\nYour registration verification code is:\n\n<strong style="font-size: 28px; letter-spacing: 8px; color: #f59e0b;">${code}</strong>\n\nThis code is valid for 5 minutes.\nIf you did not request this code, please ignore this email.` },
+        { type: 'divider' },
+        { type: 'text', content: '🎓 East West University — Smart Campus Digital Wallet' },
+      ]);
+    } catch (emailErr: any) {
+      // Don't leave a dangling OTP the student never received
+      await prisma.otpCode.delete({ where: { id: otp.id } }).catch(() => {});
+      return res.status(502).json({ message: `Could not send the verification email: ${emailErr.message} Please check the server's email configuration.` });
+    }
 
     res.json({ success: true, message: 'OTP sent to your EWU email (valid for 5 minutes)', otpId: otp.id, studentId: studentIdMatch });
   } catch (err: any) {
@@ -368,11 +378,16 @@ router.post('/auth/forgot-password/otp', async (req, res) => {
       },
     });
 
-    await sendEmail(user.email, 'Password Reset OTP — Smart Campus', [
-      { type: 'text', content: `<strong>Hi ${user.fullName || 'Student'},</strong>\n\nYou requested a password reset. Your verification code is:\n\n<strong style="font-size: 28px; letter-spacing: 8px; color: #f59e0b;">${code}</strong>\n\nThis code expires in 5 minutes.` },
-      { type: 'divider' },
-      { type: 'text', content: '🎓 East West University — Smart Campus Digital Wallet' },
-    ]);
+    try {
+      await sendEmail(user.email, 'Password Reset OTP — Smart Campus', [
+        { type: 'text', content: `<strong>Hi ${user.fullName || 'Student'},</strong>\n\nYou requested a password reset. Your verification code is:\n\n<strong style="font-size: 28px; letter-spacing: 8px; color: #f59e0b;">${code}</strong>\n\nThis code expires in 5 minutes.` },
+        { type: 'divider' },
+        { type: 'text', content: '🎓 East West University — Smart Campus Digital Wallet' },
+      ]);
+    } catch (emailErr: any) {
+      await prisma.otpCode.delete({ where: { id: otp.id } }).catch(() => {});
+      return res.status(502).json({ message: `Could not send the reset email: ${emailErr.message} Please check the server's email configuration.` });
+    }
 
     res.json({ success: true, message: `OTP sent to your email (${user.email})`, otpId: otp.id, email: user.email });
   } catch (err: any) {
@@ -896,15 +911,18 @@ router.post('/otp/send', authMiddleware, async (req: AuthRequest, res) => {
     const otp = await prisma.otpCode.create({ data: { code, userId, purpose, status: 'Active', attempts: 0, expiresAt } });
     await prisma.auditLog.create({ data: { action: 'OTP Generated', actorId: userId, entityType: 'OTP', entityId: otp.id, details: `Purpose: ${purpose}` } });
 
+    const user = await prisma.user.findUnique({ where: { id: userId } });
+    if (!user?.email) return res.status(400).json({ message: 'No email on file for this account.' });
+
     try {
-      const user = await prisma.user.findUnique({ where: { id: userId } });
-      if (user?.email) {
-        await sendEmail(user.email, 'Your OTP Code — Smart Campus', [
-          { type: 'text', content: `<strong>Hi ${user.fullName || 'Student'},</strong>\n\nYour verification code is:\n\n<strong style="font-size: 24px; letter-spacing: 8px;">${code}</strong>\n\nThis code expires in 5 minutes.\n<strong>Purpose:</strong> ${purpose}` },
-          { type: 'divider' }, { type: 'text', content: '🎓 Smart Campus — Your University Wallet' },
-        ]);
-      }
-    } catch { /* best-effort */ }
+      await sendEmail(user.email, 'Your OTP Code — Smart Campus', [
+        { type: 'text', content: `<strong>Hi ${user.fullName || 'Student'},</strong>\n\nYour verification code is:\n\n<strong style="font-size: 24px; letter-spacing: 8px;">${code}</strong>\n\nThis code expires in 5 minutes.\n<strong>Purpose:</strong> ${purpose}` },
+        { type: 'divider' }, { type: 'text', content: '🎓 Smart Campus — Your University Wallet' },
+      ]);
+    } catch (emailErr: any) {
+      await prisma.otpCode.delete({ where: { id: otp.id } }).catch(() => {});
+      return res.status(502).json({ message: `Could not send the verification email: ${emailErr.message} Please check the server's email configuration.` });
+    }
 
     res.json({ success: true, message: `OTP sent to your email for ${purpose} (valid for 5 minutes)`, otpId: otp.id, expiresAt: expiresAt.toISOString() });
   } catch (err: any) {

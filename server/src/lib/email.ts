@@ -15,10 +15,11 @@ interface EmailBody {
   content?: string;
 }
 
+// Throws on failure — callers decide whether a failed send is critical (OTP: must surface
+// to the user) or best-effort (welcome/receipt notifications: safe to catch and ignore).
 export async function sendEmail(to: string, subject: string, body: EmailBody[]) {
-  if (!process.env.SMTP_USER) {
-    console.log(`[Email] Skipped (no SMTP config): ${subject} → ${to}`);
-    return;
+  if (!process.env.SMTP_USER || !process.env.SMTP_PASS) {
+    throw new Error('Email service is not configured (SMTP_USER/SMTP_PASS missing on the server).');
   }
 
   const htmlParts = body.map(b => {
@@ -34,7 +35,8 @@ export async function sendEmail(to: string, subject: string, body: EmailBody[]) 
       html: `<div style="font-family:'Inter',sans-serif;color:#e0e0e0;background:#0a0a0f;padding:24px;border-radius:12px;">${htmlParts.join('')}</div>`,
     });
     console.log(`[Email] Sent: ${subject} → ${to}`);
-  } catch (err) {
+  } catch (err: any) {
     console.error(`[Email] Failed: ${subject} → ${to}`, err);
+    throw new Error(`Failed to send email to ${to}: ${err.message || 'SMTP error'}`);
   }
 }
