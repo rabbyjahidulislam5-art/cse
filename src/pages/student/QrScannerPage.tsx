@@ -1,35 +1,36 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
-import { ArrowLeft, ScanLine, Store, Wallet, CreditCard, Clock, Loader2, Shield, ChevronRight } from 'lucide-react';
+import { ArrowLeft, ScanLine, Store, CreditCard, Clock, Loader2, Shield, ChevronRight } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import BarcodeScanner from '@/components/BarcodeScanner';
+import SuccessScreen from '@/components/SuccessScreen';
 import PinDialog from '@/components/PinDialog';
 import OtpDialog from '@/components/OtpDialog';
-import SuccessScreen from '@/components/SuccessScreen';
+import PaymentConfirmModal from '@/components/PaymentConfirmModal';
 import { toast } from 'sonner';
-import { validateQrMerchant, payShop, initSSLPayment, type ValidateQrMerchantOutputType } from '@/lib/api';
+import { validateQrMerchant, payShop, initSSLPayment, PIN_REQUIRED_THRESHOLD, OTP_REQUIRED_THRESHOLD, type ValidateQrMerchantOutputType } from '@/lib/api';
 import { useUser } from '@/lib/user-context';
 import { formatCurrency } from '@/lib/mock-data';
 import { FadeIn } from '@/components/PageTransition';
 
 type ShopInfo = NonNullable<ValidateQrMerchantOutputType['shop']>;
-type Step = 'scan' | 'validating' | 'merchant' | 'amount' | 'method' | 'confirm' | 'processing' | 'success' | 'error';
+type Step = 'scan' | 'validating' | 'merchant' | 'amount' | 'method' | 'processing' | 'success' | 'error';
 
 export default function QrScannerPage() {
   const navigate = useNavigate();
-  const { wallet, refreshDashboard } = useUser();
+  const { user, refreshDashboard } = useUser();
   const [step, setStep] = useState<Step>('scan');
   const [shop, setShop] = useState<ShopInfo | null>(null);
   const [amount, setAmount] = useState('');
-  const [payMode, setPayMode] = useState<'wallet' | 'ssl' | 'later'>('wallet');
+  const [payMode, setPayMode] = useState<'ssl' | 'later'>('ssl');
+  const [error, setError] = useState('');
+  const [confirmOpen, setConfirmOpen] = useState(false);
   const [pinOpen, setPinOpen] = useState(false);
   const [otpOpen, setOtpOpen] = useState(false);
-  const [error, setError] = useState('');
 
   const amt = parseFloat(amount) || 0;
-  const needsOtp = amt >= 5000;
 
   const handleScan = async (value: string) => {
     setStep('validating');
@@ -45,43 +46,56 @@ export default function QrScannerPage() {
     if (!amt || amt <= 0) { toast.error('Enter a valid amount'); return; }
     setStep('method');
   };
-  const handleProceedToConfirm = () => setStep('confirm');
+  const handleProceedToConfirm = () => setConfirmOpen(true);
 
-  const handlePay = () => {
-    if (payMode === 'ssl') { handleSSLPay(); return; }
-    if (payMode === 'wallet') { setPinOpen(true); return; }
-    executePayment();
+  const executePayLater = async () => {
+    if (!shop) return;
+    setStep('processing');
+    try {
+      await payShop({ shopId: shop.id, shopName: shop.name, amount: amt });
+      setStep('success');
+      refreshDashboard();
+    } catch (e: any) { toast.error(e.message || 'Failed to create due'); setStep('method'); }
+  };
+
+  const handleSSLPay = async (otpId?: string) => {
+    if (!shop) return;
+    setStep('processing');
+    try {
+      const res = await initSSLPayment({ items: [{ id: shop.id, source: 'shop', amount: amt, label: shop.name }], purpose: 'shop_payment', itemLabel: shop.name, otpId });
+      localStorage.setItem('ssl_payment', JSON.stringify({ ref: res.transactionRef }));
+      window.location.href = res.gatewayUrl;
+    } catch (e: any) {
+      if (e.requiresPin) setPinOpen(true);
+      else if (e.requiresOtp) setOtpOpen(true);
+      else toast.error(e.message || 'Payment gateway failed');
+      setStep('method');
+    }
+  };
+
+  const proceedToPay = (otpId?: string) => {
+    if (payMode === 'later') { executePayLater(); return; }
+    handleSSLPay(otpId);
+  };
+
+  const onConfirmed = () => {
+    setConfirmOpen(false);
+    if (payMode === 'later') { proceedToPay(); return; }
+    if (amt >= PIN_REQUIRED_THRESHOLD) { setPinOpen(true); return; }
+    proceedToPay();
   };
 
   const onPinVerified = () => {
-    if (needsOtp && payMode === 'wallet') setOtpOpen(true);
-    else executePayment();
+    if (amt >= OTP_REQUIRED_THRESHOLD) { setOtpOpen(true); return; }
+    proceedToPay();
   };
 
-  const executePayment = async () => {
-    if (!shop) return;
-    setStep('processing');
-    try {
-      await payShop({ shopId: shop.id, shopName: shop.name, amount: amt, mode: payMode === 'later' ? 'later' : 'now' });
-      setStep('success');
-      refreshDashboard();
-    } catch (e: any) { toast.error(e.message || 'Payment failed'); setStep('confirm'); }
-  };
+  const onOtpVerified = (otpId: string) => proceedToPay(otpId);
 
-  const handleSSLPay = async () => {
-    if (!shop) return;
-    setStep('processing');
-    try {
-      const res = await initSSLPayment({ amount: amt, purpose: 'shop_payment', itemId: shop.id, itemLabel: shop.name });
-      localStorage.setItem('ssl_payment', JSON.stringify({ ref: res.transactionRef, purpose: 'shop_payment', itemId: shop.id }));
-      window.location.href = res.gatewayUrl;
-    } catch (e: any) { toast.error(e.message || 'Payment gateway failed'); setStep('confirm'); }
-  };
+  const reset = () => { setStep('scan'); setShop(null); setAmount(''); setPayMode('ssl'); setError(''); };
 
-  const reset = () => { setStep('scan'); setShop(null); setAmount(''); setPayMode('wallet'); setError(''); };
-
-  const stepIndex = ['scan','validating','merchant','amount','method','confirm','processing','success','error'].indexOf(step);
-  const progress = step === 'success' ? 100 : step === 'error' ? 0 : Math.min((stepIndex / 6) * 100, 100);
+  const stepIndex = ['scan','validating','merchant','amount','method','processing','success','error'].indexOf(step);
+  const progress = step === 'success' ? 100 : step === 'error' ? 0 : Math.min((stepIndex / 5) * 100, 100);
 
   return (
     <div className="container mx-auto px-4 sm:px-6 py-6 max-w-lg">
@@ -155,9 +169,6 @@ export default function QrScannerPage() {
                 <Input type="number" placeholder="0.00" value={amount} onChange={e => setAmount(e.target.value)}
                   className="mt-2 text-2xl font-bold h-14 text-center bg-accent/50 border-border/60" min={1} autoFocus />
               </div>
-              <div className="text-xs text-muted-foreground text-center">
-                Wallet Balance: <span className="text-foreground font-semibold">{formatCurrency(wallet?.balance || 0)}</span>
-              </div>
               <Button onClick={handleProceedToMethod} className="w-full h-12 font-semibold" disabled={!amt || amt <= 0}>
                 Continue <ChevronRight className="w-4 h-4 ml-1" />
               </Button>
@@ -174,13 +185,11 @@ export default function QrScannerPage() {
                 <p className="text-sm text-muted-foreground mt-1">to {shop?.name}</p>
               </div>
               {([
-                { key: 'wallet' as const, label: 'Campus Wallet', icon: Wallet, desc: `Balance: ${formatCurrency(wallet?.balance || 0)}`, disabled: amt > (wallet?.balance || 0) },
                 { key: 'ssl' as const, label: 'Online Payment', icon: CreditCard, desc: 'Cards, bKash, Nagad, Rocket' },
                 { key: 'later' as const, label: 'Pay Later', icon: Clock, desc: '7-day payment deadline' },
               ]).map((m) => (
-                <button key={m.key} onClick={() => !m.disabled && setPayMode(m.key)} disabled={m.disabled}
+                <button key={m.key} onClick={() => setPayMode(m.key)}
                   className={`w-full p-4 rounded-xl border-2 text-left transition-all flex items-center gap-4 ${
-                    m.disabled ? 'opacity-40 cursor-not-allowed border-border/30' :
                     payMode === m.key ? 'border-primary bg-primary/5' : 'border-border/60 hover:border-muted-foreground/30'
                   }`}>
                   <div className={`w-11 h-11 rounded-xl flex items-center justify-center ${payMode === m.key ? 'bg-primary/15' : 'bg-accent'}`}>
@@ -202,37 +211,13 @@ export default function QrScannerPage() {
           </FadeIn>
         )}
 
-        {/* CONFIRM */}
-        {step === 'confirm' && (
-          <FadeIn key="confirm">
-            <div className="space-y-5">
-              <h2 className="text-lg font-bold text-foreground text-center">Review Payment</h2>
-              <div className="rounded-xl border border-border/60 bg-accent/30 p-4 space-y-3">
-                <div className="flex justify-between text-sm"><span className="text-muted-foreground">Merchant</span><span className="font-semibold text-foreground">{shop?.name}</span></div>
-                <div className="flex justify-between text-sm"><span className="text-muted-foreground">Amount</span><span className="font-bold text-foreground tabular">{formatCurrency(amt)}</span></div>
-                <div className="flex justify-between text-sm"><span className="text-muted-foreground">Method</span><span className="font-medium text-foreground">{payMode === 'wallet' ? 'Campus Wallet' : payMode === 'ssl' ? 'Online Payment' : 'Pay Later'}</span></div>
-                {needsOtp && payMode === 'wallet' && (
-                  <div className="flex justify-between text-sm"><span className="text-muted-foreground">Security</span><span className="font-medium text-[hsl(var(--chart-4))]">PIN + OTP required</span></div>
-                )}
-              </div>
-              <div className="flex items-center gap-2 text-xs text-muted-foreground bg-accent/30 p-3 rounded-xl">
-                <Shield className="w-4 h-4 text-primary shrink-0" />
-                <span>{payMode === 'ssl' ? 'You will be redirected to the secure payment gateway.' : 'Transaction secured with bank-grade encryption.'}</span>
-              </div>
-              <Button onClick={handlePay} className="w-full h-12 font-semibold">
-                {payMode === 'ssl' ? 'Proceed to Payment' : payMode === 'later' ? 'Create Due' : `Pay ${formatCurrency(amt)}`}
-              </Button>
-            </div>
-          </FadeIn>
-        )}
-
         {/* PROCESSING */}
         {step === 'processing' && (
           <motion.div key="proc" initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="text-center py-20">
             <div className="relative w-16 h-16 mx-auto mb-6">
               <div className="absolute inset-0 rounded-full border-2 border-primary/20" />
               <div className="absolute inset-0 rounded-full border-2 border-transparent border-t-primary animate-spin" />
-              <Wallet className="absolute inset-0 m-auto w-6 h-6 text-primary" />
+              <CreditCard className="absolute inset-0 m-auto w-6 h-6 text-primary" />
             </div>
             <p className="text-sm font-medium text-foreground">Processing Payment...</p>
             <p className="text-xs text-muted-foreground mt-1">Please wait, do not close this page</p>
@@ -247,7 +232,7 @@ export default function QrScannerPage() {
             details={[
               { label: 'Merchant', value: shop?.name || '' },
               { label: 'Amount', value: formatCurrency(amt) },
-              { label: 'Method', value: payMode === 'wallet' ? 'Campus Wallet' : payMode === 'ssl' ? 'Online Payment' : 'Pay Later' },
+              { label: 'Method', value: payMode === 'ssl' ? 'Online Payment' : 'Pay Later' },
             ]}
             actions={[
               { label: 'Scan Again', onClick: reset, variant: 'outline' },
@@ -271,8 +256,21 @@ export default function QrScannerPage() {
         )}
       </AnimatePresence>
 
-      <PinDialog open={pinOpen} onOpenChange={setPinOpen} mode="verify" onSuccess={onPinVerified} />
-      <OtpDialog open={otpOpen} onOpenChange={setOtpOpen} purpose="Payment" onSuccess={executePayment} />
+      {shop && (
+        <PaymentConfirmModal
+          open={confirmOpen}
+          onOpenChange={setConfirmOpen}
+          receiverName={shop.name}
+          receiverRole="Shop"
+          payerName={user?.fullName}
+          amount={amt}
+          method={payMode === 'ssl' ? 'Online Payment (SSLCommerz)' : 'Pay Later (7-day due)'}
+          confirmLabel={payMode === 'ssl' ? 'Proceed to Payment' : 'Create Due'}
+          onConfirm={onConfirmed}
+        />
+      )}
+      <PinDialog open={pinOpen} onOpenChange={setPinOpen} mode="verify" verifyLength={user?.pinLength || 4} onSuccess={onPinVerified} />
+      <OtpDialog open={otpOpen} onOpenChange={setOtpOpen} purpose="Large Payment" onSuccess={onOtpVerified} />
     </div>
   );
 }

@@ -1,15 +1,12 @@
 import { useEffect, useState } from 'react';
 import { motion } from 'framer-motion';
-import { Wallet, Plus, Eye, EyeOff, TrendingUp, ArrowDownToLine } from 'lucide-react';
-import { useNavigate } from 'react-router-dom';
+import { Wallet, Eye, EyeOff, TrendingUp } from 'lucide-react';
 
 interface WalletCardProps {
   balance: number;
-  onAddMoney: () => void;
 }
 
-export default function WalletCard({ balance, onAddMoney }: WalletCardProps) {
-  const navigate = useNavigate();
+export default function WalletCard({ balance }: WalletCardProps) {
   const [displayed, setDisplayed] = useState(0);
   const [hidden, setHidden] = useState(false);
 
@@ -65,26 +62,9 @@ export default function WalletCard({ balance, onAddMoney }: WalletCardProps) {
           </button>
         </div>
 
-        <div className="flex items-center gap-1.5 mb-5">
+        <div className="flex items-center gap-1.5">
           <TrendingUp className="w-3 h-3 text-primary-foreground/50" />
           <span className="text-[11px] text-primary-foreground/50 font-medium">Available Balance</span>
-        </div>
-
-        <div className="flex items-center gap-2">
-          <button
-            onClick={onAddMoney}
-            className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-primary-foreground/90 text-primary text-sm font-semibold hover:bg-primary-foreground transition-all shadow-lg shadow-black/20 active:scale-[0.98]"
-          >
-            <Plus className="w-4 h-4" />
-            Add Money
-          </button>
-          <button
-            onClick={() => navigate('/student/withdraw')}
-            className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-white/15 text-primary-foreground text-sm font-semibold hover:bg-white/25 transition-all active:scale-[0.98]"
-          >
-            <ArrowDownToLine className="w-4 h-4" />
-            Withdraw
-          </button>
         </div>
       </div>
     </motion.div>

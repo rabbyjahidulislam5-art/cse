@@ -26,7 +26,6 @@ import TransferPage from './pages/student/TransferPage';
 import PaymentResultPage from './pages/student/PaymentResultPage';
 import NotificationsPage from './pages/student/NotificationsPage';
 import ReceiptPage from './pages/student/ReceiptPage';
-import WithdrawPage from './pages/student/WithdrawPage';
 
 // Admin pages
 import AdminHomePage from './pages/admin/AdminHomePage';
@@ -47,7 +46,6 @@ import AccountsHomePage from './pages/accounts/AccountsHomePage';
 import SemesterFeePushPage from './pages/accounts/SemesterFeePushPage';
 import FeeAdjustmentsPage from './pages/accounts/FeeAdjustmentsPage';
 import CollectionAnalyticsPage from './pages/accounts/CollectionAnalyticsPage';
-import WithdrawalsPage from './pages/accounts/WithdrawalsPage';
 
 // Shop pages
 import ShopHomePage from './pages/shop/ShopHomePage';
@@ -76,7 +74,6 @@ export default function App() {
           <Route path="payment-result" element={<PaymentResultPage />} />
           <Route path="notifications" element={<NotificationsPage />} />
           <Route path="receipt" element={<ReceiptPage />} />
-          <Route path="withdraw" element={<WithdrawPage />} />
         </Route>
 
         {/* Admin Office Dashboard */}
@@ -103,7 +100,6 @@ export default function App() {
           <Route path="fee-push" element={<SemesterFeePushPage />} />
           <Route path="adjustments" element={<FeeAdjustmentsPage />} />
           <Route path="analytics" element={<CollectionAnalyticsPage />} />
-          <Route path="withdrawals" element={<WithdrawalsPage />} />
         </Route>
 
         {/* Shop Dashboard */}

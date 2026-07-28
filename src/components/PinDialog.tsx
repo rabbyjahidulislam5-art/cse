@@ -15,11 +15,13 @@ interface PinDialogProps {
   mandatory?: boolean;
   title?: string;
   description?: string;
+  /** The account's existing PIN length (from `user.pinLength`) — 4 for legacy accounts that haven't reset their PIN since the 6-digit policy, 6 for everyone else. Required to enter/verify an EXISTING pin correctly; new PINs always target NEW_PIN_LENGTH regardless of this value. Defaults to 6 if omitted. */
+  verifyLength?: number;
 }
 
-const PIN_LENGTH = 4;
+const NEW_PIN_LENGTH = 6;
 
-function PinDots({ value, length = PIN_LENGTH, error = false }: { value: string; length?: number; error?: boolean }) {
+function PinDots({ value, length, error = false }: { value: string; length: number; error?: boolean }) {
   return (
     <div className="flex gap-4 justify-center my-8">
       {Array.from({ length }).map((_, i) => (
@@ -65,7 +67,7 @@ function Numpad({ onDigit, onDelete, disabled }: { onDigit: (d: string) => void;
   );
 }
 
-export default function PinDialog({ open, onOpenChange, mode, onSuccess, mandatory, title, description }: PinDialogProps) {
+export default function PinDialog({ open, onOpenChange, mode, onSuccess, mandatory, title, description, verifyLength }: PinDialogProps) {
   const [pin, setPin] = useState('');
   const [currentPin, setCurrentPin] = useState('');
   const [confirmPin, setConfirmPin] = useState('');
@@ -84,14 +86,17 @@ export default function PinDialog({ open, onOpenChange, mode, onSuccess, mandato
 
   const activePin = step === 'current' ? currentPin : step === 'confirm' ? confirmPin : pin;
   const setActivePin = step === 'current' ? setCurrentPin : step === 'confirm' ? setConfirmPin : setPin;
+  // "verify"/"current" steps enter an EXISTING pin (whatever length the account actually has —
+  // legacy accounts may still be 4 digits). "new"/"confirm" always target the current policy.
+  const activeLength = (step === 'verify' || step === 'current') ? (verifyLength || NEW_PIN_LENGTH) : NEW_PIN_LENGTH;
 
   const handleDigit = useCallback((d: string) => {
-    if (activePin.length >= PIN_LENGTH) return;
+    if (activePin.length >= activeLength) return;
     const newVal = activePin + d;
     setActivePin(newVal);
     setError(false);
 
-    if (newVal.length === PIN_LENGTH) {
+    if (newVal.length === activeLength) {
       setTimeout(() => {
         if (step === 'verify') handleVerifyPin(newVal);
         else if (step === 'current') { setStep('new'); }
@@ -99,7 +104,7 @@ export default function PinDialog({ open, onOpenChange, mode, onSuccess, mandato
         else handleSetPin(newVal);
       }, 200);
     }
-  }, [activePin, step]);
+  }, [activePin, step, activeLength]);
 
   const handleDelete = useCallback(() => {
     setActivePin(activePin.slice(0, -1));
@@ -146,10 +151,10 @@ export default function PinDialog({ open, onOpenChange, mode, onSuccess, mandato
 
   const titles: Record<string, string> = { current: 'Current PIN', new: mode === 'change' ? 'New PIN' : 'Create PIN', confirm: 'Confirm PIN', verify: 'Enter PIN' };
   const descs: Record<string, string> = {
-    verify: 'Enter your 4-digit PIN to authorize this transaction',
-    current: 'Enter your current PIN to continue',
+    verify: `Enter your ${activeLength}-digit PIN to authorize this transaction`,
+    current: `Enter your current ${activeLength}-digit PIN to continue`,
     confirm: 'Re-enter your PIN to confirm',
-    new: 'Choose a secure 4-digit PIN for your wallet',
+    new: `Choose a secure ${NEW_PIN_LENGTH}-digit PIN for your wallet`,
   };
 
   return (
@@ -168,7 +173,7 @@ export default function PinDialog({ open, onOpenChange, mode, onSuccess, mandato
           <DialogDescription className="text-sm">{description || descs[step]}</DialogDescription>
         </DialogHeader>
 
-        <PinDots value={activePin} error={error} />
+        <PinDots value={activePin} length={activeLength} error={error} />
 
         {loading ? (
           <div className="flex justify-center py-8">

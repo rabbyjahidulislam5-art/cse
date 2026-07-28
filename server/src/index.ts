@@ -7,9 +7,30 @@ import crypto from 'crypto';
 import multer from 'multer';
 import path from 'path';
 import fs from 'fs';
+import PDFDocument from 'pdfkit';
+import rateLimit from 'express-rate-limit';
 import prisma from './lib/prisma';
-import { authMiddleware, generateToken, AuthRequest } from './lib/auth';
+import { authMiddleware, generateToken, requireRole, AuthRequest } from './lib/auth';
 import { sendEmail } from './lib/email';
+
+// Abuse backstops for the two payment-confirmation entry points. Render's free tier runs a
+// single instance, so in-memory rate limiting (express-rate-limit's default store) is sufficient
+// — no Redis needed.
+const paymentInitLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  limit: 10,
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: (req: AuthRequest) => req.user?.id || req.ip || 'unknown',
+  message: { message: 'Too many payment attempts. Please wait a moment and try again.' },
+});
+const paymentIpnLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  limit: 30,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { message: 'Too many requests.' },
+});
 
 const app = express();
 const PORT = process.env.PORT || 4000;
@@ -22,9 +43,17 @@ app.use(helmet({ crossOriginResourcePolicy: false }));
 // this was harmless in practice, but corrected for a technically-valid CORS configuration.
 app.use(cors({ origin: '*', credentials: false }));
 app.use(express.json({ limit: '10mb' }));
+// SSLCommerz's IPN callback posts as application/x-www-form-urlencoded, not JSON.
+app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 app.use('/uploads', express.static(path.join(__dirname, '../uploads')));
 
 const router = express.Router();
+
+// Role gates for the four staff dashboards — see requireRole in lib/auth.ts for why this exists.
+const requireAdmin = requireRole('Admin Office');
+const requireLibrary = requireRole('Library');
+const requireAccounts = requireRole('Accounts Office');
+const requireShopStaff = requireRole('Shop Staff');
 
 // File upload config
 const storage = multer.diskStorage({
@@ -237,6 +266,7 @@ router.post('/auth/signup', async (req, res) => {
         phone: user.phone,
         status: user.status,
         pinSet: false,
+        pinLength: 4,
       },
     });
   } catch (err: any) {
@@ -265,7 +295,11 @@ router.post('/auth/login', async (req, res) => {
 
     let authenticated = user.password ? await bcrypt.compare(password, user.password) : false;
 
-    if (!authenticated && user.pinSet && user.pinHash && /^\d{4}$/.test(password)) {
+    // Accept the account's own PIN length — legacy accounts kept their original 4-digit PIN
+    // when the policy moved to 6 digits, so the server checks each user's actual pinLength.
+    const expectedPinLength = user.pinLength || 4;
+    const pinLengthPattern = new RegExp(`^\\d{${expectedPinLength}}$`);
+    if (!authenticated && user.pinSet && user.pinHash && pinLengthPattern.test(password)) {
       if (user.pinLockedUntil && new Date(user.pinLockedUntil) > new Date()) {
         const mins = Math.ceil((new Date(user.pinLockedUntil).getTime() - Date.now()) / 60000);
         return res.status(429).json({ message: `Too many attempts. Try again in ${mins} minutes.` });
@@ -298,6 +332,7 @@ router.post('/auth/login', async (req, res) => {
         phone: user.phone,
         status: user.status,
         pinSet: user.pinSet || false,
+        pinLength: user.pinLength || 4,
       },
     });
   } catch (err: any) {
@@ -391,6 +426,7 @@ router.post('/auth/google', async (req, res) => {
         phone: user.phone,
         status: user.status,
         pinSet: user.pinSet || false,
+        pinLength: user.pinLength || 4,
       },
     });
   } catch (err: any) {
@@ -551,6 +587,7 @@ router.post('/student/dashboard', authMiddleware, async (req: AuthRequest, res) 
         phone: userRecord?.phone || req.user!.phone || '',
         status: req.user!.status || 'Active',
         pinSet: req.user!.pinSet || false,
+        pinLength: req.user!.pinLength || 4,
         profilePicture: userRecord?.profilePicture || '',
         emergencyContact: userRecord?.emergencyContact || '',
         address: userRecord?.address || '',
@@ -610,58 +647,32 @@ router.post('/shops/detail', async (req, res) => {
   }
 });
 
-// ─── SHOP PAY ───
+// ─── SHOP PAY LATER ───
+// Instant "Pay Now" shop payments no longer exist here — those go through
+// /payment/init (purpose: 'shop_payment', see SSL PAYMENT section below). This route only
+// creates a deferred due; no money moves and no gateway is involved until it's settled later.
 router.post('/shops/pay', authMiddleware, async (req: AuthRequest, res) => {
   try {
     const userId = req.user!.id;
-    const { shopId, shopName, amount, mode, description } = req.body;
+    const { shopId, shopName, amount, description } = req.body;
     const ref = `SHP-${Date.now().toString(36).toUpperCase()}`;
 
-    if (mode === 'now') {
-      const wallet = await prisma.wallet.findFirst({ where: { ownerId: userId } });
-      if (!wallet) return res.status(404).json({ message: 'Wallet not found' });
-      if ((wallet.balance || 0) < amount) return res.status(400).json({ message: 'Insufficient balance' });
+    const dueDate = new Date();
+    dueDate.setDate(dueDate.getDate() + 7);
 
-      const newBalance = (wallet.balance || 0) - amount;
-      await prisma.wallet.update({ where: { id: wallet.id }, data: { balance: newBalance } });
+    const due = await prisma.payLaterDue.create({
+      data: { reference: ref, studentId: userId, shopId, amount, status: 'Pending', dueDate: dueDate.toISOString().split('T')[0], description: description || shopName },
+    });
 
-      const tx = await prisma.transaction.create({
-        data: {
-          reference: ref, userId, type: 'Shop Payment', direction: 'Debit',
-          amount, status: 'Success', shopId, gateway: 'Wallet',
-          description: description || shopName,
-        },
-      });
+    const tx = await prisma.transaction.create({
+      data: {
+        reference: ref, userId, type: 'Shop Payment', direction: 'Debit',
+        amount, status: 'Pending', shopId, gateway: 'Wallet',
+        description: `[Pay Later] ${description || shopName}`,
+      },
+    });
 
-      try {
-        const user = await prisma.user.findUnique({ where: { id: userId } });
-        if (user?.email) {
-          await sendEmail(user.email, `Shop Payment — ৳${amount} — Smart Campus`, [
-            { type: 'text', content: `<strong>Hi ${user.fullName || 'Student'},</strong>\n\nShop payment completed.\n\n<strong>Shop:</strong> ${shopName}\n<strong>Amount:</strong> ৳${amount.toLocaleString()}\n<strong>Reference:</strong> ${ref}\n<strong>Date:</strong> ${new Date().toLocaleString('en-US', { timeZone: 'Asia/Dhaka' })}` },
-            { type: 'divider' }, { type: 'text', content: '🎓 Smart Campus — Your University Wallet' },
-          ]);
-        }
-      } catch { /* best-effort */ }
-
-      res.json({ success: true, newBalance, transactionId: tx.id });
-    } else {
-      const dueDate = new Date();
-      dueDate.setDate(dueDate.getDate() + 7);
-
-      const due = await prisma.payLaterDue.create({
-        data: { reference: ref, studentId: userId, shopId, amount, status: 'Pending', dueDate: dueDate.toISOString().split('T')[0], description: description || shopName },
-      });
-
-      const tx = await prisma.transaction.create({
-        data: {
-          reference: ref, userId, type: 'Shop Payment', direction: 'Debit',
-          amount, status: 'Pending', shopId, gateway: 'Wallet',
-          description: `[Pay Later] ${description || shopName}`,
-        },
-      });
-
-      res.json({ success: true, transactionId: tx.id, dueId: due.id });
-    }
+    res.json({ success: true, transactionId: tx.id, dueId: due.id });
   } catch (err: any) {
     res.status(500).json({ message: err.message });
   }
@@ -708,46 +719,13 @@ router.post('/dues', authMiddleware, async (req: AuthRequest, res) => {
   }
 });
 
-router.post('/dues/pay', authMiddleware, async (req: AuthRequest, res) => {
-  try {
-    const userId = req.user!.id;
-    const { items } = req.body;
-    const totalAmount = items.reduce((s: number, i: any) => s + i.amount, 0);
-
-    const wallet = await prisma.wallet.findFirst({ where: { ownerId: userId } });
-    if (!wallet) return res.status(404).json({ message: 'Wallet not found' });
-    if ((wallet.balance || 0) < totalAmount) return res.status(400).json({ message: 'Insufficient balance' });
-
-    const newBalance = (wallet.balance || 0) - totalAmount;
-    await prisma.wallet.update({ where: { id: wallet.id }, data: { balance: newBalance } });
-
-    for (const item of items) {
-      const ref = `PAY-${Date.now().toString(36).toUpperCase()}-${item.id.slice(0, 4)}`;
-      const typeMap: Record<string, string> = { semester: 'Fee Payment', library: 'Fine Payment', admin: 'Fine Payment', payLater: 'Shop Payment' };
-
-      await prisma.transaction.create({
-        data: { reference: ref, userId, type: typeMap[item.source] || 'Fee Payment', direction: 'Debit', amount: item.amount, status: 'Success', gateway: 'Wallet', description: item.label },
-      });
-
-      if (item.source === 'semester') await prisma.semesterFee.update({ where: { id: item.id }, data: { status: 'Paid', reference: ref } });
-      else if (item.source === 'library') await prisma.libraryFine.update({ where: { id: item.id }, data: { status: 'Paid', reference: ref } });
-      else if (item.source === 'admin') await prisma.adminFine.update({ where: { id: item.id }, data: { status: 'Paid', reference: ref } });
-      else if (item.source === 'payLater') await prisma.payLaterDue.update({ where: { id: item.id }, data: { status: 'Paid', paymentReference: ref } });
-    }
-
-    res.json({ success: true, newBalance, paidCount: items.length });
-  } catch (err: any) {
-    res.status(500).json({ message: err.message });
-  }
-});
-
 // ─── DISPUTE FINE ───
 router.post('/fines/dispute', authMiddleware, async (req: AuthRequest, res) => {
   try {
     const { fineId, source, reason } = req.body;
     if (source === 'admin') await prisma.adminFine.update({ where: { id: fineId }, data: { status: 'Disputed' } });
     else if (source === 'library') await prisma.libraryFine.update({ where: { id: fineId }, data: { status: 'Disputed' } });
-    await prisma.auditLog.create({ data: { action: 'Fine Disputed', actorId: req.user!.id, entityType: 'Fine', entityId: fineId, details: reason } });
+    await prisma.auditLog.create({ data: { action: 'Fine Disputed', actorId: req.user!.id, entityType: 'Fine', entityId: fineId, details: reason, ipAddress: req.ip } });
     res.json({ success: true, message: 'Dispute submitted' });
   } catch (err: any) {
     res.status(500).json({ message: err.message });
@@ -808,11 +786,78 @@ router.post('/notifications', authMiddleware, async (req: AuthRequest, res) => {
 });
 
 // ─── RECEIPT ───
+// Generates (and caches on disk) a PDF receipt for a successful transaction. Idempotent — a
+// transaction's fields never change once Success, so the file is only built once and reused.
+async function generateReceiptPdf(tx: {
+  id: string; reference: string; type: string; amount: number; status: string;
+  paymentMethod: string | null; gateway: string | null; gatewayTxnId: string | null; bankTxnId: string | null;
+  createdAt: Date; user: { fullName: string | null; studentId: string | null } | null; shop: { name: string } | null;
+}): Promise<string> {
+  const dir = path.join(__dirname, '../uploads/receipts');
+  if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+  const filename = `${tx.reference}.pdf`;
+  const filepath = path.join(dir, filename);
+
+  if (!fs.existsSync(filepath)) {
+    await new Promise<void>((resolve, reject) => {
+      const doc = new PDFDocument({ size: 'A4', margin: 50 });
+      const stream = fs.createWriteStream(filepath);
+      doc.pipe(stream);
+
+      doc.fontSize(18).font('Helvetica-Bold').text('Smart Campus — Payment Receipt', { align: 'center' });
+      doc.fontSize(10).font('Helvetica').fillColor('#666').text('East West University Digital Wallet', { align: 'center' });
+      doc.moveDown(2);
+
+      const rows: [string, string][] = [
+        ['Receipt Number', tx.reference],
+        ['Transaction ID', tx.id],
+        ['SSLCommerz Transaction ID', tx.gatewayTxnId || 'N/A'],
+        ['Validation ID', tx.bankTxnId || 'N/A'],
+        ['Date', tx.createdAt.toLocaleDateString('en-US', { timeZone: 'Asia/Dhaka', dateStyle: 'medium' })],
+        ['Time', tx.createdAt.toLocaleTimeString('en-US', { timeZone: 'Asia/Dhaka', timeStyle: 'short' })],
+        ['Amount', `৳ ${tx.amount.toLocaleString()}`],
+        ['Payment Method', tx.paymentMethod || tx.gateway || 'N/A'],
+        ['Receiver', tx.shop?.name || tx.type],
+        ['Student Name', tx.user?.fullName || 'N/A'],
+        ['Student ID', tx.user?.studentId || 'N/A'],
+        ['Status', tx.status],
+      ];
+
+      doc.fillColor('#000');
+      rows.forEach(([label, value]) => {
+        doc.font('Helvetica-Bold').fontSize(11).text(`${label}:`, 50, doc.y, { continued: true, width: 220 });
+        doc.font('Helvetica').text(`  ${value}`);
+        doc.moveDown(0.5);
+      });
+
+      doc.moveDown(2);
+      doc.fontSize(9).fillColor('#999').text('This receipt was generated automatically and, where applicable, verified via SSLCommerz.', { align: 'center' });
+
+      doc.end();
+      stream.on('finish', () => resolve());
+      stream.on('error', reject);
+    });
+  }
+
+  const backendUrl = process.env.BACKEND_URL || `http://localhost:${PORT}`;
+  return `${backendUrl}/uploads/receipts/${filename}`;
+}
+
 router.post('/receipt', authMiddleware, async (req: AuthRequest, res) => {
   try {
     const { transactionId } = req.body;
-    const tx = await prisma.transaction.findUnique({ where: { id: transactionId }, include: { user: true, shop: true } });
+    // Accepts either the internal id or the human-readable reference — some callers (e.g. the
+    // payment-result screen) only have the SSLCommerz reference on hand at that point.
+    const tx = await prisma.transaction.findFirst({
+      where: { OR: [{ id: transactionId }, { reference: transactionId }] },
+      include: { user: true, shop: true },
+    });
     if (!tx) return res.status(404).json({ message: 'Transaction not found' });
+
+    let url: string | undefined;
+    if (tx.status === 'Success') {
+      url = await generateReceiptPdf(tx);
+    }
 
     res.json({
       id: tx.id, reference: tx.reference, type: tx.type, direction: tx.direction,
@@ -822,6 +867,7 @@ router.post('/receipt', authMiddleware, async (req: AuthRequest, res) => {
       createdAt: tx.createdAt.toISOString(),
       userName: tx.user?.fullName || '', userEmail: tx.user?.email || '',
       studentId: tx.user?.studentId || '', shopName: tx.shop?.name || '',
+      url,
     });
   } catch (err: any) {
     res.status(500).json({ message: err.message });
@@ -869,7 +915,7 @@ router.post('/transfer', authMiddleware, async (req: AuthRequest, res) => {
       data: { reference: `${ref}-R`, userId: recipient.id, type: 'Transfer Received', direction: 'Credit', amount, status: 'Success', gateway: 'Wallet', description: `Transfer from ${req.user!.fullName || 'sender'}${note ? ` — ${note}` : ''}` },
     });
 
-    await prisma.auditLog.create({ data: { action: 'Wallet Transfer', actorId: senderId, entityType: 'Wallet', entityId: senderWallet.id, details: `Sent ৳${amount} to ${recipient.fullName || recipient.email} (${ref})` } });
+    await prisma.auditLog.create({ data: { action: 'Wallet Transfer', actorId: senderId, entityType: 'Wallet', entityId: senderWallet.id, details: `Sent ৳${amount} to ${recipient.fullName || recipient.email} (${ref})`, ipAddress: req.ip } });
 
     try {
       const sender = await prisma.user.findUnique({ where: { id: senderId } });
@@ -893,36 +939,21 @@ router.post('/transfer', authMiddleware, async (req: AuthRequest, res) => {
   }
 });
 
-// ─── WITHDRAWAL ───
-router.post('/withdrawal/request', authMiddleware, async (req: AuthRequest, res) => {
-  try {
-    const userId = req.user!.id;
-    const { amount, method, accountDetails } = req.body;
-    const wallet = await prisma.wallet.findFirst({ where: { ownerId: userId } });
-    if (!wallet) return res.status(404).json({ message: 'Wallet not found' });
-    if ((wallet.balance || 0) < amount) return res.status(400).json({ message: 'Insufficient balance' });
-
-    const ref = `WDR-${Date.now().toString(36).toUpperCase()}`;
-    const newBalance = (wallet.balance || 0) - amount;
-    await prisma.wallet.update({ where: { id: wallet.id }, data: { balance: newBalance } });
-
-    const tx = await prisma.transaction.create({
-      data: { reference: ref, userId, type: 'Withdrawal', direction: 'Debit', amount, status: 'Pending', gateway: method, description: `Withdrawal to ${method}: ${accountDetails}` },
-    });
-
-    res.json({ success: true, message: 'Withdrawal request submitted', transactionId: tx.id });
-  } catch (err: any) {
-    res.status(500).json({ message: err.message });
-  }
-});
-
 // ─── PIN ───
+// PIN policy is 6 digits. Existing 4-digit PINs keep working at their original length (checked
+// against user.pinLength elsewhere) — but any PIN set or changed from here on must be 6 digits.
+const NEW_PIN_LENGTH = 6;
+
 router.post('/pin/set', authMiddleware, async (req: AuthRequest, res) => {
   try {
     const userId = req.user!.id;
     const { pin, currentPin } = req.body;
     const user = await prisma.user.findUnique({ where: { id: userId } });
     if (!user) return res.status(404).json({ message: 'User not found' });
+
+    if (!pin || !new RegExp(`^\\d{${NEW_PIN_LENGTH}}$`).test(pin)) {
+      return res.status(400).json({ message: `PIN must be exactly ${NEW_PIN_LENGTH} digits.` });
+    }
 
     if (user.pinSet && user.pinHash) {
       if (!currentPin) return res.status(400).json({ message: 'Current PIN required' });
@@ -939,10 +970,10 @@ router.post('/pin/set', authMiddleware, async (req: AuthRequest, res) => {
 
     const salt = crypto.randomUUID();
     const hash = await hashPin(pin, salt);
-    await prisma.user.update({ where: { id: userId }, data: { pinHash: hash, pinSalt: salt, pinSet: true, pinAttempts: 0, pinLockedUntil: null } });
-    await prisma.auditLog.create({ data: { action: user.pinSet ? 'PIN Changed' : 'PIN Set', actorId: userId, entityType: 'User', entityId: userId, details: user.pinSet ? 'Wallet PIN changed' : 'Wallet PIN set for first time' } });
+    await prisma.user.update({ where: { id: userId }, data: { pinHash: hash, pinSalt: salt, pinSet: true, pinLength: NEW_PIN_LENGTH, pinAttempts: 0, pinLockedUntil: null } });
+    await prisma.auditLog.create({ data: { action: user.pinSet ? 'PIN Changed' : 'PIN Set', actorId: userId, entityType: 'User', entityId: userId, details: user.pinSet ? 'Wallet PIN changed' : 'Wallet PIN set for first time', ipAddress: req.ip } });
 
-    res.json({ success: true, message: user.pinSet ? 'PIN changed successfully' : 'PIN set successfully' });
+    res.json({ success: true, message: user.pinSet ? 'PIN changed successfully' : 'PIN set successfully', pinLength: NEW_PIN_LENGTH });
   } catch (err: any) {
     res.status(500).json({ message: err.message });
   }
@@ -961,6 +992,11 @@ router.post('/pin/verify', authMiddleware, async (req: AuthRequest, res) => {
       return res.status(429).json({ message: `PIN locked. Try again in ${mins} minutes.` });
     }
 
+    const expectedPinLength = user.pinLength || 4;
+    if (!pin || pin.length !== expectedPinLength) {
+      return res.json({ valid: false, message: `Enter your ${expectedPinLength}-digit PIN.` });
+    }
+
     const hash = await hashPin(pin, user.pinSalt || '');
     if (hash !== user.pinHash) {
       const attempts = (user.pinAttempts || 0) + 1;
@@ -970,7 +1006,9 @@ router.post('/pin/verify', authMiddleware, async (req: AuthRequest, res) => {
       return res.json({ valid: false, message: `Incorrect PIN. ${Math.max(0, 5 - attempts)} attempts remaining.` });
     }
 
-    await prisma.user.update({ where: { id: userId }, data: { pinAttempts: 0 } });
+    // Stamp freshness — /payment/init checks this to confirm PIN verification actually
+    // happened recently for this user, rather than trusting the client's say-so.
+    await prisma.user.update({ where: { id: userId }, data: { pinAttempts: 0, pinVerifiedAt: new Date() } });
     res.json({ valid: true, message: 'PIN verified' });
   } catch (err: any) {
     res.status(500).json({ message: err.message });
@@ -1007,7 +1045,7 @@ router.post('/otp/send', authMiddleware, async (req: AuthRequest, res) => {
     mark('otpGenerate');
 
     const otp = await prisma.otpCode.create({ data: { code, userId, purpose, status: 'Active', attempts: 0, expiresAt } });
-    await prisma.auditLog.create({ data: { action: 'OTP Generated', actorId: userId, entityType: 'OTP', entityId: otp.id, details: `Purpose: ${purpose}` } });
+    await prisma.auditLog.create({ data: { action: 'OTP Generated', actorId: userId, entityType: 'OTP', entityId: otp.id, details: `Purpose: ${purpose}`, ipAddress: req.ip } });
     mark('otpSave');
 
     const emailPromise = sendEmail(userEmail, 'Your OTP Code — Smart Campus', [
@@ -1109,24 +1147,190 @@ router.post('/profile/update', authMiddleware, async (req: AuthRequest, res) => 
 });
 
 // ─── SSL PAYMENT ───
-router.post('/payment/init', authMiddleware, async (req: AuthRequest, res) => {
+// Every real payment (fees, fines, shop purchases, pay-later dues, and mass/batch pay) is a
+// single SSLCommerz checkout session. Confirmation NEVER happens on the client's say-so alone —
+// both the real SSLCommerz IPN (server-to-server) and the browser's return-trip status check
+// funnel through the same confirmSslPayment(), which always re-validates against SSLCommerz's
+// own Merchant Transaction Validation API before marking anything Paid.
+
+type SslPurpose = 'semester_fee' | 'library_fine' | 'admin_fine' | 'pay_later' | 'shop_payment' | 'mass_pay';
+const SSL_PURPOSES: SslPurpose[] = ['semester_fee', 'library_fine', 'admin_fine', 'pay_later', 'shop_payment', 'mass_pay'];
+const SSL_TYPE_MAP: Record<SslPurpose, string> = {
+  semester_fee: 'Fee Payment', library_fine: 'Fine Payment', admin_fine: 'Fine Payment',
+  pay_later: 'Shop Payment', shop_payment: 'Shop Payment', mass_pay: 'Mass Payment',
+};
+
+// Tiered payment authorization — enforced server-side, not just in the UI. A client that skips
+// the PIN/OTP dialogs entirely still gets rejected here; this is what actually stops a request,
+// not the dialogs the frontend happens to show first.
+const PIN_REQUIRED_THRESHOLD = 3000;    // ৳3,000+ requires a fresh PIN verification
+const OTP_REQUIRED_THRESHOLD = 20000;   // ৳20,000+ additionally requires a fresh OTP
+const AUTH_FRESHNESS_WINDOW_MS = 5 * 60 * 1000; // both proofs expire after 5 minutes
+
+interface PayItem { id: string; source: 'semester' | 'library' | 'admin' | 'payLater' | 'shop'; amount: number; label: string }
+
+async function markItemPaid(item: PayItem, reference: string) {
+  if (item.source === 'semester') await prisma.semesterFee.update({ where: { id: item.id }, data: { status: 'Paid', reference } }).catch(() => {});
+  else if (item.source === 'library') await prisma.libraryFine.update({ where: { id: item.id }, data: { status: 'Paid', reference } }).catch(() => {});
+  else if (item.source === 'admin') await prisma.adminFine.update({ where: { id: item.id }, data: { status: 'Paid', reference } }).catch(() => {});
+  else if (item.source === 'payLater') await prisma.payLaterDue.update({ where: { id: item.id }, data: { status: 'Paid', paymentReference: reference } }).catch(() => {});
+  // source === 'shop': no separate due row to update — the Transaction row itself is the payment record.
+}
+
+function sslValidationUrl() {
+  const isLive = process.env.SSLCOMMERZ_IS_LIVE === 'true';
+  return isLive ? 'https://securepay.sslcommerz.com/validator/api/merchantTransIDvalidationAPI.php' : 'https://sandbox.sslcommerz.com/validator/api/merchantTransIDvalidationAPI.php';
+}
+
+// The single source of truth for "did this payment actually succeed". Called by both the real
+// IPN webhook and the browser's post-redirect status check — never by client-supplied status alone.
+async function confirmSslPayment(reference: string, source: 'ipn' | 'browser-validate', rawPayload: unknown, ip?: string) {
+  const tx = await prisma.transaction.findFirst({ where: { reference } });
+  if (!tx) {
+    await prisma.paymentCallback.create({ data: { reference, source, rawPayload: JSON.stringify(rawPayload), verified: false, ipAddress: ip } }).catch(() => {});
+    return { status: 'failed' as const, message: 'Transaction not found' };
+  }
+
+  if (tx.status === 'Success') {
+    await prisma.paymentCallback.create({ data: { transactionId: tx.id, reference, source, rawPayload: JSON.stringify(rawPayload), sslStatus: 'ALREADY_CONFIRMED', verified: true, ipAddress: ip } }).catch(() => {});
+    return { status: 'valid' as const, message: 'Payment already confirmed' };
+  }
+  if (tx.status === 'Failed' || tx.status === 'Cancelled') {
+    await prisma.paymentCallback.create({ data: { transactionId: tx.id, reference, source, rawPayload: JSON.stringify(rawPayload), sslStatus: tx.status, verified: false, ipAddress: ip } }).catch(() => {});
+    return { status: 'failed' as const, message: `Payment ${tx.status.toLowerCase()}` };
+  }
+
+  let data: Record<string, unknown>;
+  try {
+    const params = new URLSearchParams({ store_id: process.env.SSLCOMMERZ_STORE_ID || '', store_passwd: process.env.SSLCOMMERZ_STORE_PASSWORD || '', merchanttran_id: reference, v: '1', format: 'json' });
+    const response = await fetch(`${sslValidationUrl()}?${params.toString()}`);
+    data = await response.json() as Record<string, unknown>;
+  } catch {
+    await prisma.paymentCallback.create({ data: { transactionId: tx.id, reference, source, rawPayload: JSON.stringify(rawPayload), sslStatus: 'VALIDATION_UNREACHABLE', verified: false, ipAddress: ip } }).catch(() => {});
+    return { status: 'pending' as const, message: 'Could not reach the payment gateway validator. Please check again shortly.' };
+  }
+
+  const element = (Array.isArray(data.element) ? data.element[0] : data) as Record<string, unknown>;
+  const sslStatus = (element?.status as string)?.toUpperCase();
+  const validId = element?.val_id as string;
+  const bankTranId = element?.bank_tran_id as string;
+  const amount = parseFloat(element?.amount as string) || tx.amount || 0;
+
+  await prisma.paymentCallback.create({
+    data: { transactionId: tx.id, reference, source, rawPayload: JSON.stringify({ callback: rawPayload, validation: data }), sslStatus: sslStatus || 'UNKNOWN', verified: false, ipAddress: ip },
+  }).catch(() => {});
+
+  if (sslStatus === 'VALID' || sslStatus === 'VALIDATED') {
+    if (Math.abs(amount - (tx.amount || 0)) > 1) {
+      await prisma.transaction.update({ where: { id: tx.id }, data: { status: 'Failed' } });
+      return { status: 'failed' as const, message: 'Payment amount mismatch. Contact support.' };
+    }
+
+    // Re-fetch immediately before writing — guards the race between the real IPN and the
+    // browser's own status check both landing at roughly the same time.
+    const fresh = await prisma.transaction.findUnique({ where: { id: tx.id } });
+    if (fresh?.status === 'Success') return { status: 'valid' as const, message: 'Payment already confirmed' };
+
+    const cardType = (element?.card_type as string) || '';
+    const payMethod = cardType.includes('bkash') ? 'bKash' : cardType.includes('nagad') ? 'Nagad' : cardType.includes('rocket') ? 'Rocket' : cardType.includes('visa') || cardType.includes('master') ? 'Card' : (cardType || 'Online');
+    await prisma.transaction.update({ where: { id: tx.id }, data: { status: 'Success', gatewayTxnId: validId, bankTxnId: bankTranId, paymentMethod: payMethod } });
+
+    let items: PayItem[] = [];
+    try { items = tx.itemsJson ? JSON.parse(tx.itemsJson) : []; } catch { items = []; }
+    for (const item of items) await markItemPaid(item, reference);
+
+    await prisma.auditLog.create({ data: { action: 'SSLCommerz Payment Verified', actorId: tx.userId, entityType: 'Transaction', entityId: tx.id, details: `Amount: ৳${amount}, Purpose: ${tx.purpose}, Val ID: ${validId}, Source: ${source}`, ipAddress: ip } }).catch(() => {});
+
+    try {
+      const user = await prisma.user.findUnique({ where: { id: tx.userId } });
+      if (user?.email) {
+        await sendEmail(user.email, `Payment Successful — ৳${amount.toLocaleString()} — Smart Campus`, [
+          { type: 'text', content: `<strong>Hi ${user.fullName || 'Student'},</strong>\n\nYour payment was successful and verified with the payment gateway.\n\n<strong>Amount:</strong> ৳${amount.toLocaleString()}\n<strong>Purpose:</strong> ${(tx.purpose || '').replace(/_/g, ' ')}\n<strong>Reference:</strong> ${reference}\n<strong>Gateway ID:</strong> ${validId || 'N/A'}\n<strong>Date:</strong> ${new Date().toLocaleString('en-US', { timeZone: 'Asia/Dhaka' })}` },
+          { type: 'divider' }, { type: 'text', content: '<em>If you did not make this payment, contact support immediately.</em>\n\n🎓 Smart Campus — Your University Wallet' },
+        ]);
+      }
+    } catch { /* best-effort */ }
+
+    return { status: 'valid' as const, message: 'Payment successful' };
+  }
+
+  if (sslStatus === 'FAILED' || sslStatus === 'CANCELLED') {
+    await prisma.transaction.update({ where: { id: tx.id }, data: { status: sslStatus === 'FAILED' ? 'Failed' : 'Cancelled' } });
+    return { status: 'failed' as const, message: `Payment ${sslStatus.toLowerCase()}` };
+  }
+
+  return { status: 'pending' as const, message: 'Payment is still being processed' };
+}
+
+router.post('/payment/init', authMiddleware, paymentInitLimiter, async (req: AuthRequest, res) => {
   try {
     const userId = req.user!.id;
-    const { amount, purpose, itemId, itemLabel } = req.body;
+    const { purpose, items, itemLabel, otpId } = req.body as { purpose: SslPurpose; items: PayItem[]; itemLabel?: string; otpId?: string };
+
+    if (!SSL_PURPOSES.includes(purpose)) return res.status(400).json({ message: 'Invalid payment purpose.' });
+    if (!Array.isArray(items) || items.length === 0) return res.status(400).json({ message: 'No items specified for payment.' });
+
+    let shopId: string | undefined;
+    for (const item of items) {
+      if (item.source === 'semester') {
+        const rec = await prisma.semesterFee.findUnique({ where: { id: item.id } });
+        if (!rec || rec.studentId !== userId) return res.status(404).json({ message: 'Semester fee not found.' });
+        if (rec.status !== 'Pending') return res.status(400).json({ message: 'This fee is no longer pending.' });
+      } else if (item.source === 'library') {
+        const rec = await prisma.libraryFine.findUnique({ where: { id: item.id } });
+        if (!rec || rec.studentId !== userId) return res.status(404).json({ message: 'Library fine not found.' });
+        if (rec.status !== 'Pending') return res.status(400).json({ message: 'This fine is no longer pending.' });
+      } else if (item.source === 'admin') {
+        const rec = await prisma.adminFine.findUnique({ where: { id: item.id } });
+        if (!rec || rec.studentId !== userId) return res.status(404).json({ message: 'Admin fine not found.' });
+        if (rec.status !== 'Pending') return res.status(400).json({ message: 'This fine is no longer pending.' });
+      } else if (item.source === 'payLater') {
+        const rec = await prisma.payLaterDue.findUnique({ where: { id: item.id } });
+        if (!rec || rec.studentId !== userId) return res.status(404).json({ message: 'Due not found.' });
+        if (rec.status !== 'Pending') return res.status(400).json({ message: 'This due is no longer pending.' });
+      } else if (item.source === 'shop') {
+        const shop = await prisma.shop.findUnique({ where: { id: item.id } });
+        if (!shop || shop.status !== 'Active') return res.status(400).json({ message: 'This shop cannot accept payments right now.' });
+        shopId = shop.id;
+      } else {
+        return res.status(400).json({ message: 'Unknown item source.' });
+      }
+    }
+
+    const amount = items.reduce((s, i) => s + (i.amount || 0), 0);
+    if (!amount || amount <= 0) return res.status(400).json({ message: 'Invalid payment amount.' });
+
+    if (amount >= PIN_REQUIRED_THRESHOLD) {
+      const freshUser = await prisma.user.findUnique({ where: { id: userId } });
+      const pinFresh = freshUser?.pinVerifiedAt && (Date.now() - new Date(freshUser.pinVerifiedAt).getTime()) < AUTH_FRESHNESS_WINDOW_MS;
+      if (!pinFresh) return res.status(403).json({ message: 'Please verify your PIN before this payment.', requiresPin: true });
+
+      if (amount >= OTP_REQUIRED_THRESHOLD) {
+        const otp = otpId ? await prisma.otpCode.findUnique({ where: { id: otpId } }) : null;
+        const otpFresh = otp && otp.userId === userId && otp.status === 'Used' && otp.purpose === 'Large Payment' && (Date.now() - new Date(otp.updatedAt).getTime()) < AUTH_FRESHNESS_WINDOW_MS;
+        if (!otpFresh) return res.status(403).json({ message: 'OTP verification required for this payment.', requiresOtp: true });
+      }
+    }
+
     const ref = `SSL-${Date.now().toString(36).toUpperCase()}-${Math.random().toString(36).slice(2, 6).toUpperCase()}`;
 
     const pendingTxns = await prisma.transaction.findMany({ where: { userId, status: 'Pending', gateway: 'SSLCommerz' }, take: 5 });
-    if (pendingTxns.length >= 3) return res.status(429).json({ message: 'Too many pending payments.' });
+    if (pendingTxns.length >= 3) return res.status(429).json({ message: 'Too many pending payments. Complete or cancel existing ones first.' });
 
-    const typeMap: Record<string, string> = { topup: 'Top Up', semester_fee: 'Fee Payment', library_fine: 'Fine Payment', admin_fine: 'Fine Payment', shop_payment: 'Shop Payment', pay_later: 'Shop Payment' };
     const tx = await prisma.transaction.create({
-      data: { reference: ref, userId, type: typeMap[purpose] || 'Top Up', direction: purpose === 'topup' ? 'Credit' : 'Debit', amount, status: 'Pending', gateway: 'SSLCommerz', idempotencyKey: `${userId}-${purpose}-${Date.now()}`, description: itemLabel || `Online ${purpose}`, paymentMethod: 'Online' },
+      data: {
+        reference: ref, userId, type: SSL_TYPE_MAP[purpose], direction: 'Debit', amount, status: 'Pending',
+        gateway: 'SSLCommerz', idempotencyKey: `${userId}-${purpose}-${Date.now()}`,
+        description: itemLabel || items.map(i => i.label).join(', '), paymentMethod: 'Online',
+        purpose, itemsJson: JSON.stringify(items), shopId,
+      },
     });
 
     const user = await prisma.user.findUnique({ where: { id: userId } });
     const isLive = process.env.SSLCOMMERZ_IS_LIVE === 'true';
     const SSLCOMMERZ_URL = isLive ? 'https://securepay.sslcommerz.com/gwprocess/v4/api.php' : 'https://sandbox.sslcommerz.com/gwprocess/v4/api.php';
     const appUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
+    const backendUrl = process.env.BACKEND_URL || `http://localhost:${PORT}`;
 
     const formData = new URLSearchParams({
       store_id: process.env.SSLCOMMERZ_STORE_ID || '',
@@ -1135,14 +1339,15 @@ router.post('/payment/init', authMiddleware, async (req: AuthRequest, res) => {
       success_url: `${appUrl}/student/payment-result?status=success&ref=${ref}`,
       fail_url: `${appUrl}/student/payment-result?status=failed&ref=${ref}`,
       cancel_url: `${appUrl}/student/payment-result?status=cancelled&ref=${ref}`,
-      ipn_url: `${appUrl}/student/payment-result?status=success&ref=${ref}`,
+      // Real server-to-server IPN — this is what actually confirms payment now, not the browser's return trip.
+      ipn_url: `${backendUrl}/api/payment/ipn`,
       cus_name: user?.fullName || 'Student',
       cus_email: user?.email || req.user!.email,
       cus_phone: user?.phone || '01700000000',
       cus_add1: 'University Campus', cus_city: 'Dhaka', cus_country: 'Bangladesh',
-      shipping_method: 'NO', product_name: itemLabel || 'Wallet Top Up',
-      product_category: purpose === 'topup' ? 'Wallet' : 'Payment', product_profile: 'general',
-      value_a: userId, value_b: purpose, value_c: itemId || '', value_d: tx.id,
+      shipping_method: 'NO', product_name: itemLabel || items[0]?.label || 'Campus Payment',
+      product_category: 'Payment', product_profile: 'general',
+      value_a: userId, value_b: purpose, value_c: ref, value_d: tx.id,
     });
 
     const response = await fetch(SSLCOMMERZ_URL, { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: formData.toString() });
@@ -1157,7 +1362,7 @@ router.post('/payment/init', authMiddleware, async (req: AuthRequest, res) => {
     }
 
     await prisma.transaction.update({ where: { id: tx.id }, data: { gatewayTxnId: data.sessionkey as string } });
-    await prisma.auditLog.create({ data: { action: 'SSLCommerz Payment Initiated', actorId: userId, entityType: 'Transaction', entityId: tx.id, details: `Amount: ৳${amount}, Purpose: ${purpose}, Ref: ${ref}` } });
+    await prisma.auditLog.create({ data: { action: 'SSLCommerz Payment Initiated', actorId: userId, entityType: 'Transaction', entityId: tx.id, details: `Amount: ৳${amount}, Purpose: ${purpose}, Ref: ${ref}`, ipAddress: req.ip } });
 
     res.json({ gatewayUrl: data.GatewayPageURL as string, transactionRef: ref, sessionKey: data.sessionkey as string });
   } catch (err: any) {
@@ -1165,73 +1370,34 @@ router.post('/payment/init', authMiddleware, async (req: AuthRequest, res) => {
   }
 });
 
+// Browser's post-redirect status check — just reflects current state via the same shared
+// confirmation logic the IPN uses. Safe to call repeatedly; never double-applies an effect.
 router.post('/payment/validate', authMiddleware, async (req: AuthRequest, res) => {
   try {
-    const userId = req.user!.id;
-    const { transactionRef, purpose, itemId } = req.body;
-    const tx = await prisma.transaction.findFirst({ where: { reference: transactionRef } });
-    if (!tx) return res.status(404).json({ message: 'Transaction not found' });
-
-    if (tx.status === 'Success') {
-      const wallet = await prisma.wallet.findFirst({ where: { ownerId: userId } });
-      return res.json({ status: 'valid', newBalance: wallet?.balance || 0, message: 'Payment already confirmed' });
-    }
-    if (tx.status === 'Failed' || tx.status === 'Cancelled') return res.json({ status: 'failed', message: `Payment ${tx.status?.toLowerCase()}` });
-
-    const isLive = process.env.SSLCOMMERZ_IS_LIVE === 'true';
-    const VALIDATION_URL = isLive ? 'https://securepay.sslcommerz.com/validator/api/merchantTransIDvalidationAPI.php' : 'https://sandbox.sslcommerz.com/validator/api/merchantTransIDvalidationAPI.php';
-
-    const params = new URLSearchParams({ store_id: process.env.SSLCOMMERZ_STORE_ID || '', store_passwd: process.env.SSLCOMMERZ_STORE_PASSWORD || '', merchanttran_id: transactionRef, v: '1', format: 'json' });
-    const response = await fetch(`${VALIDATION_URL}?${params.toString()}`);
-    const data = await response.json() as Record<string, unknown>;
-    const element = Array.isArray(data.element) ? data.element[0] : data;
-    const sslStatus = (element?.status as string)?.toUpperCase();
-    const validId = element?.val_id as string;
-    const bankTranId = element?.bank_tran_id as string;
-    const amount = parseFloat(element?.amount as string) || tx.amount || 0;
-
-    if (sslStatus === 'VALID' || sslStatus === 'VALIDATED') {
-      if (Math.abs(amount - (tx.amount || 0)) > 1) {
-        await prisma.transaction.update({ where: { id: tx.id }, data: { status: 'Failed' } });
-        return res.status(400).json({ message: 'Payment amount mismatch.' });
-      }
-
-      const cardType = (element?.card_type as string) || '';
-      const payMethod = cardType.includes('bkash') ? 'bKash' : cardType.includes('nagad') ? 'Nagad' : cardType.includes('rocket') ? 'Rocket' : cardType.includes('visa') || cardType.includes('master') ? 'Card' : 'Online';
-      await prisma.transaction.update({ where: { id: tx.id }, data: { status: 'Success', gatewayTxnId: validId, bankTxnId: bankTranId, paymentMethod: payMethod } });
-
-      let wallet = await prisma.wallet.findFirst({ where: { ownerId: userId } });
-      if (!wallet) wallet = await prisma.wallet.create({ data: { walletId: `W-${userId.slice(0, 8)}`, ownerId: userId, balance: 0 } });
-
-      let newBalance = wallet.balance || 0;
-      if (purpose === 'topup') {
-        newBalance = newBalance + amount;
-        await prisma.wallet.update({ where: { id: wallet.id }, data: { balance: newBalance } });
-      }
-
-      if (itemId) {
-        if (purpose === 'semester_fee') await prisma.semesterFee.update({ where: { id: itemId }, data: { status: 'Paid', reference: transactionRef } });
-        else if (purpose === 'library_fine') await prisma.libraryFine.update({ where: { id: itemId }, data: { status: 'Paid', reference: transactionRef } });
-        else if (purpose === 'admin_fine') await prisma.adminFine.update({ where: { id: itemId }, data: { status: 'Paid', reference: transactionRef } });
-        else if (purpose === 'pay_later') await prisma.payLaterDue.update({ where: { id: itemId }, data: { status: 'Paid', paymentReference: transactionRef } });
-      }
-
-      return res.json({ status: 'valid', newBalance, message: purpose === 'topup' ? `৳${amount} added to wallet` : 'Payment successful' });
-    }
-
-    if (sslStatus === 'FAILED' || sslStatus === 'CANCELLED') {
-      await prisma.transaction.update({ where: { id: tx.id }, data: { status: sslStatus === 'FAILED' ? 'Failed' : 'Cancelled' } });
-      return res.json({ status: 'failed', message: `Payment ${sslStatus.toLowerCase()}` });
-    }
-
-    res.json({ status: 'pending', message: 'Payment is still being processed' });
+    const { transactionRef } = req.body;
+    if (!transactionRef) return res.status(400).json({ message: 'Missing transaction reference.' });
+    const result = await confirmSslPayment(transactionRef, 'browser-validate', req.body, req.ip);
+    res.json(result);
   } catch (err: any) {
     res.status(500).json({ message: err.message });
   }
 });
 
+// Real SSLCommerz IPN — server-to-server, no student session/Bearer token involved. This is the
+// endpoint that actually confirms a payment; the browser-return path above is just a UX mirror.
+router.post('/payment/ipn', paymentIpnLimiter, async (req, res) => {
+  try {
+    const tranId = (req.body?.tran_id || req.body?.value_c) as string | undefined;
+    if (tranId) await confirmSslPayment(tranId, 'ipn', req.body, req.ip);
+  } catch (err: any) {
+    console.error('[payment/ipn] error:', err.message);
+  }
+  // Always ack fast with 200 — SSLCommerz retries on non-200, and retries must be safe no-ops (they are).
+  res.status(200).json({ received: true });
+});
+
 // ─── ADMIN ROUTES ───
-router.post('/admin/overview', authMiddleware, async (req: AuthRequest, res) => {
+router.post('/admin/overview', authMiddleware, requireAdmin, async (req: AuthRequest, res) => {
   try {
     const [totalStudents, totalShops, totalTransactions, recentLogs] = await Promise.all([
       prisma.user.count({ where: { role: 'Student' } }),
@@ -1251,7 +1417,7 @@ router.post('/admin/overview', authMiddleware, async (req: AuthRequest, res) => 
   }
 });
 
-router.post('/admin/seed', authMiddleware, async (req: AuthRequest, res) => {
+router.post('/admin/seed', authMiddleware, requireAdmin, async (req: AuthRequest, res) => {
   try {
     const existingShops = await prisma.shop.findMany({ take: 1 });
     if (existingShops.length > 0) return res.json({ success: false, message: 'Database already has data. Seed skipped.' });
@@ -1277,35 +1443,55 @@ router.post('/admin/seed', authMiddleware, async (req: AuthRequest, res) => {
   }
 });
 
-router.post('/admin/shops', authMiddleware, async (req: AuthRequest, res) => {
+router.post('/admin/shops', authMiddleware, requireAdmin, async (req: AuthRequest, res) => {
   try {
     const shops = await prisma.shop.findMany({ take: 100, orderBy: { createdAt: 'desc' } });
-    res.json({
-      shops: shops.map(s => ({
+    const results = await Promise.all(shops.map(async (s) => {
+      const [revenueAgg, settledAgg] = await Promise.all([
+        prisma.transaction.aggregate({ _sum: { amount: true }, where: { shopId: s.id, status: 'Success' } }),
+        prisma.settlement.aggregate({ _sum: { amount: true }, where: { shopId: s.id } }),
+      ]);
+      const totalReceived = revenueAgg._sum.amount || 0;
+      const totalSettled = settledAgg._sum.amount || 0;
+      return {
         id: s.id, name: s.name, category: s.category, rating: s.rating,
         status: s.status, location: s.location || '', logoUrl: s.logoUrl || '',
         merchantId: s.merchantId || '', qrToken: s.qrToken || '',
-      })),
-    });
+        totalReceived, totalSettled, pendingSettlement: Math.max(0, totalReceived - totalSettled),
+      };
+    }));
+    res.json({ shops: results });
   } catch (err: any) {
     res.status(500).json({ message: err.message });
   }
 });
 
-router.post('/admin/shops/manage', authMiddleware, async (req: AuthRequest, res) => {
+router.post('/admin/shops/manage', authMiddleware, requireAdmin, async (req: AuthRequest, res) => {
   try {
     const { action, shopId, ...data } = req.body;
     if (action === 'create') {
       const shop = await prisma.shop.create({ data: { ...data, qrToken: `QR-${crypto.randomBytes(6).toString('hex')}`, merchantId: `MERCH-${crypto.randomBytes(4).toString('hex').toUpperCase()}` } });
+      await prisma.auditLog.create({ data: { action: 'Shop Created', actorId: req.user!.id, entityType: 'Shop', entityId: shop.id, details: `Created shop "${shop.name}"`, ipAddress: req.ip } });
       return res.json({ success: true, message: 'Shop created', shopId: shop.id });
     }
     if (action === 'update') {
       await prisma.shop.update({ where: { id: shopId }, data });
+      await prisma.auditLog.create({ data: { action: 'Shop Updated', actorId: req.user!.id, entityType: 'Shop', entityId: shopId, details: JSON.stringify(data), ipAddress: req.ip } });
       return res.json({ success: true, message: 'Shop updated' });
     }
     if (action === 'delete' || action === 'deactivate') {
       await prisma.shop.update({ where: { id: shopId }, data: { status: 'Inactive' } });
+      await prisma.auditLog.create({ data: { action: 'Shop Deactivated', actorId: req.user!.id, entityType: 'Shop', entityId: shopId, ipAddress: req.ip } });
       return res.json({ success: true, message: 'Shop deactivated' });
+    }
+    if (action === 'settle') {
+      // Manual internal reconciliation — SSLCommerz doesn't expose a "funds disbursed" API, so
+      // this records Admin Office confirming a shop has actually been paid outside the app.
+      const amount = Number(data.amount);
+      if (!amount || amount <= 0) return res.status(400).json({ message: 'Enter a valid settlement amount.' });
+      const settlement = await prisma.settlement.create({ data: { shopId, amount, notes: data.notes || null, settledBy: req.user!.id } });
+      await prisma.auditLog.create({ data: { action: 'Shop Settlement Recorded', actorId: req.user!.id, entityType: 'Shop', entityId: shopId, details: `Settled ৳${amount}${data.notes ? ` — ${data.notes}` : ''}`, ipAddress: req.ip } });
+      return res.json({ success: true, message: 'Settlement recorded', settlementId: settlement.id });
     }
     res.status(400).json({ message: 'Unknown action' });
   } catch (err: any) {
@@ -1313,7 +1499,7 @@ router.post('/admin/shops/manage', authMiddleware, async (req: AuthRequest, res)
   }
 });
 
-router.post('/admin/audit-logs', authMiddleware, async (req: AuthRequest, res) => {
+router.post('/admin/audit-logs', authMiddleware, requireAdmin, async (req: AuthRequest, res) => {
   try {
     const { limit = 50, offset = 0, action, entityType } = req.body;
     const where: any = {};
@@ -1338,7 +1524,7 @@ router.post('/admin/audit-logs', authMiddleware, async (req: AuthRequest, res) =
   }
 });
 
-router.post('/admin/staff', authMiddleware, async (req: AuthRequest, res) => {
+router.post('/admin/staff', authMiddleware, requireAdmin, async (req: AuthRequest, res) => {
   try {
     const { search } = req.body;
     let staff = await prisma.user.findMany({ where: { role: { not: 'Student' } }, take: 500 });
@@ -1353,24 +1539,28 @@ router.post('/admin/staff', authMiddleware, async (req: AuthRequest, res) => {
   }
 });
 
-router.post('/admin/staff/manage', authMiddleware, async (req: AuthRequest, res) => {
+router.post('/admin/staff/manage', authMiddleware, requireAdmin, async (req: AuthRequest, res) => {
   try {
     const { action, userId, ...data } = req.body;
     if (action === 'create') {
       const hashed = await bcrypt.hash(data.password || 'changeme123', 10);
-      await prisma.user.create({ data: { email: data.email, password: hashed, fullName: data.fullName, role: data.role, department: data.department, phone: data.phone, status: 'Active' } });
+      const staff = await prisma.user.create({ data: { email: data.email, password: hashed, fullName: data.fullName, role: data.role, department: data.department, phone: data.phone, status: 'Active' } });
+      await prisma.auditLog.create({ data: { action: 'Staff Account Created', actorId: req.user!.id, entityType: 'User', entityId: staff.id, details: `Created ${data.role} account for ${data.email}`, ipAddress: req.ip } });
       return res.json({ success: true, message: 'Staff account created' });
     }
     if (action === 'update') {
       await prisma.user.update({ where: { id: userId }, data });
+      await prisma.auditLog.create({ data: { action: 'Staff Account Updated', actorId: req.user!.id, entityType: 'User', entityId: userId, ipAddress: req.ip } });
       return res.json({ success: true, message: 'Staff updated' });
     }
     if (action === 'suspend') {
       await prisma.user.update({ where: { id: userId }, data: { status: 'Suspended' } });
+      await prisma.auditLog.create({ data: { action: 'Staff Account Suspended', actorId: req.user!.id, entityType: 'User', entityId: userId, ipAddress: req.ip } });
       return res.json({ success: true, message: 'Staff suspended' });
     }
     if (action === 'activate') {
       await prisma.user.update({ where: { id: userId }, data: { status: 'Active' } });
+      await prisma.auditLog.create({ data: { action: 'Staff Account Activated', actorId: req.user!.id, entityType: 'User', entityId: userId, ipAddress: req.ip } });
       return res.json({ success: true, message: 'Staff activated' });
     }
     res.status(400).json({ message: 'Unknown action' });
@@ -1379,7 +1569,7 @@ router.post('/admin/staff/manage', authMiddleware, async (req: AuthRequest, res)
   }
 });
 
-router.post('/admin/search-students', authMiddleware, async (req: AuthRequest, res) => {
+router.post('/admin/search-students', authMiddleware, requireAdmin, async (req: AuthRequest, res) => {
   try {
     const { query } = req.body;
     if (!query || query.length < 2) return res.json({ students: [] });
@@ -1405,19 +1595,19 @@ router.post('/admin/search-students', authMiddleware, async (req: AuthRequest, r
   }
 });
 
-router.post('/admin/fines/assign', authMiddleware, async (req: AuthRequest, res) => {
+router.post('/admin/fines/assign', authMiddleware, requireAdmin, async (req: AuthRequest, res) => {
   try {
     const { studentId, reason, amount, incidentDate } = req.body;
     const ref = `AF-${Date.now().toString(36).toUpperCase()}`;
     const fine = await prisma.adminFine.create({ data: { reason, studentId, amount, incidentDate: incidentDate || new Date().toISOString().split('T')[0], status: 'Pending', reference: ref } });
-    await prisma.auditLog.create({ data: { action: 'Admin Fine Assigned', actorId: req.user!.id, entityType: 'AdminFine', entityId: fine.id, details: `Fine of ৳${amount}: ${reason}` } });
+    await prisma.auditLog.create({ data: { action: 'Admin Fine Assigned', actorId: req.user!.id, entityType: 'AdminFine', entityId: fine.id, details: `Fine of ৳${amount}: ${reason}`, ipAddress: req.ip } });
     res.json({ success: true, fineId: fine.id, message: 'Fine assigned successfully' });
   } catch (err: any) {
     res.status(500).json({ message: err.message });
   }
 });
 
-router.post('/admin/waivers', authMiddleware, async (req: AuthRequest, res) => {
+router.post('/admin/waivers', authMiddleware, requireAdmin, async (req: AuthRequest, res) => {
   try {
     const disputed = await prisma.adminFine.findMany({ where: { status: 'Disputed' }, include: { student: true } });
     const libDisputed = await prisma.libraryFine.findMany({ where: { status: 'Disputed' }, include: { student: true } });
@@ -1432,12 +1622,13 @@ router.post('/admin/waivers', authMiddleware, async (req: AuthRequest, res) => {
   }
 });
 
-router.post('/admin/waivers/update', authMiddleware, async (req: AuthRequest, res) => {
+router.post('/admin/waivers/update', authMiddleware, requireAdmin, async (req: AuthRequest, res) => {
   try {
     const { waiverId, type, action } = req.body;
     const newStatus = action === 'approve' ? 'Waived' : action === 'reject' ? 'Pending' : 'Pending';
     if (type === 'admin') await prisma.adminFine.update({ where: { id: waiverId }, data: { status: newStatus } });
     else await prisma.libraryFine.update({ where: { id: waiverId }, data: { status: newStatus } });
+    await prisma.auditLog.create({ data: { action: `Waiver ${action === 'approve' ? 'Approved' : 'Rejected'}`, actorId: req.user!.id, entityType: type === 'admin' ? 'AdminFine' : 'LibraryFine', entityId: waiverId, ipAddress: req.ip } });
     res.json({ success: true, message: `Waiver ${action}d` });
   } catch (err: any) {
     res.status(500).json({ message: err.message });
@@ -1445,7 +1636,7 @@ router.post('/admin/waivers/update', authMiddleware, async (req: AuthRequest, re
 });
 
 // ─── LIBRARY ROUTES ───
-router.post('/library/overview', authMiddleware, async (req: AuthRequest, res) => {
+router.post('/library/overview', authMiddleware, requireLibrary, async (req: AuthRequest, res) => {
   try {
     const [total, pending, paid] = await Promise.all([
       prisma.libraryFine.count(),
@@ -1469,7 +1660,7 @@ router.post('/library/overview', authMiddleware, async (req: AuthRequest, res) =
   }
 });
 
-router.post('/library/student-lookup', authMiddleware, async (req: AuthRequest, res) => {
+router.post('/library/student-lookup', authMiddleware, requireLibrary, async (req: AuthRequest, res) => {
   try {
     const { identifier } = req.body;
     let student = await prisma.user.findUnique({ where: { email: identifier } });
@@ -1486,30 +1677,30 @@ router.post('/library/student-lookup', authMiddleware, async (req: AuthRequest, 
   }
 });
 
-router.post('/library/fines/assign', authMiddleware, async (req: AuthRequest, res) => {
+router.post('/library/fines/assign', authMiddleware, requireLibrary, async (req: AuthRequest, res) => {
   try {
     const { studentId, fineType, amount, dueDate, label } = req.body;
     const ref = `LIB-${Date.now().toString(36).toUpperCase()}`;
     const fine = await prisma.libraryFine.create({ data: { label: label || `${fineType} Fine`, studentId, fineType, amount, dueDate, status: 'Pending', reference: ref } });
-    await prisma.auditLog.create({ data: { action: 'Library Fine Assigned', actorId: req.user!.id, entityType: 'LibraryFine', entityId: fine.id, details: `${fineType} fine of ৳${amount}` } });
+    await prisma.auditLog.create({ data: { action: 'Library Fine Assigned', actorId: req.user!.id, entityType: 'LibraryFine', entityId: fine.id, details: `${fineType} fine of ৳${amount}`, ipAddress: req.ip } });
     res.json({ success: true, fineId: fine.id, message: 'Library fine assigned' });
   } catch (err: any) {
     res.status(500).json({ message: err.message });
   }
 });
 
-router.post('/library/fines/waive', authMiddleware, async (req: AuthRequest, res) => {
+router.post('/library/fines/waive', authMiddleware, requireLibrary, async (req: AuthRequest, res) => {
   try {
     const { fineId, reason } = req.body;
     await prisma.libraryFine.update({ where: { id: fineId }, data: { status: 'Waived' } });
-    await prisma.auditLog.create({ data: { action: 'Library Fine Waived', actorId: req.user!.id, entityType: 'LibraryFine', entityId: fineId, details: reason || 'Fine waived' } });
+    await prisma.auditLog.create({ data: { action: 'Library Fine Waived', actorId: req.user!.id, entityType: 'LibraryFine', entityId: fineId, details: reason || 'Fine waived', ipAddress: req.ip } });
     res.json({ success: true, message: 'Fine waived' });
   } catch (err: any) {
     res.status(500).json({ message: err.message });
   }
 });
 
-router.post('/library/clearance', authMiddleware, async (req: AuthRequest, res) => {
+router.post('/library/clearance', authMiddleware, requireLibrary, async (req: AuthRequest, res) => {
   try {
     const students = await prisma.user.findMany({ where: { role: 'Student' }, take: 100 });
     const result = [];
@@ -1528,7 +1719,7 @@ router.post('/library/clearance', authMiddleware, async (req: AuthRequest, res) 
 });
 
 // ─── ACCOUNTS ROUTES ───
-router.post('/accounts/overview', authMiddleware, async (req: AuthRequest, res) => {
+router.post('/accounts/overview', authMiddleware, requireAccounts, async (req: AuthRequest, res) => {
   try {
     const [totalAgg, collectedAgg, pendingAgg] = await Promise.all([
       prisma.semesterFee.aggregate({ _sum: { amount: true } }),
@@ -1550,7 +1741,7 @@ router.post('/accounts/overview', authMiddleware, async (req: AuthRequest, res) 
   }
 });
 
-router.post('/accounts/fee-push', authMiddleware, async (req: AuthRequest, res) => {
+router.post('/accounts/fee-push', authMiddleware, requireAccounts, async (req: AuthRequest, res) => {
   try {
     const { label, amount, dueDate, department, batch } = req.body;
     const where: any = { role: 'Student' };
@@ -1571,21 +1762,21 @@ router.post('/accounts/fee-push', authMiddleware, async (req: AuthRequest, res) 
   }
 });
 
-router.post('/accounts/fee-adjust', authMiddleware, async (req: AuthRequest, res) => {
+router.post('/accounts/fee-adjust', authMiddleware, requireAccounts, async (req: AuthRequest, res) => {
   try {
     const { feeId, newAmount, newStatus, reason } = req.body;
     const data: any = {};
     if (newAmount !== undefined) data.amount = newAmount;
     if (newStatus) data.status = newStatus;
     await prisma.semesterFee.update({ where: { id: feeId }, data });
-    await prisma.auditLog.create({ data: { action: 'Semester Fee Adjusted', actorId: req.user!.id, entityType: 'SemesterFee', entityId: feeId, details: reason || 'Fee adjusted' } });
+    await prisma.auditLog.create({ data: { action: 'Semester Fee Adjusted', actorId: req.user!.id, entityType: 'SemesterFee', entityId: feeId, details: reason || 'Fee adjusted', ipAddress: req.ip } });
     res.json({ success: true, message: 'Fee adjusted' });
   } catch (err: any) {
     res.status(500).json({ message: err.message });
   }
 });
 
-router.post('/accounts/analytics', authMiddleware, async (req: AuthRequest, res) => {
+router.post('/accounts/analytics', authMiddleware, requireAccounts, async (req: AuthRequest, res) => {
   try {
     const students = await prisma.user.findMany({ where: { role: 'Student' } });
     const fees = await prisma.semesterFee.findMany({ include: { student: true } });
@@ -1617,43 +1808,8 @@ router.post('/accounts/analytics', authMiddleware, async (req: AuthRequest, res)
   }
 });
 
-router.post('/accounts/withdrawals', authMiddleware, async (req: AuthRequest, res) => {
-  try {
-    const txns = await prisma.transaction.findMany({ where: { type: 'Withdrawal' }, take: 100, orderBy: { createdAt: 'desc' }, include: { user: true } });
-    res.json({
-      withdrawals: txns.map(t => ({
-        id: t.id, reference: t.reference, studentName: t.user?.fullName || '', studentEmail: t.user?.email || '',
-        amount: t.amount, method: t.gateway || '', accountDetails: t.description || '',
-        status: t.status, createdAt: t.createdAt.toISOString(),
-      })),
-    });
-  } catch (err: any) {
-    res.status(500).json({ message: err.message });
-  }
-});
-
-router.post('/accounts/withdrawals/process', authMiddleware, async (req: AuthRequest, res) => {
-  try {
-    const { transactionId, action } = req.body;
-    const tx = await prisma.transaction.findUnique({ where: { id: transactionId } });
-    if (!tx) return res.status(404).json({ message: 'Transaction not found' });
-
-    if (action === 'approve') {
-      await prisma.transaction.update({ where: { id: transactionId }, data: { status: 'Success' } });
-    } else {
-      await prisma.transaction.update({ where: { id: transactionId }, data: { status: 'Cancelled' } });
-      // Refund to wallet
-      const wallet = await prisma.wallet.findFirst({ where: { ownerId: tx.userId } });
-      if (wallet) await prisma.wallet.update({ where: { id: wallet.id }, data: { balance: wallet.balance + tx.amount } });
-    }
-    res.json({ success: true, message: `Withdrawal ${action}d` });
-  } catch (err: any) {
-    res.status(500).json({ message: err.message });
-  }
-});
-
 // ─── SHOP DASHBOARD ROUTES ───
-router.post('/shop/dashboard', authMiddleware, async (req: AuthRequest, res) => {
+router.post('/shop/dashboard', authMiddleware, requireShopStaff, async (req: AuthRequest, res) => {
   try {
     const userId = req.user!.id;
     const user = await prisma.user.findUnique({ where: { id: userId } });
@@ -1666,27 +1822,35 @@ router.post('/shop/dashboard', authMiddleware, async (req: AuthRequest, res) => 
     const weekStart = new Date(todayStart.getTime() - 7 * 24 * 60 * 60 * 1000);
     const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
 
-    const [todayTxns, weekTxns, monthTxns, recentTxns, payLater] = await Promise.all([
+    const [todayTxns, weekTxns, monthTxns, allTimeAgg, recentTxns, payLater, settledAgg, recentSettlements] = await Promise.all([
       prisma.transaction.findMany({ where: { shopId: shop.id, status: 'Success', createdAt: { gte: todayStart } } }),
       prisma.transaction.findMany({ where: { shopId: shop.id, status: 'Success', createdAt: { gte: weekStart } } }),
       prisma.transaction.findMany({ where: { shopId: shop.id, status: 'Success', createdAt: { gte: monthStart } } }),
+      prisma.transaction.aggregate({ _sum: { amount: true }, where: { shopId: shop.id, status: 'Success' } }),
       prisma.transaction.findMany({ where: { shopId: shop.id }, take: 20, orderBy: { createdAt: 'desc' } }),
       prisma.payLaterDue.findMany({ where: { shopId: shop.id, status: 'Pending' }, include: { student: true } }),
+      prisma.settlement.aggregate({ _sum: { amount: true }, where: { shopId: shop.id } }),
+      prisma.settlement.findMany({ where: { shopId: shop.id }, take: 10, orderBy: { settledAt: 'desc' } }),
     ]);
+
+    const totalRevenue = allTimeAgg._sum.amount || 0;
+    const totalSettled = settledAgg._sum.amount || 0;
 
     res.json({
       shop: { id: shop.id, name: shop.name, category: shop.category, rating: shop.rating, status: shop.status, location: shop.location || '', logoUrl: shop.logoUrl || '', merchantId: shop.merchantId || '', qrToken: shop.qrToken || '', qrSignature: shop.qrSignature || '' },
-      todayRevenue: todayTxns.reduce((s, t) => s + t.amount, 0), todayTransactions: todayTxns.length,
+      todayRevenue: todayTxns.reduce((s, t) => s + t.amount, 0), todayCount: todayTxns.length,
       weekRevenue: weekTxns.reduce((s, t) => s + t.amount, 0), monthRevenue: monthTxns.reduce((s, t) => s + t.amount, 0),
+      totalRevenue, totalSettled, pendingSettlement: Math.max(0, totalRevenue - totalSettled),
       recentTransactions: recentTxns.map(t => ({ id: t.id, reference: t.reference, amount: t.amount, status: t.status, description: t.description || '', paymentMethod: t.paymentMethod || '', createdAt: t.createdAt.toISOString() })),
       pendingPayLater: payLater.map(p => ({ id: p.id, reference: p.reference || '', amount: p.amount, status: p.status, studentName: p.student?.fullName || '', dueDate: p.dueDate || '', description: p.description || '' })),
+      recentSettlements: recentSettlements.map(s => ({ id: s.id, amount: s.amount, notes: s.notes || '', settledAt: s.settledAt.toISOString() })),
     });
   } catch (err: any) {
     res.status(500).json({ message: err.message });
   }
 });
 
-router.post('/shop/regenerate-qr', authMiddleware, async (req: AuthRequest, res) => {
+router.post('/shop/regenerate-qr', authMiddleware, requireShopStaff, async (req: AuthRequest, res) => {
   try {
     const shop = await prisma.shop.findFirst({ where: { status: 'Active' } });
     if (!shop) return res.status(404).json({ message: 'Shop not found' });
@@ -1697,11 +1861,6 @@ router.post('/shop/regenerate-qr', authMiddleware, async (req: AuthRequest, res)
   } catch (err: any) {
     res.status(500).json({ message: err.message });
   }
-});
-
-// ─── DEPRECATED ───
-router.post('/wallet/add-money', authMiddleware, async (_req: AuthRequest, res) => {
-  res.status(400).json({ message: 'Direct deposits are disabled. Use SSLCommerz.' });
 });
 
 // Health check

@@ -1,33 +1,36 @@
 import { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
-import { ArrowLeft, Star, Store, QrCode, CreditCard, Clock, Loader2, Wallet, ChevronRight, Shield, MapPin } from 'lucide-react';
+import { ArrowLeft, Star, Store, QrCode, CreditCard, Clock, ChevronRight, MapPin } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Skeleton } from '@/components/ui/skeleton';
 import StatusBadge from '@/components/StatusBadge';
-import PinDialog from '@/components/PinDialog';
 import SuccessScreen from '@/components/SuccessScreen';
+import PinDialog from '@/components/PinDialog';
+import OtpDialog from '@/components/OtpDialog';
+import PaymentConfirmModal from '@/components/PaymentConfirmModal';
 import { toast } from 'sonner';
-import { getShopDetail, payShop, initSSLPayment, type GetShopDetailOutputType } from '@/lib/api';
+import { getShopDetail, payShop, initSSLPayment, PIN_REQUIRED_THRESHOLD, OTP_REQUIRED_THRESHOLD, type GetShopDetailOutputType } from '@/lib/api';
 import { useUser } from '@/lib/user-context';
 import { CATEGORY_LABELS, formatCurrency } from '@/lib/mock-data';
 import { FadeIn } from '@/components/PageTransition';
 
 type ShopData = NonNullable<GetShopDetailOutputType['shop']>;
-type PayStep = 'idle' | 'amount' | 'method' | 'confirm' | 'processing' | 'success';
+type PayStep = 'idle' | 'amount' | 'method' | 'processing' | 'success';
 
 export default function ShopDetailPage() {
   const { shopId } = useParams();
   const navigate = useNavigate();
-  const { wallet, refreshDashboard } = useUser();
+  const { user, refreshDashboard } = useUser();
   const [shop, setShop] = useState<ShopData | null>(null);
   const [loading, setLoading] = useState(true);
   const [payStep, setPayStep] = useState<PayStep>('idle');
-  const [payMode, setPayMode] = useState<'wallet' | 'sslcommerz' | 'later'>('wallet');
+  const [payMode, setPayMode] = useState<'sslcommerz' | 'later'>('sslcommerz');
   const [payAmount, setPayAmount] = useState('');
-  const [paying, setPaying] = useState(false);
+  const [confirmOpen, setConfirmOpen] = useState(false);
   const [pinOpen, setPinOpen] = useState(false);
+  const [otpOpen, setOtpOpen] = useState(false);
 
   const amt = parseFloat(payAmount) || 0;
 
@@ -41,35 +44,55 @@ export default function ShopDetailPage() {
     setPayStep('method');
   };
 
-  const handleToConfirm = () => setPayStep('confirm');
+  const handleToConfirm = () => setConfirmOpen(true);
 
-  const handlePay = () => {
-    if (payMode === 'wallet') { setPinOpen(true); return; }
-    if (payMode === 'sslcommerz') { handleSSLPay(); return; }
-    handleWalletPay();
-  };
-
-  const handleWalletPay = async () => {
+  const handlePayLater = async () => {
     if (!shop) return;
     setPayStep('processing');
     try {
-      await payShop({ shopId: shop.id, shopName: shop.name, amount: amt, mode: payMode === 'later' ? 'later' : 'now' });
+      await payShop({ shopId: shop.id, shopName: shop.name, amount: amt });
       setPayStep('success');
       refreshDashboard();
-    } catch (e: any) { toast.error(e.message || 'Payment failed'); setPayStep('confirm'); }
+    } catch (e: any) { toast.error(e.message || 'Failed to create due'); setPayStep('method'); }
   };
 
-  const handleSSLPay = async () => {
+  const handleSSLPay = async (otpId?: string) => {
     if (!shop) return;
     setPayStep('processing');
     try {
-      const res = await initSSLPayment({ amount: amt, purpose: 'shop_payment', itemId: shop.id, itemLabel: `Shop Payment — ${shop.name}` });
-      localStorage.setItem('ssl_payment', JSON.stringify({ ref: res.transactionRef, purpose: 'shop_payment', itemId: shop.id, amount: amt }));
+      const res = await initSSLPayment({ items: [{ id: shop.id, source: 'shop', amount: amt, label: shop.name }], purpose: 'shop_payment', itemLabel: `Shop Payment — ${shop.name}`, otpId });
+      localStorage.setItem('ssl_payment', JSON.stringify({ ref: res.transactionRef }));
       window.location.href = res.gatewayUrl;
-    } catch (e: any) { toast.error(e.message || 'Payment gateway failed'); setPayStep('confirm'); }
+    } catch (e: any) {
+      if (e.requiresPin) setPinOpen(true);
+      else if (e.requiresOtp) setOtpOpen(true);
+      else toast.error(e.message || 'Payment gateway failed');
+      setPayStep('method');
+    }
   };
 
-  const resetPay = () => { setPayStep('idle'); setPayAmount(''); setPayMode('wallet'); };
+  const proceedToPay = (otpId?: string) => {
+    if (payMode === 'later') { handlePayLater(); return; }
+    handleSSLPay(otpId);
+  };
+
+  // Confirm step complete — Pay Later never touches money, so it skips PIN/OTP entirely.
+  // Online payment is gated by amount before a gateway session is ever created.
+  const onConfirmed = () => {
+    setConfirmOpen(false);
+    if (payMode === 'later') { proceedToPay(); return; }
+    if (amt >= PIN_REQUIRED_THRESHOLD) { setPinOpen(true); return; }
+    proceedToPay();
+  };
+
+  const onPinVerified = () => {
+    if (amt >= OTP_REQUIRED_THRESHOLD) { setOtpOpen(true); return; }
+    proceedToPay();
+  };
+
+  const onOtpVerified = (otpId: string) => proceedToPay(otpId);
+
+  const resetPay = () => { setPayStep('idle'); setPayAmount(''); setPayMode('sslcommerz'); };
 
   if (loading) {
     return (
@@ -116,7 +139,6 @@ export default function ShopDetailPage() {
               <div className="space-y-4">
                 <div className="text-center py-2"><span className="text-3xl font-bold text-foreground tabular">{formatCurrency(amt)}</span></div>
                 {([
-                  { key: 'wallet' as const, label: 'Campus Wallet', icon: Wallet, desc: `Balance: ${formatCurrency(wallet?.balance || 0)}` },
                   { key: 'sslcommerz' as const, label: 'Online Payment', icon: CreditCard, desc: 'Cards, bKash, Nagad, Rocket' },
                   { key: 'later' as const, label: 'Pay Later', icon: Clock, desc: '7-day payment deadline' },
                 ]).map(m => (
@@ -133,20 +155,6 @@ export default function ShopDetailPage() {
               </div>
             </FadeIn>
           )}
-          {payStep === 'confirm' && (
-            <FadeIn key="confirm">
-              <div className="space-y-5">
-                <h2 className="text-lg font-bold text-foreground text-center">Review Payment</h2>
-                <div className="rounded-xl border border-border/60 bg-accent/30 p-4 space-y-3">
-                  <div className="flex justify-between text-sm"><span className="text-muted-foreground">Merchant</span><span className="font-semibold text-foreground">{shop.name}</span></div>
-                  <div className="flex justify-between text-sm"><span className="text-muted-foreground">Amount</span><span className="font-bold text-foreground tabular">{formatCurrency(amt)}</span></div>
-                  <div className="flex justify-between text-sm"><span className="text-muted-foreground">Method</span><span className="font-medium text-foreground">{payMode === 'wallet' ? 'Campus Wallet' : payMode === 'sslcommerz' ? 'Online Payment' : 'Pay Later'}</span></div>
-                </div>
-                <div className="flex items-center gap-2 text-xs text-muted-foreground bg-accent/30 p-3 rounded-xl"><Shield className="w-4 h-4 text-primary shrink-0" /><span>{payMode === 'sslcommerz' ? 'You will be redirected to the secure payment gateway.' : 'Secured with bank-grade encryption.'}</span></div>
-                <Button onClick={handlePay} className="w-full h-12 font-semibold">{payMode === 'sslcommerz' ? 'Proceed to Payment' : payMode === 'later' ? 'Create Due' : `Pay ${formatCurrency(amt)}`}</Button>
-              </div>
-            </FadeIn>
-          )}
           {payStep === 'processing' && (
             <motion.div key="proc" initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="text-center py-20">
               <div className="relative w-16 h-16 mx-auto mb-6"><div className="absolute inset-0 rounded-full border-2 border-primary/20" /><div className="absolute inset-0 rounded-full border-2 border-transparent border-t-primary animate-spin" /><Store className="absolute inset-0 m-auto w-6 h-6 text-primary" /></div>
@@ -154,7 +162,20 @@ export default function ShopDetailPage() {
             </motion.div>
           )}
         </AnimatePresence>
-        <PinDialog open={pinOpen} onOpenChange={setPinOpen} mode="verify" onSuccess={handleWalletPay} />
+
+        <PaymentConfirmModal
+          open={confirmOpen}
+          onOpenChange={setConfirmOpen}
+          receiverName={shop.name}
+          receiverRole="Shop"
+          payerName={user?.fullName}
+          amount={amt}
+          method={payMode === 'sslcommerz' ? 'Online Payment (SSLCommerz)' : 'Pay Later (7-day due)'}
+          confirmLabel={payMode === 'sslcommerz' ? 'Proceed to Payment' : 'Create Due'}
+          onConfirm={onConfirmed}
+        />
+        <PinDialog open={pinOpen} onOpenChange={setPinOpen} mode="verify" verifyLength={user?.pinLength || 4} onSuccess={onPinVerified} />
+        <OtpDialog open={otpOpen} onOpenChange={setOtpOpen} purpose="Large Payment" onSuccess={onOtpVerified} />
       </div>
     );
   }
@@ -168,7 +189,7 @@ export default function ShopDetailPage() {
           details={[
             { label: 'Merchant', value: shop.name },
             { label: 'Amount', value: formatCurrency(amt) },
-            { label: 'Method', value: payMode === 'wallet' ? 'Campus Wallet' : payMode === 'sslcommerz' ? 'Online Payment' : 'Pay Later' },
+            { label: 'Method', value: payMode === 'sslcommerz' ? 'Online Payment' : 'Pay Later' },
           ]}
           actions={[
             { label: 'Back to Shop', onClick: resetPay, variant: 'outline' },
@@ -223,10 +244,7 @@ export default function ShopDetailPage() {
               <p className="text-xs text-muted-foreground text-center">Scan this QR at the counter or tap below to pay</p>
             </div>
             <div className="flex flex-col gap-3">
-              <Button className="w-full h-12 font-semibold" onClick={() => { setPayMode('wallet'); setPayStep('amount'); }}>
-                <Wallet className="w-4 h-4 mr-2" /> Pay with Wallet
-              </Button>
-              <Button variant="outline" className="w-full h-11" onClick={() => { setPayMode('sslcommerz'); setPayStep('amount'); }}>
+              <Button className="w-full h-12 font-semibold" onClick={() => { setPayMode('sslcommerz'); setPayStep('amount'); }}>
                 <CreditCard className="w-4 h-4 mr-2" /> Pay Online
               </Button>
               <Button variant="outline" className="w-full h-11" onClick={() => { setPayMode('later'); setPayStep('amount'); }}>

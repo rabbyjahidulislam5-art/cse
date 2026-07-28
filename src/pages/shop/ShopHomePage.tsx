@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { DollarSign, ShoppingBag, Bell, QrCode, Loader2 } from 'lucide-react';
+import { DollarSign, ShoppingBag, Bell, QrCode, Loader2, Landmark, Clock } from 'lucide-react';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Button } from '@/components/ui/button';
 import { getShopDashboard, type GetShopDashboardOutputType } from '@/lib/api';
@@ -78,6 +78,21 @@ export default function ShopHomePage() {
           </div>
         </motion.button>
       </div>
+
+      <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.08 }} className="grid grid-cols-3 gap-3 mb-6">
+        <div className="rounded-xl border border-border/60 bg-card p-4">
+          <div className="flex items-center gap-1.5 mb-1"><DollarSign className="w-3.5 h-3.5 text-muted-foreground" /><p className="text-xs text-muted-foreground">Total Received</p></div>
+          <p className="text-lg font-bold text-foreground tabular">৳{(data?.totalRevenue || 0).toLocaleString()}</p>
+        </div>
+        <div className="rounded-xl border border-border/60 bg-card p-4">
+          <div className="flex items-center gap-1.5 mb-1"><Clock className="w-3.5 h-3.5 text-[hsl(var(--chart-4))]" /><p className="text-xs text-muted-foreground">Pending Settlement</p></div>
+          <p className="text-lg font-bold text-[hsl(var(--chart-4))] tabular">৳{(data?.pendingSettlement || 0).toLocaleString()}</p>
+        </div>
+        <div className="rounded-xl border border-border/60 bg-card p-4">
+          <div className="flex items-center gap-1.5 mb-1"><Landmark className="w-3.5 h-3.5 text-[hsl(var(--chart-3))]" /><p className="text-xs text-muted-foreground">Settled</p></div>
+          <p className="text-lg font-bold text-[hsl(var(--chart-3))] tabular">৳{(data?.totalSettled || 0).toLocaleString()}</p>
+        </div>
+      </motion.div>
 
       <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.1 }}>
         <div className="flex items-center justify-between mb-3">

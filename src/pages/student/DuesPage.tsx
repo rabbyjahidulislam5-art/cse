@@ -5,18 +5,30 @@ import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from '@/components/ui/dialog';
 import { Textarea } from '@/components/ui/textarea';
-import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog';
 import { Skeleton } from '@/components/ui/skeleton';
 import StatusBadge from '@/components/StatusBadge';
 import PinDialog from '@/components/PinDialog';
+import OtpDialog from '@/components/OtpDialog';
+import PaymentConfirmModal from '@/components/PaymentConfirmModal';
 import { toast } from 'sonner';
-import { GraduationCap, BookOpen, ShieldAlert, Loader2, CheckCircle2, Clock, Banknote, CreditCard, Shield } from 'lucide-react';
-import { getDues, payDues as payDuesEndpoint, disputeFine, initSSLPayment, type GetDuesOutputType } from '@/lib/api';
+import { GraduationCap, BookOpen, ShieldAlert, Loader2, CheckCircle2, Clock, CreditCard } from 'lucide-react';
+import { getDues, disputeFine, initSSLPayment, PIN_REQUIRED_THRESHOLD, OTP_REQUIRED_THRESHOLD, type GetDuesOutputType, type SslPayItem } from '@/lib/api';
 import { useUser } from '@/lib/user-context';
 import { formatCurrency } from '@/lib/mock-data';
 import { FadeIn } from '@/components/PageTransition';
 
 type DueItem = GetDuesOutputType['semester'][0];
+type SslPurpose = 'semester_fee' | 'library_fine' | 'admin_fine' | 'pay_later' | 'mass_pay';
+
+const RECEIVER_ROLE_MAP: Record<string, string> = { semester: 'Accounts Office', library: 'Library', admin: 'Admin Office', payLater: 'Shop' };
+const PURPOSE_MAP: Record<string, SslPurpose> = { semester: 'semester_fee', library: 'library_fine', admin: 'admin_fine', payLater: 'pay_later' };
+
+interface PendingPayment {
+  items: SslPayItem[];
+  purpose: SslPurpose;
+  itemLabel: string;
+  receiverName: string;
+}
 
 export default function DuesPage() {
   const { user, refreshDashboard } = useUser();
@@ -27,10 +39,12 @@ export default function DuesPage() {
   const [disputeOpen, setDisputeOpen] = useState(false);
   const [disputeFineId, setDisputeFineId] = useState<string | null>(null);
   const [disputeReason, setDisputeReason] = useState('');
-  const [confirmPayOpen, setConfirmPayOpen] = useState(false);
+
+  // Tiered payment authorization: confirm -> (PIN if amount is medium+) -> (OTP if amount is large) -> gateway.
+  const [pending, setPending] = useState<PendingPayment | null>(null);
+  const [confirmOpen, setConfirmOpen] = useState(false);
   const [pinOpen, setPinOpen] = useState(false);
-  const [pendingAction, setPendingAction] = useState<'bulk' | 'single' | null>(null);
-  const [singleItem, setSingleItem] = useState<DueItem | null>(null);
+  const [otpOpen, setOtpOpen] = useState(false);
 
   const loadDues = () => {
     if (!user) return;
@@ -50,43 +64,59 @@ export default function DuesPage() {
 
   const totalPending = allItems.filter(d => d.status === 'pending' || d.status === 'overdue').reduce((s, d) => s + d.amount, 0);
 
-  const handlePaySelected = () => { if (payableItems.length === 0) { toast.error('Select pending items'); return; } setPendingAction('bulk'); setConfirmPayOpen(true); };
-  const confirmPay = () => { setConfirmPayOpen(false); setPinOpen(true); };
+  const pendingAmount = pending ? pending.items.reduce((s, i) => s + i.amount, 0) : 0;
 
-  const executeBulkPay = async () => {
-    if (!user) return;
-    setPaying(true);
-    try {
-      await payDuesEndpoint({ items: payableItems.map(d => ({ id: d.id, source: d.source, amount: d.amount, label: d.label })) });
-      toast.success(`${payableItems.length} item${payableItems.length > 1 ? 's' : ''} paid`);
-      setSelected(new Set()); refreshDashboard(); loadDues();
-    } catch (e: any) { toast.error(e.message || 'Payment failed'); }
-    finally { setPaying(false); }
+  const handlePaySelected = () => {
+    if (payableItems.length === 0) { toast.error('Select pending items'); return; }
+    const uniqueSources = new Set(payableItems.map(d => d.source));
+    const receiverName = uniqueSources.size === 1 ? (RECEIVER_ROLE_MAP[[...uniqueSources][0]] || 'Campus Office') : 'Multiple Offices';
+    setPending({
+      items: payableItems.map(d => ({ id: d.id, source: d.source as SslPayItem['source'], amount: d.amount, label: d.label })),
+      purpose: 'mass_pay',
+      itemLabel: `${payableItems.length} selected dues`,
+      receiverName,
+    });
+    setConfirmOpen(true);
   };
 
-  const handlePaySingle = (item: DueItem) => { setSingleItem(item); setPendingAction('single'); setPinOpen(true); };
-
-  const executeSinglePay = async () => {
-    if (!user || !singleItem) return;
-    setPaying(true);
-    try {
-      await payDuesEndpoint({ items: [{ id: singleItem.id, source: singleItem.source, amount: singleItem.amount, label: singleItem.label }] });
-      toast.success(`${singleItem.label} paid`); refreshDashboard(); loadDues();
-    } catch (e: any) { toast.error(e.message || 'Payment failed'); }
-    finally { setPaying(false); setSingleItem(null); }
+  const handlePaySingle = (item: DueItem) => {
+    setPending({
+      items: [{ id: item.id, source: item.source as SslPayItem['source'], amount: item.amount, label: item.label }],
+      purpose: PURPOSE_MAP[item.source] || 'semester_fee',
+      itemLabel: item.label,
+      receiverName: RECEIVER_ROLE_MAP[item.source] || 'Campus Office',
+    });
+    setConfirmOpen(true);
   };
 
-  const handleSSLPay = async (item: DueItem) => {
-    if (!user) return;
+  const executePayment = async (otpId?: string) => {
+    if (!pending) return;
     setPaying(true);
-    const purposeMap: Record<string, 'semester_fee' | 'library_fine' | 'admin_fine' | 'pay_later'> = { semester: 'semester_fee', library: 'library_fine', admin: 'admin_fine', payLater: 'pay_later' };
     try {
-      const res = await initSSLPayment({ amount: item.amount, purpose: purposeMap[item.source] || 'semester_fee', itemId: item.id, itemLabel: item.label });
-      localStorage.setItem('ssl_payment', JSON.stringify({ ref: res.transactionRef, purpose: purposeMap[item.source] || 'semester_fee', itemId: item.id }));
+      const res = await initSSLPayment({ items: pending.items, purpose: pending.purpose as any, itemLabel: pending.itemLabel, otpId });
+      localStorage.setItem('ssl_payment', JSON.stringify({ ref: res.transactionRef }));
       window.location.href = res.gatewayUrl;
-    } catch (e: any) { toast.error(e.message || 'Payment gateway failed'); }
-    finally { setPaying(false); }
+    } catch (e: any) {
+      if (e.requiresPin) { setPinOpen(true); }
+      else if (e.requiresOtp) { setOtpOpen(true); }
+      else { toast.error(e.message || 'Payment gateway failed'); }
+      setPaying(false);
+    }
   };
+
+  // Confirm step complete — gate by amount before actually opening a gateway session.
+  const onConfirmed = () => {
+    setConfirmOpen(false);
+    if (pendingAmount >= PIN_REQUIRED_THRESHOLD) { setPinOpen(true); return; }
+    executePayment();
+  };
+
+  const onPinVerified = () => {
+    if (pendingAmount >= OTP_REQUIRED_THRESHOLD) { setOtpOpen(true); return; }
+    executePayment();
+  };
+
+  const onOtpVerified = (otpId: string) => executePayment(otpId);
 
   const handleDispute = async () => {
     if (!disputeFineId || disputeReason.length < 10 || !user) { toast.error('Provide a reason (min 10 chars)'); return; }
@@ -97,8 +127,6 @@ export default function DuesPage() {
     } catch (e: any) { toast.error(e.message || 'Failed'); }
   };
 
-  const onPinSuccess = () => { if (pendingAction === 'bulk') executeBulkPay(); else if (pendingAction === 'single') executeSinglePay(); setPendingAction(null); };
-
   const renderList = (items: DueItem[], source: string) => {
     if (!items || items.length === 0) {
       return (
@@ -108,12 +136,12 @@ export default function DuesPage() {
         </div>
       );
     }
-    const pending = items.filter(i => i.status === 'pending' || i.status === 'under review' || i.status === 'overdue');
+    const pendingItems = items.filter(i => i.status === 'pending' || i.status === 'under review' || i.status === 'overdue');
     const done = items.filter(i => i.status === 'paid' || i.status === 'waived' || i.status === 'cancelled');
 
     return (
       <div className="flex flex-col gap-2">
-        {[...pending, ...done].map((item, idx) => {
+        {[...pendingItems, ...done].map((item, idx) => {
           const canPay = item.status === 'pending' || item.status === 'overdue';
           const canDispute = source === 'admin' && item.status === 'pending';
           return (
@@ -132,9 +160,6 @@ export default function DuesPage() {
                 <div className="flex items-center gap-1.5 shrink-0">
                   <Button size="sm" className="h-8 text-xs px-3 font-semibold" onClick={() => handlePaySingle(item)} disabled={paying}>
                     <CreditCard className="w-3 h-3 mr-1" /> Pay
-                  </Button>
-                  <Button size="sm" variant="outline" className="h-8 text-xs px-2" onClick={() => handleSSLPay(item)} disabled={paying} title="Pay Online">
-                    <Banknote className="w-3.5 h-3.5" />
                   </Button>
                   {canDispute && (
                     <Button size="sm" variant="ghost" className="h-8 text-xs text-muted-foreground" onClick={() => { setDisputeFineId(item.id); setDisputeOpen(true); }}>Dispute</Button>
@@ -200,22 +225,20 @@ export default function DuesPage() {
         </DialogContent>
       </Dialog>
 
-      <AlertDialog open={confirmPayOpen} onOpenChange={setConfirmPayOpen}>
-        <AlertDialogContent className="glass-strong rounded-2xl">
-          <AlertDialogHeader>
-            <AlertDialogTitle>Confirm Payment</AlertDialogTitle>
-            <AlertDialogDescription>
-              You are about to pay {payableItems.length} item{payableItems.length > 1 ? 's' : ''} totaling <strong>{formatCurrency(totalSelected)}</strong> from your wallet.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction onClick={confirmPay}>Continue to PIN</AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
-
-      <PinDialog open={pinOpen} onOpenChange={setPinOpen} mode="verify" onSuccess={onPinSuccess} />
+      {pending && (
+        <PaymentConfirmModal
+          open={confirmOpen}
+          onOpenChange={setConfirmOpen}
+          receiverName={pending.receiverName}
+          payerName={user?.fullName}
+          amount={pendingAmount}
+          lineItems={pending.items.map(i => ({ label: i.label, amount: i.amount }))}
+          loading={paying}
+          onConfirm={onConfirmed}
+        />
+      )}
+      <PinDialog open={pinOpen} onOpenChange={setPinOpen} mode="verify" verifyLength={user?.pinLength || 4} onSuccess={onPinVerified} />
+      <OtpDialog open={otpOpen} onOpenChange={setOtpOpen} purpose="Large Payment" onSuccess={onOtpVerified} />
     </div>
   );
 }

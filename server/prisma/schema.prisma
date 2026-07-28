@@ -21,8 +21,10 @@ model User {
   pinHash          String?
   pinSalt          String?
   pinSet           Boolean   @default(false)
+  pinLength        Int       @default(4)
   pinAttempts      Int       @default(0)
   pinLockedUntil   DateTime?
+  pinVerifiedAt    DateTime?
   lastLogin        DateTime?
   profilePicture   String?
   emergencyContact String?
@@ -77,8 +79,25 @@ model Transaction {
   idempotencyKey String?
   description    String?
   paymentMethod  String?
+  purpose        String?
+  itemsJson      String?
   createdAt      DateTime  @default(now())
   updatedAt      DateTime  @updatedAt
+
+  callbacks      PaymentCallback[]
+}
+
+model PaymentCallback {
+  id            String       @id @default(cuid())
+  transaction   Transaction? @relation(fields: [transactionId], references: [id])
+  transactionId String?
+  reference     String
+  source        String
+  rawPayload    String
+  sslStatus     String?
+  verified      Boolean      @default(false)
+  ipAddress     String?
+  createdAt     DateTime     @default(now())
 }
 
 model Shop {
@@ -97,6 +116,22 @@ model Shop {
 
   transactions Transaction[]
   payLaterDues PayLaterDue[]
+  settlements  Settlement[]
+}
+
+// Records a manual internal reconciliation — Admin Office confirming a shop's collected
+// SSLCommerz revenue has been paid out to that shop outside the app. SSLCommerz doesn't expose
+// an API for actual bank disbursement, so this is bookkeeping, not automatic — every row here
+// IS the settlement history (append-only, never edited), so no separate history table is needed.
+model Settlement {
+  id        String   @id @default(cuid())
+  shop      Shop     @relation(fields: [shopId], references: [id])
+  shopId    String
+  amount    Float
+  notes     String?
+  settledBy String?
+  settledAt DateTime @default(now())
+  createdAt DateTime @default(now())
 }
 
 model SemesterFee {

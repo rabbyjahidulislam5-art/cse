@@ -1,16 +1,18 @@
 import { useState, useEffect, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Store, Plus, Search, Pencil, Ban, Trash2, CheckCircle, X, Loader2, MapPin } from 'lucide-react';
+import { Store, Plus, Search, Pencil, Ban, Trash2, CheckCircle, Landmark, Loader2, MapPin } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { Textarea } from '@/components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from '@/components/ui/dialog';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog';
 import { Skeleton } from '@/components/ui/skeleton';
 import StatusBadge from '@/components/StatusBadge';
 import { toast } from 'sonner';
 import { getAdminShops, manageShop, type GetAdminShopsOutputType } from '@/lib/api';
+import { formatCurrency } from '@/lib/mock-data';
 import { FadeIn } from '@/components/PageTransition';
 
 type Shop = GetAdminShopsOutputType['shops'][0];
@@ -29,6 +31,12 @@ export default function ShopManagementPage() {
   const [formName, setFormName] = useState('');
   const [formCategory, setFormCategory] = useState('Food & Beverage');
   const [formLocation, setFormLocation] = useState('');
+
+  // Settlement state
+  const [settleShop, setSettleShop] = useState<Shop | null>(null);
+  const [settleAmount, setSettleAmount] = useState('');
+  const [settleNotes, setSettleNotes] = useState('');
+  const [settling, setSettling] = useState(false);
 
   const loadShops = () => {
     setLoading(true);
@@ -90,6 +98,26 @@ export default function ShopManagementPage() {
       loadShops();
     } catch (e: any) { toast.error(e.message || 'Failed'); }
     finally { setSaving(false); }
+  };
+
+  const openSettle = (shop: Shop) => {
+    setSettleShop(shop);
+    setSettleAmount(shop.pendingSettlement > 0 ? String(shop.pendingSettlement) : '');
+    setSettleNotes('');
+  };
+
+  const handleSettle = async () => {
+    if (!settleShop) return;
+    const amount = parseFloat(settleAmount);
+    if (!amount || amount <= 0) { toast.error('Enter a valid amount'); return; }
+    setSettling(true);
+    try {
+      await manageShop({ action: 'settle', shopId: settleShop.id, amount, notes: settleNotes });
+      toast.success('Settlement recorded');
+      setSettleShop(null);
+      loadShops();
+    } catch (e: any) { toast.error(e.message || 'Failed'); }
+    finally { setSettling(false); }
   };
 
   if (loading) {
@@ -158,8 +186,13 @@ export default function ShopManagementPage() {
                       {shop.location && <span className="text-xs text-muted-foreground flex items-center gap-1"><MapPin className="w-3 h-3" />{shop.location}</span>}
                     </div>
                   </div>
+                  <div className="text-right shrink-0 hidden sm:block">
+                    <p className="text-xs text-muted-foreground">Pending Settlement</p>
+                    <p className={`text-sm font-bold tabular ${shop.pendingSettlement > 0 ? 'text-[hsl(var(--chart-4))]' : 'text-muted-foreground'}`}>{formatCurrency(shop.pendingSettlement)}</p>
+                  </div>
                   <div className="flex items-center gap-1.5 shrink-0">
                     <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => openEdit(shop)}><Pencil className="w-3.5 h-3.5" /></Button>
+                    <Button variant="ghost" size="icon" className="h-8 w-8 text-primary" title="Record Settlement" onClick={() => openSettle(shop)}><Landmark className="w-3.5 h-3.5" /></Button>
                     {shop.status === 'Active' && (
                       <Button variant="ghost" size="icon" className="h-8 w-8 text-[hsl(var(--chart-4))]" onClick={() => setConfirmAction({ shop, action: 'suspend' })}><Ban className="w-3.5 h-3.5" /></Button>
                     )}
@@ -236,6 +269,38 @@ export default function ShopManagementPage() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      {/* Record Settlement */}
+      <Dialog open={!!settleShop} onOpenChange={(o) => !o && setSettleShop(null)}>
+        <DialogContent className="glass-strong rounded-2xl max-w-md">
+          <DialogHeader>
+            <DialogTitle>Record Settlement — {settleShop?.name}</DialogTitle>
+            <DialogDescription>Confirm this shop has been paid the collected amount outside the app.</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 mt-2">
+            <div className="rounded-xl border border-border/60 bg-accent/30 p-3 space-y-1.5 text-sm">
+              <div className="flex justify-between"><span className="text-muted-foreground">Total Received</span><span className="font-semibold text-foreground tabular">{formatCurrency(settleShop?.totalReceived || 0)}</span></div>
+              <div className="flex justify-between"><span className="text-muted-foreground">Already Settled</span><span className="font-semibold text-foreground tabular">{formatCurrency(settleShop?.totalSettled || 0)}</span></div>
+              <div className="flex justify-between pt-1.5 border-t border-border/40"><span className="text-muted-foreground">Pending Settlement</span><span className="font-bold text-[hsl(var(--chart-4))] tabular">{formatCurrency(settleShop?.pendingSettlement || 0)}</span></div>
+            </div>
+            <div>
+              <Label className="text-xs text-muted-foreground">Settlement Amount (৳) *</Label>
+              <Input type="number" value={settleAmount} onChange={e => setSettleAmount(e.target.value)} placeholder="0.00" className="mt-1.5 bg-accent/50" />
+            </div>
+            <div>
+              <Label className="text-xs text-muted-foreground">Notes</Label>
+              <Textarea value={settleNotes} onChange={e => setSettleNotes(e.target.value)} placeholder="e.g. Bank transfer ref, date paid..." rows={2} className="mt-1.5 bg-accent/50" />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setSettleShop(null)} disabled={settling}>Cancel</Button>
+            <Button onClick={handleSettle} disabled={settling} className="font-semibold">
+              {settling ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <Landmark className="w-4 h-4 mr-2" />}
+              Record Settlement
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

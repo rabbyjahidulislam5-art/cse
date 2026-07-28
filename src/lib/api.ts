@@ -24,7 +24,11 @@ async function apiCall<T>(endpoint: string, input: Record<string, unknown> = {})
       }
     }
     const data = await res.json();
-    if (!res.ok) throw new Error(data.message || 'Request failed');
+    if (!res.ok) {
+      // Attach any extra fields the server sent (e.g. requiresPin/requiresOtp on a 403 from
+      // /payment/init) so callers can react to the specific reason, not just show a generic error.
+      throw Object.assign(new Error(data.message || 'Request failed'), data);
+    }
     return data;
   } catch (err: any) {
     if (err.message?.includes('Failed to fetch') || err.name === 'TypeError') {
@@ -40,7 +44,7 @@ export type GetStudentDashboardOutputType = {
   user: {
     id: string; fullName: string; email: string; studentId: string;
     department: string; batch: string; phone: string; status: string;
-    pinSet: boolean; profilePicture: string; emergencyContact: string;
+    pinSet: boolean; pinLength: number; profilePicture: string; emergencyContact: string;
     address: string; bloodGroup: string; gender: string; dateOfBirth: string; bio: string;
   };
   wallet: { id: string; balance: number };
@@ -101,6 +105,7 @@ export type GetAdminShopsOutputType = {
   shops: Array<{
     id: string; name: string; category: string; rating: number;
     status: string; location: string; logoUrl: string; merchantId: string; qrToken: string;
+    totalReceived: number; totalSettled: number; pendingSettlement: number;
   }>;
 };
 
@@ -187,6 +192,7 @@ export type GetShopDashboardOutputType = {
     qrSignature?: string;
   };
   todayRevenue: number; todayCount: number; totalRevenue: number;
+  totalSettled: number; pendingSettlement: number;
   recentTransactions: Array<{
     id: string; reference: string; amount: number; status: string;
     type?: string; description: string; paymentMethod?: string; createdAt?: string;
@@ -195,14 +201,7 @@ export type GetShopDashboardOutputType = {
     id: string; reference: string; amount: number; status: string;
     studentName: string; dueDate: string; description: string;
   }>;
-};
-
-export type GetWithdrawalsOutputType = {
-  withdrawals: Array<{
-    id: string; reference: string; studentName: string; studentEmail: string;
-    studentId: string; amount: number; method: string; accountDetails: string;
-    description?: string; status: string; createdAt: string;
-  }>;
+  recentSettlements?: Array<{ id: string; amount: number; notes: string; settledAt: string }>;
 };
 
 export type ValidateQrMerchantOutputType = {
@@ -227,9 +226,6 @@ export const getShopDetail = (input: { shopId: string }) =>
 export const getDues = (input: Record<string, unknown> = {}) =>
   apiCall<GetDuesOutputType>('/dues', input);
 
-export const payDues = (input: { items: Array<{ id: string; source: string; amount: number; label: string }> }) =>
-  apiCall<{ success: boolean; newBalance: number; paidCount: number }>('/dues/pay', input);
-
 export const disputeFine = (input: { fineId: string; source?: string; reason: string }) =>
   apiCall<{ success: boolean; message: string }>('/fines/dispute', input);
 
@@ -245,20 +241,25 @@ export const getReceipt = (input: { transactionId: string }) =>
 export const transferMoney = (input: { recipientIdentifier: string; amount: number; note?: string }) =>
   apiCall<{ success: boolean; newBalance: number; transactionId: string; recipientName: string }>('/transfer', input);
 
-export const requestWithdrawal = (input: { amount: number; method: string; accountNumber?: string; accountName?: string; accountDetails?: string }) =>
-  apiCall<{ success: boolean; message: string; transactionId: string }>('/withdrawal/request', input);
-
-export const payShop = (input: { shopId: string; shopName: string; amount: number; mode: string; description?: string }) =>
-  apiCall<{ success: boolean; newBalance?: number; transactionId: string; dueId?: string }>('/shops/pay', input);
+export const payShop = (input: { shopId: string; shopName: string; amount: number; description?: string }) =>
+  apiCall<{ success: boolean; transactionId: string; dueId?: string }>('/shops/pay', input);
 
 export const validateQrMerchant = (input: { qrData: string }) =>
   apiCall<ValidateQrMerchantOutputType>('/shops/validate-qr', input);
 
-export const initSSLPayment = (input: { amount: number; purpose: string; itemId?: string; itemLabel?: string }) =>
+export type SslPayItem = { id: string; source: 'semester' | 'library' | 'admin' | 'payLater' | 'shop'; amount: number; label: string };
+
+export const initSSLPayment = (input: { items: SslPayItem[]; purpose: 'semester_fee' | 'library_fine' | 'admin_fine' | 'pay_later' | 'shop_payment' | 'mass_pay'; itemLabel?: string; otpId?: string }) =>
   apiCall<{ gatewayUrl: string; transactionRef: string; sessionKey: string }>('/payment/init', input);
 
-export const validateSSLPayment = (input: { transactionRef: string; purpose: string; itemId?: string }): Promise<{ status: 'valid' | 'failed' | 'pending'; newBalance?: number; message: string }> =>
-  apiCall<{ status: 'valid' | 'failed' | 'pending'; newBalance?: number; message: string }>('/payment/validate', input);
+// Thresholds mirrored from server/src/index.ts's PIN_REQUIRED_THRESHOLD / OTP_REQUIRED_THRESHOLD —
+// used client-side purely for UX (showing the right dialog before the redirect); the server enforces
+// the real gate independently and never trusts these being checked on the client.
+export const PIN_REQUIRED_THRESHOLD = 3000;
+export const OTP_REQUIRED_THRESHOLD = 20000;
+
+export const validateSSLPayment = (input: { transactionRef: string }): Promise<{ status: 'valid' | 'failed' | 'pending'; message: string }> =>
+  apiCall<{ status: 'valid' | 'failed' | 'pending'; message: string }>('/payment/validate', input);
 
 export const updateProfile = (input: Record<string, unknown>) =>
   apiCall<{ success: boolean; message: string }>('/profile/update', input);
@@ -338,12 +339,6 @@ export const adjustSemesterFee = (input: Record<string, unknown>) =>
 export const getCollectionAnalytics = (input: Record<string, unknown> = {}) =>
   apiCall<GetCollectionAnalyticsOutputType>('/accounts/analytics', input);
 
-export const getWithdrawals = (input: Record<string, unknown> = {}) =>
-  apiCall<GetWithdrawalsOutputType>('/accounts/withdrawals', input);
-
-export const processWithdrawal = (input: Record<string, unknown>) =>
-  apiCall<{ success: boolean; message: string }>('/accounts/withdrawals/process', input);
-
 // Shop endpoints
 export const getShopDashboard = (input: Record<string, unknown> = {}) =>
   apiCall<GetShopDashboardOutputType>('/shop/dashboard', input);
@@ -366,7 +361,3 @@ export const uploadFile = async (file: File | { data: File; filename?: string })
   if (!res.ok) throw new Error(data.message || 'Upload failed');
   return { url: data.url, fileUrl: data.url };
 };
-
-// Deprecated (kept for compatibility)
-export const addMoney = (input: { amount: number; method: string }) =>
-  apiCall<{ success: boolean; newBalance: number; transactionId: string }>('/wallet/add-money', input);

@@ -1,5 +1,5 @@
 import { Outlet, NavLink, useNavigate } from 'react-router-dom';
-import { LayoutDashboard, Users, Receipt, BarChart3, LogOut, Landmark, Banknote } from 'lucide-react';
+import { LayoutDashboard, Users, Receipt, BarChart3, LogOut, Landmark } from 'lucide-react';
 import { useAuth } from '@/lib/auth-context';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger, DropdownMenuSeparator } from '@/components/ui/dropdown-menu';
 import { motion } from 'framer-motion';
@@ -9,7 +9,6 @@ const navItems = [
   { to: '/accounts', icon: LayoutDashboard, label: 'Home', end: true },
   { to: '/accounts/fee-push', icon: Users, label: 'Fee Push' },
   { to: '/accounts/adjustments', icon: Receipt, label: 'Adjust' },
-  { to: '/accounts/withdrawals', icon: Banknote, label: 'Withdrawals' },
 ];
 
 export default function AccountsLayout() {

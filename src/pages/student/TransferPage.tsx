@@ -19,7 +19,7 @@ type Step = 'recipient' | 'amount' | 'review' | 'processing' | 'success';
 
 export default function TransferPage() {
   const navigate = useNavigate();
-  const { wallet, refreshDashboard } = useUser();
+  const { user, wallet, refreshDashboard } = useUser();
   const [step, setStep] = useState<Step>('recipient');
   const [recipient, setRecipient] = useState('');
   const [amount, setAmount] = useState('');
@@ -210,7 +210,7 @@ export default function TransferPage() {
         )}
       </AnimatePresence>
 
-      <PinDialog open={pinOpen} onOpenChange={setPinOpen} mode="verify" onSuccess={onPinVerified} />
+      <PinDialog open={pinOpen} onOpenChange={setPinOpen} mode="verify" verifyLength={user?.pinLength || 4} onSuccess={onPinVerified} />
       <OtpDialog open={otpOpen} onOpenChange={setOtpOpen} purpose="Transfer" onSuccess={executeTransfer} />
     </div>
   );

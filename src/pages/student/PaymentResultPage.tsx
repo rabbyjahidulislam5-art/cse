@@ -5,29 +5,22 @@ import { CheckCircle2, XCircle, Clock, Loader2, Home, RotateCcw, Receipt } from 
 import { Button } from '@/components/ui/button';
 import { validateSSLPayment } from '@/lib/api';
 import { useUser } from '@/lib/user-context';
-import { formatCurrency } from '@/lib/mock-data';
 
 export default function PaymentResultPage() {
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
-  const { user, refreshDashboard, setWalletBalance } = useUser();
+  const { user, refreshDashboard } = useUser();
   const statusParam = searchParams.get('status') || '';
   const ref = searchParams.get('ref') || '';
 
   const [validating, setValidating] = useState(true);
-  const [result, setResult] = useState<{ status: 'valid' | 'failed' | 'pending'; message: string; newBalance?: number } | null>(null);
+  const [result, setResult] = useState<{ status: 'valid' | 'failed' | 'pending'; message: string } | null>(null);
 
   useEffect(() => {
     if (!ref || !user) return;
-    const stored = localStorage.getItem('ssl_payment');
-    let purpose = 'topup';
-    let itemId: string | undefined;
-    if (stored) {
-      try { const parsed = JSON.parse(stored); if (parsed.ref === ref) { purpose = parsed.purpose || 'topup'; itemId = parsed.itemId; } } catch {}
-    }
     if (statusParam === 'cancelled') { setResult({ status: 'failed', message: 'Payment was cancelled by user' }); setValidating(false); return; }
-    validateSSLPayment({ transactionRef: ref, purpose, itemId })
-      .then(res => { setResult(res); if (res.status === 'valid') { if (res.newBalance !== undefined) setWalletBalance(res.newBalance); refreshDashboard(); localStorage.removeItem('ssl_payment'); } })
+    validateSSLPayment({ transactionRef: ref })
+      .then(res => { setResult(res); if (res.status === 'valid') { refreshDashboard(); localStorage.removeItem('ssl_payment'); } })
       .catch(e => setResult({ status: 'failed', message: e.message || 'Validation failed' }))
       .finally(() => setValidating(false));
   }, [ref, user]);
@@ -77,14 +70,6 @@ export default function PaymentResultPage() {
       <motion.p initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.4 }} className="text-muted-foreground text-center max-w-sm">
         {result?.message}
       </motion.p>
-
-      {result?.newBalance !== undefined && result.status === 'valid' && (
-        <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.5 }}
-          className="mt-4 px-5 py-3 rounded-xl border border-border bg-card">
-          <p className="text-xs text-muted-foreground">Updated Wallet Balance</p>
-          <p className="text-xl font-bold text-foreground tabular">{formatCurrency(result.newBalance)}</p>
-        </motion.div>
-      )}
 
       <motion.p initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.5 }} className="text-xs text-muted-foreground font-mono mt-4">
         Ref: {ref}

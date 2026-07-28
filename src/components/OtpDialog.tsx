@@ -10,7 +10,8 @@ interface OtpDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   purpose: 'Payment' | 'Transfer' | 'PIN Reset' | 'Large Payment';
-  onSuccess: () => void;
+  /** Receives the verified OTP's id — callers that need to prove verification happened (e.g. passing `otpId` to /payment/init for the large-payment tier) can forward it; others can ignore the argument. */
+  onSuccess: (otpId: string) => void;
 }
 
 export default function OtpDialog({ open, onOpenChange, purpose, onSuccess }: OtpDialogProps) {
@@ -78,7 +79,7 @@ export default function OtpDialog({ open, onOpenChange, purpose, onSuccess }: Ot
     setVerifying(true);
     try {
       const res = await verifyOtp({ otpId, code: otpCode });
-      if (res.valid) { toast.success('OTP verified'); onSuccess(); onOpenChange(false); }
+      if (res.valid) { toast.success('OTP verified'); onSuccess(otpId); onOpenChange(false); }
       else { toast.error(res.message); setCode(['', '', '', '', '', '']); inputRefs.current[0]?.focus(); }
     } catch (e: any) { toast.error(e.message || 'Verification failed'); }
     finally { setVerifying(false); }

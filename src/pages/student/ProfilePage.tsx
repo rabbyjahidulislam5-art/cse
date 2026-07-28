@@ -226,7 +226,7 @@ export default function ProfilePage() {
         </Button>
       </FadeIn>
 
-      <PinDialog open={pinOpen} onOpenChange={setPinOpen} mode={pinMode} onSuccess={() => refreshDashboard()} />
+      <PinDialog open={pinOpen} onOpenChange={setPinOpen} mode={pinMode} verifyLength={user.pinLength || 4} onSuccess={() => refreshDashboard()} />
     </div>
   );
 }

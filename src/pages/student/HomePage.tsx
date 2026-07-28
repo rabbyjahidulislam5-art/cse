@@ -1,10 +1,9 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
-import { Plus, ScanLine, FileWarning, ArrowRightLeft, Store, PlusCircle, GraduationCap, ShieldAlert, ArrowRight, RotateCcw, Lock, TrendingUp, TrendingDown, Receipt } from 'lucide-react';
+import { ScanLine, FileWarning, ArrowRightLeft, Store, PlusCircle, GraduationCap, ShieldAlert, ArrowRight, RotateCcw, Lock, TrendingUp, TrendingDown, Receipt } from 'lucide-react';
 import { Skeleton } from '@/components/ui/skeleton';
 import WalletCard from '@/components/WalletCard';
-import AddMoneyDialog from '@/components/AddMoneyDialog';
 import PinDialog from '@/components/PinDialog';
 import { useUser } from '@/lib/user-context';
 import { getStudentDashboard, type GetStudentDashboardOutputType } from '@/lib/api';
@@ -20,7 +19,6 @@ const typeIcons: Record<string, typeof Store> = {
 };
 
 const quickActions = [
-  { label: 'Add Money', icon: Plus, action: 'add_money', color: 'from-primary/15 to-primary/5', iconColor: 'text-primary' },
   { label: 'Scan & Pay', icon: ScanLine, path: '/student/scan', color: 'from-secondary/15 to-secondary/5', iconColor: 'text-secondary' },
   { label: 'Transfer', icon: ArrowRightLeft, path: '/student/transfer', color: 'from-[hsl(var(--chart-3))]/15 to-[hsl(var(--chart-3))]/5', iconColor: 'text-[hsl(var(--chart-3))]' },
   { label: 'Dues', icon: FileWarning, path: '/student/dues', color: 'from-[hsl(var(--chart-4))]/15 to-[hsl(var(--chart-4))]/5', iconColor: 'text-[hsl(var(--chart-4))]' },
@@ -58,8 +56,7 @@ function TransactionRow({ tx, onReceipt, index }: { tx: TxType; onReceipt: (id: 
 
 export default function HomePage() {
   const navigate = useNavigate();
-  const { user, wallet, loading, setWalletBalance, refreshDashboard } = useUser();
-  const [addMoneyOpen, setAddMoneyOpen] = useState(false);
+  const { user, wallet, loading, refreshDashboard } = useUser();
   const [pinOpen, setPinOpen] = useState(false);
   const [recentTx, setRecentTx] = useState<TxType[]>([]);
 
@@ -110,17 +107,17 @@ export default function HomePage() {
       {/* Wallet + Quick Actions */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 sm:gap-6 mb-8">
         <FadeIn delay={0.1}>
-          <WalletCard balance={wallet?.balance || 0} onAddMoney={() => setAddMoneyOpen(true)} />
+          <WalletCard balance={wallet?.balance || 0} />
         </FadeIn>
         <FadeIn delay={0.15} className="lg:col-span-2">
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 h-full">
+          <div className="grid grid-cols-3 gap-3 h-full">
             {quickActions.map((qa, i) => (
               <motion.button
                 key={qa.label}
                 initial={{ opacity: 0, y: 16 }}
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ delay: 0.2 + i * 0.06 }}
-                onClick={() => { if (qa.action === 'add_money') setAddMoneyOpen(true); else if (qa.path) navigate(qa.path); }}
+                onClick={() => navigate(qa.path)}
                 className="flex flex-col items-center justify-center gap-3 p-5 rounded-2xl border border-border/60 bg-card hover:border-primary/20 transition-all group active:scale-[0.97]"
               >
                 <div className={`w-12 h-12 rounded-xl bg-gradient-to-br ${qa.color} flex items-center justify-center group-hover:scale-105 transition-transform`}>
@@ -145,7 +142,7 @@ export default function HomePage() {
           <div className="text-center py-16 rounded-2xl border border-dashed border-border bg-card/50">
             <PlusCircle className="w-12 h-12 mx-auto mb-4 text-muted-foreground/20" />
             <p className="text-sm text-muted-foreground font-medium">No transactions yet</p>
-            <p className="text-xs text-muted-foreground/60 mt-1">Add money to your wallet to get started</p>
+            <p className="text-xs text-muted-foreground/60 mt-1">Your activity will show up here</p>
           </div>
         ) : (
           <div className="flex flex-col gap-2">
@@ -154,8 +151,6 @@ export default function HomePage() {
         )}
       </FadeIn>
 
-      <AddMoneyDialog open={addMoneyOpen} onOpenChange={setAddMoneyOpen}
-        onSuccess={(newBal) => { setWalletBalance(newBal); refreshDashboard(); }} />
       <PinDialog open={pinOpen} onOpenChange={setPinOpen} mode="set" onSuccess={() => refreshDashboard()} />
     </div>
   );

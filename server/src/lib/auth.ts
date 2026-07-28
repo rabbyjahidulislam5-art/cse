@@ -16,6 +16,7 @@ export interface AuthRequest extends Request {
     phone?: string;
     status?: string;
     pinSet?: boolean;
+    pinLength?: number;
     [key: string]: unknown;
   };
 }
@@ -48,9 +49,22 @@ export async function authMiddleware(req: AuthRequest, res: Response, next: Next
       phone: user.phone || undefined,
       status: user.status || undefined,
       pinSet: user.pinSet || false,
+      pinLength: user.pinLength || 4,
     };
     next();
   } catch {
     return res.status(401).json({ message: 'Invalid or expired token' });
   }
+}
+
+// Role gate — must run after authMiddleware. Every /admin/*, /library/*, /accounts/*, and
+// shop-staff-dashboard route needs this; without it, any authenticated account (including a
+// student) can call staff-only endpoints since authMiddleware alone only checks "is logged in".
+export function requireRole(...roles: string[]) {
+  return (req: AuthRequest, res: Response, next: NextFunction) => {
+    if (!req.user || !roles.includes(req.user.role || '')) {
+      return res.status(403).json({ message: 'You do not have permission to perform this action.' });
+    }
+    next();
+  };
 }
