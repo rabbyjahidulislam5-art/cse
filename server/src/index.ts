@@ -2246,7 +2246,8 @@ router.post('/admin/staff', authMiddleware, requireAdmin, async (req: AuthReques
 
 router.post('/admin/staff/manage', authMiddleware, requireAdmin, async (req: AuthRequest, res) => {
   try {
-    const { action, userId, ...data } = req.body;
+    const { action, staffId, userId: legacyUserId, ...data } = req.body;
+    const userId = staffId || legacyUserId;
     if (action === 'create') {
       const hashed = await bcrypt.hash(data.password || 'changeme123', 10);
       const staff = await prisma.user.create({ data: { email: data.email, password: hashed, fullName: data.fullName, role: data.role, department: data.department, phone: data.phone, status: 'Active' } });
