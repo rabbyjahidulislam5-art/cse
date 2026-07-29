@@ -1980,9 +1980,11 @@ router.post('/semester-fees/pay', authMiddleware, paymentInitLimiter, async (req
 // ─── ADMIN ROUTES ───
 router.post('/admin/overview', authMiddleware, requireAdmin, async (req: AuthRequest, res) => {
   try {
-    const [totalStudents, totalShops, totalTransactions, recentLogs] = await Promise.all([
+    const [totalStudents, totalShops, activeShops, suspendedShops, totalTransactions, recentLogs] = await Promise.all([
       prisma.user.count({ where: { role: 'Student' } }),
       prisma.shop.count(),
+      prisma.shop.count({ where: { status: 'Active' } }),
+      prisma.shop.count({ where: { status: 'Suspended' } }),
       prisma.transaction.count(),
       prisma.auditLog.findMany({ take: 10, orderBy: { createdAt: 'desc' }, include: { actor: true } }),
     ]);
@@ -1990,7 +1992,7 @@ router.post('/admin/overview', authMiddleware, requireAdmin, async (req: AuthReq
     const pendingFines = await prisma.adminFine.count({ where: { status: 'Pending' } });
 
     res.json({
-      totalStudents, totalShops, totalTransactions, totalRevenue: txSum._sum.amount || 0, pendingFines,
+      totalStudents, totalShops, activeShops, suspendedShops, totalTransactions, totalRevenue: txSum._sum.amount || 0, pendingFines,
       recentActivity: recentLogs.map(l => ({ id: l.id, action: l.action, actor: l.actorId || '', actorName: l.actor?.fullName || '', entityType: l.entityType || '', details: l.details || '', createdAt: l.createdAt.toISOString() })),
     });
   } catch (err: any) {
@@ -2490,19 +2492,23 @@ router.post('/library/clearance/report', authMiddleware, requireLibrary, async (
 // ─── ACCOUNTS ROUTES ───
 router.post('/accounts/overview', authMiddleware, requireAccounts, async (req: AuthRequest, res) => {
   try {
-    const [totalAgg, collectedAgg, pendingAgg] = await Promise.all([
+    const [totalAgg, collectedAgg, pendingAgg, pendingCount, totalStudents] = await Promise.all([
       prisma.semesterFee.aggregate({ _sum: { amount: true } }),
       prisma.semesterFee.aggregate({ _sum: { amount: true }, where: { status: 'Paid' } }),
       prisma.semesterFee.aggregate({ _sum: { amount: true }, where: { status: 'Pending' } }),
+      prisma.semesterFee.count({ where: { status: 'Pending' } }),
+      prisma.user.count({ where: { role: 'Student' } }),
     ]);
     const total = totalAgg._sum.amount || 0;
     const collected = collectedAgg._sum.amount || 0;
     const pending = pendingAgg._sum.amount || 0;
+    const collectionRate = total > 0 ? Math.round((collected / total) * 100) : 0;
 
     const recent = await prisma.semesterFee.findMany({ where: { status: 'Paid' }, take: 10, orderBy: { updatedAt: 'desc' }, include: { student: true } });
     res.json({
-      totalFees: total, totalCollected: collected, totalPending: pending,
-      collectionRate: total > 0 ? Math.round((collected / total) * 100) : 0,
+      totalFees: total, totalCollected: collected, totalPending: pending, collectionRate,
+      totalAssigned: total, totalPaid: collected, totalOutstanding: pending,
+      collectionPercent: collectionRate, pendingCount, totalStudents,
       recentPayments: recent.map(r => ({ id: r.id, studentName: r.student?.fullName || '', amount: r.amount, status: r.status, date: r.updatedAt.toISOString() })),
     });
   } catch (err: any) {
@@ -2640,7 +2646,7 @@ router.post('/shop/dashboard', authMiddleware, requireShopStaff, async (req: Aut
       prisma.transaction.findMany({ where: { shopId: shop.id, status: 'Success', createdAt: { gte: todayStart } } }),
       prisma.transaction.findMany({ where: { shopId: shop.id, status: 'Success', createdAt: { gte: weekStart } } }),
       prisma.transaction.findMany({ where: { shopId: shop.id, status: 'Success', createdAt: { gte: monthStart } } }),
-      prisma.transaction.aggregate({ _sum: { amount: true }, where: { shopId: shop.id, status: 'Success' } }),
+      prisma.transaction.aggregate({ _sum: { amount: true }, _count: { _all: true }, where: { shopId: shop.id, status: 'Success' } }),
       prisma.transaction.findMany({ where: { shopId: shop.id }, take: 20, orderBy: { createdAt: 'desc' } }),
       prisma.payLaterDue.findMany({ where: { shopId: shop.id, status: 'Pending' }, include: { student: true } }),
       prisma.settlement.aggregate({ _sum: { amount: true }, where: { shopId: shop.id } }),
@@ -2649,9 +2655,11 @@ router.post('/shop/dashboard', authMiddleware, requireShopStaff, async (req: Aut
 
     const totalRevenue = allTimeAgg._sum.amount || 0;
     const totalSettled = settledAgg._sum.amount || 0;
+    const totalCount = allTimeAgg._count._all || 0;
 
     res.json({
       shop: { id: shop.id, name: shop.name, category: shop.category, rating: shop.rating, status: shop.status, location: shop.location || '', logoUrl: shop.logoUrl || '', merchantId: shop.merchantId || '', qrToken: shop.qrToken || '', qrSignature: shop.qrSignature || '' },
+      totalCount,
       todayRevenue: todayTxns.reduce((s, t) => s + t.amount, 0), todayCount: todayTxns.length,
       weekRevenue: weekTxns.reduce((s, t) => s + t.amount, 0), monthRevenue: monthTxns.reduce((s, t) => s + t.amount, 0),
       totalRevenue, totalSettled, pendingSettlement: Math.max(0, totalRevenue - totalSettled),

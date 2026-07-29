@@ -17,6 +17,9 @@ server/.env
 *.log
 npm-debug.log*
 
+# Playwright MCP test artifacts
+.playwright-mcp/
+
 # IDE
 .vscode/
 .idea/

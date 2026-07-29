@@ -195,7 +195,7 @@ export type GetShopDashboardOutputType = {
     status: string; location: string; logoUrl?: string; merchantId: string; qrToken: string;
     qrSignature?: string;
   };
-  todayRevenue: number; todayCount: number; totalRevenue: number;
+  todayRevenue: number; todayCount: number; totalRevenue: number; totalCount?: number;
   totalSettled: number; pendingSettlement: number;
   recentTransactions: Array<{
     id: string; reference: string; amount: number; status: string;

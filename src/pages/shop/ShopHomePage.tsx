@@ -57,7 +57,7 @@ export default function ShopHomePage() {
               </div>
             </div>
             <div className="text-right">
-              <p className="text-sm font-bold text-foreground tabular">{data?.todayCount || 0}</p>
+              <p className="text-sm font-bold text-foreground tabular">{data?.totalCount || 0}</p>
               <p className="text-[10px] text-muted-foreground">transactions</p>
             </div>
           </div>
