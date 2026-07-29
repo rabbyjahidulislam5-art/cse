@@ -196,10 +196,9 @@ describe('Fee Management Service — Unit Tests', () => {
       expect(permission.allowed).toBe(true);
     });
 
-    it('should prevent pushing fees if status is not Approved', () => {
-      const permission = validateApprovalWorkflowPermissions('Approver', 'Draft', 'EXECUTE_PUSH');
-      expect(permission.allowed).toBe(false);
-      expect(permission.reason).toContain('Batch must be Approved before Fee Push');
+    it('should allow pushing fees directly from Draft or Validated state in 5-step workflow', () => {
+      const permission = validateApprovalWorkflowPermissions('Accounts Office', 'Draft', 'EXECUTE_PUSH');
+      expect(permission.allowed).toBe(true);
     });
   });
 

@@ -141,8 +141,11 @@ export function validateApprovalWorkflowPermissions(
   }
 
   if (action === 'EXECUTE_PUSH') {
-    if (batchStatus !== 'Approved') {
-      return { allowed: false, reason: 'Batch must be Approved before Fee Push' };
+    if (batchStatus === 'Rejected') {
+      return { allowed: false, reason: 'Rejected batch cannot be pushed' };
+    }
+    if (batchStatus === 'Pushed' || batchStatus === 'Completed') {
+      return { allowed: false, reason: 'Batch has already been pushed' };
     }
     return { allowed: true };
   }

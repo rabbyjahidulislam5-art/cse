@@ -447,9 +447,9 @@ router.post('/accounts/fee-import/push', async (req: AuthRequest, res: Response)
       return;
     }
 
-    // Ensure batch is approved before pushing
-    if (batch.status !== 'Approved') {
-      res.status(400).json({ error: 'Batch must be approved before fee push.' });
+    // Ensure batch has not already been pushed
+    if (batch.status === 'Pushed' || batch.status === 'Completed') {
+      res.status(400).json({ error: 'Batch has already been pushed.' });
       return;
     }
 
