@@ -250,31 +250,33 @@ export default function ShopDetailPage() {
           </div>
         </FadeIn>
 
-        <FadeIn delay={0.1}>
-          <div className="rounded-2xl border border-border/60 bg-card p-6">
-            <h2 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-4">Shop Information</h2>
-            <div className="space-y-3">
-              <InfoRow icon={FileText} label="About" value={shop.description} />
-              <InfoRow icon={MapPin} label="Location" value={shop.location} />
-              <InfoRow icon={Phone} label="Contact Number" value={shop.contactNumber} />
-              <InfoRow icon={Mail} label="Email" value={shop.ownerEmail} />
-              <InfoRow icon={CalendarClock} label="Operating Hours" value={shop.operatingHours} />
-              <InfoRow icon={UserIcon} label="Owner / Manager" value={shop.ownerName} />
+        <div className="space-y-6">
+          <FadeIn delay={0.1}>
+            <div className="rounded-2xl border border-border/60 bg-card p-6">
+              <h2 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-4">Shop Information</h2>
+              <div className="space-y-3">
+                <InfoRow icon={FileText} label="About" value={shop.description} />
+                <InfoRow icon={MapPin} label="Location" value={shop.location} />
+                <InfoRow icon={Phone} label="Contact Number" value={shop.contactNumber} />
+                <InfoRow icon={Mail} label="Email" value={shop.ownerEmail} />
+                <InfoRow icon={CalendarClock} label="Operating Hours" value={shop.operatingHours} />
+                <InfoRow icon={UserIcon} label="Owner / Manager" value={shop.ownerName} />
+              </div>
             </div>
-          </div>
-        </FadeIn>
-      </div>
+          </FadeIn>
 
-      <FadeIn delay={0.15}>
-        <div className="flex flex-col sm:flex-row gap-3 mt-6 max-w-md mx-auto lg:max-w-none lg:mx-0">
-          <Button className="w-full h-12 font-semibold" onClick={() => { setPayMode('sslcommerz'); setPayStep('amount'); }}>
-            <CreditCard className="w-4 h-4 mr-2" /> Pay Online
-          </Button>
-          <Button variant="outline" className="w-full h-12" onClick={() => { setPayMode('later'); setPayStep('amount'); }}>
-            <Clock className="w-4 h-4 mr-2" /> Pay Later
-          </Button>
+          <FadeIn delay={0.15}>
+            <div className="flex flex-col sm:flex-row gap-3">
+              <Button className="w-full h-12 font-semibold" onClick={() => { setPayMode('sslcommerz'); setPayStep('amount'); }}>
+                <CreditCard className="w-4 h-4 mr-2" /> Pay Online
+              </Button>
+              <Button variant="outline" className="w-full h-12" onClick={() => { setPayMode('later'); setPayStep('amount'); }}>
+                <Clock className="w-4 h-4 mr-2" /> Pay Later
+              </Button>
+            </div>
+          </FadeIn>
         </div>
-      </FadeIn>
+      </div>
     </div>
   );
 }
