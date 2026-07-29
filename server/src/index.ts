@@ -779,13 +779,17 @@ router.post('/shops', async (req, res) => {
 router.post('/shops/detail', async (req, res) => {
   try {
     const { shopId } = req.body;
-    const shop = await prisma.shop.findUnique({ where: { id: shopId } });
+    const shop = await prisma.shop.findUnique({ where: { id: shopId }, include: { owner: { select: { email: true, fullName: true } } } });
     if (!shop) return res.status(404).json({ message: 'Shop not found' });
     res.json({
       shop: {
         id: shop.id, name: shop.name, category: shop.category, rating: shop.rating,
         status: shop.status, location: shop.location || '', logoUrl: shop.logoUrl || '',
         qrToken: shop.qrToken || '', merchantId: shop.merchantId || '',
+        description: shop.description || '', operatingHours: shop.operatingHours || '',
+        contactNumber: shop.contactNumber || '',
+        ownerName: shop.ownerName || shop.owner?.fullName || '',
+        ownerEmail: shop.owner?.email || '',
       },
     });
   } catch (err: any) {

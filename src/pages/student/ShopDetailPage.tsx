@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
-import { ArrowLeft, Star, Store, QrCode, CreditCard, Clock, ChevronRight, MapPin } from 'lucide-react';
+import { ArrowLeft, Star, Store, CreditCard, Clock, ChevronRight, MapPin, Phone, Mail, CalendarClock, User as UserIcon, FileText } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -18,6 +18,20 @@ import { FadeIn } from '@/components/PageTransition';
 
 type ShopData = NonNullable<GetShopDetailOutputType['shop']>;
 type PayStep = 'idle' | 'amount' | 'method' | 'processing' | 'success';
+
+function InfoRow({ icon: Icon, label, value }: { icon: typeof Phone; label: string; value: string }) {
+  return (
+    <div className="flex items-center gap-4 p-4 rounded-xl bg-accent/30 border border-border/40">
+      <div className="w-10 h-10 rounded-xl bg-accent flex items-center justify-center shrink-0">
+        <Icon className="w-4.5 h-4.5 text-muted-foreground" />
+      </div>
+      <div className="flex-1 min-w-0">
+        <p className="text-[10px] text-muted-foreground uppercase font-semibold tracking-wider">{label}</p>
+        <p className={`text-sm font-medium mt-0.5 ${value ? 'text-foreground' : 'text-muted-foreground/60 italic'}`}>{value || 'Not provided'}</p>
+      </div>
+    </div>
+  );
+}
 
 export default function ShopDetailPage() {
   const { shopId } = useParams();
@@ -237,24 +251,30 @@ export default function ShopDetailPage() {
         </FadeIn>
 
         <FadeIn delay={0.1}>
-          <div className="space-y-4">
-            <div className="rounded-2xl border border-border/60 bg-card p-6 flex flex-col items-center">
-              <div className="w-40 h-40 bg-accent rounded-2xl flex items-center justify-center mb-4">
-                <QrCode className="w-16 h-16 text-muted-foreground/15" />
-              </div>
-              <p className="text-xs text-muted-foreground text-center">Scan this QR at the counter or tap below to pay</p>
-            </div>
-            <div className="flex flex-col gap-3">
-              <Button className="w-full h-12 font-semibold" onClick={() => { setPayMode('sslcommerz'); setPayStep('amount'); }}>
-                <CreditCard className="w-4 h-4 mr-2" /> Pay Online
-              </Button>
-              <Button variant="outline" className="w-full h-11" onClick={() => { setPayMode('later'); setPayStep('amount'); }}>
-                <Clock className="w-4 h-4 mr-2" /> Pay Later
-              </Button>
+          <div className="rounded-2xl border border-border/60 bg-card p-6">
+            <h2 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-4">Shop Information</h2>
+            <div className="space-y-3">
+              <InfoRow icon={FileText} label="About" value={shop.description} />
+              <InfoRow icon={MapPin} label="Location" value={shop.location} />
+              <InfoRow icon={Phone} label="Contact Number" value={shop.contactNumber} />
+              <InfoRow icon={Mail} label="Email" value={shop.ownerEmail} />
+              <InfoRow icon={CalendarClock} label="Operating Hours" value={shop.operatingHours} />
+              <InfoRow icon={UserIcon} label="Owner / Manager" value={shop.ownerName} />
             </div>
           </div>
         </FadeIn>
       </div>
+
+      <FadeIn delay={0.15}>
+        <div className="flex flex-col sm:flex-row gap-3 mt-6 max-w-md mx-auto lg:max-w-none lg:mx-0">
+          <Button className="w-full h-12 font-semibold" onClick={() => { setPayMode('sslcommerz'); setPayStep('amount'); }}>
+            <CreditCard className="w-4 h-4 mr-2" /> Pay Online
+          </Button>
+          <Button variant="outline" className="w-full h-12" onClick={() => { setPayMode('later'); setPayStep('amount'); }}>
+            <Clock className="w-4 h-4 mr-2" /> Pay Later
+          </Button>
+        </div>
+      </FadeIn>
     </div>
   );
 }

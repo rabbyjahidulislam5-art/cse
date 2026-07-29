@@ -72,6 +72,8 @@ export type GetShopDetailOutputType = {
   shop: {
     id: string; name: string; category: string; rating: number;
     status: string; location: string; logoUrl: string; qrToken: string; merchantId: string;
+    description: string; operatingHours: string; contactNumber: string;
+    ownerName: string; ownerEmail: string;
   };
 };
 
