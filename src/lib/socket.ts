@@ -34,6 +34,20 @@ export function useDisputeSocket(onNotification: (payload: { id: string; dispute
   }, []);
 }
 
+/** Subscribes to the general notification feed (wallet/security/payment events) for the lifetime of the calling component. */
+export function useNotificationSocket(onNotification: (payload: { id: string; category: string; type: string; title: string; body: string; link: string | null; createdAt: string; read: boolean }) => void) {
+  const handlerRef = useRef(onNotification);
+  handlerRef.current = onNotification;
+
+  useEffect(() => {
+    const s = getSocket();
+    if (!s) return;
+    const handler = (payload: any) => handlerRef.current(payload);
+    s.on('notification:new', handler);
+    return () => { s.off('notification:new', handler); };
+  }, []);
+}
+
 /** Joins a specific case's room so live message/status updates arrive while the detail page is open. */
 export function useDisputeRoom(disputeId: string | undefined, onUpdate: (payload: { id: string; eventType: string; summary: string; createdAt: string }) => void) {
   const handlerRef = useRef(onUpdate);

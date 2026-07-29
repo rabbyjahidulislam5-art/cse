@@ -265,7 +265,12 @@ router.post('/disputes/pdf', authMiddleware, async (req: AuthRequest, res) => {
       include: { raisedBy: { select: { fullName: true, studentId: true } }, transaction: { select: { reference: true, amount: true, type: true, createdAt: true } } },
     });
     if (!dispute || dispute.deletedAt) return res.status(404).json({ message: 'Dispute not found.' });
-    if (dispute.raisedById !== userId) return res.status(403).json({ message: 'You do not have access to this case.' });
+    // Staff roles review cases across every student, not just their own — only a Student caller is
+    // restricted to a case they personally raised.
+    const staffRoles = ['Admin Office', 'Accounts Office', 'Library', 'Shop Staff'];
+    if (dispute.raisedById !== userId && !staffRoles.includes(req.user!.role || '')) {
+      return res.status(403).json({ message: 'You do not have access to this case.' });
+    }
 
     const url = await generateDisputeSummaryPdf(dispute);
     res.json({ url });

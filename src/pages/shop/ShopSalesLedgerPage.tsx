@@ -1,8 +1,9 @@
 import { useState, useEffect } from 'react';
 import { History, DollarSign } from 'lucide-react';
 import { Skeleton } from '@/components/ui/skeleton';
-import { getShopDashboard, type GetShopDashboardOutputType } from '@/lib/api';
+import { getShopDashboard, generateSalesLedgerReport, type GetShopDashboardOutputType } from '@/lib/api';
 import { motion } from 'framer-motion';
+import ExportButton from '@/components/ExportButton';
 
 export default function ShopSalesLedgerPage() {
   const [data, setData] = useState<GetShopDashboardOutputType | null>(null);
@@ -13,11 +14,20 @@ export default function ShopSalesLedgerPage() {
 
   if (loading) return <div className="container mx-auto px-4 sm:px-6 py-6 max-w-3xl space-y-4"><Skeleton className="h-8 w-48" /><Skeleton className="h-24 rounded-2xl" />{[1,2,3].map(i => <Skeleton key={i} className="h-16 rounded-xl" />)}</div>;
 
-  const txns = data?.recentTransactions || [];
+  const now = Date.now();
+  const dayMs = 24 * 60 * 60 * 1000;
+  const periodStart = period === 'today' ? new Date().setHours(0, 0, 0, 0) : period === 'week' ? now - 7 * dayMs : new Date(new Date().getFullYear(), new Date().getMonth(), 1).getTime();
+  const txns = (data?.recentTransactions || []).filter(t => new Date(t.createdAt || 0).getTime() >= periodStart);
 
   return (
     <div className="container mx-auto px-4 sm:px-6 py-6 max-w-3xl">
-      <h1 className="text-xl font-bold text-foreground mb-6">Sales Ledger</h1>
+      <div className="flex items-center justify-between mb-6 flex-wrap gap-3">
+        <h1 className="text-xl font-bold text-foreground">Sales Ledger</h1>
+        <ExportButton
+          supportRoute="/shop/disputes"
+          onExport={(format) => generateSalesLedgerReport({ format, period })}
+        />
+      </div>
 
       <div className="rounded-2xl border border-border/60 bg-card p-5 mb-6">
         <div className="flex items-center justify-between">

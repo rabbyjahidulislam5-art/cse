@@ -1,5 +1,5 @@
 import { Outlet, NavLink, useNavigate } from 'react-router-dom';
-import { LayoutDashboard, Store, ShieldAlert, FileText, UserCog, Bell, LogOut, Settings, Shield, ScrollText } from 'lucide-react';
+import { LayoutDashboard, Store, ShieldAlert, FileText, UserCog, LogOut, Settings, Shield, ScrollText } from 'lucide-react';
 import { useAuth } from '@/lib/auth-context';
 import { Skeleton } from '@/components/ui/skeleton';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger, DropdownMenuSeparator } from '@/components/ui/dropdown-menu';
@@ -7,6 +7,7 @@ import { motion } from 'framer-motion';
 import { useEffect, useState } from 'react';
 import { getDisputeBadgeCounts } from '@/lib/disputeApi';
 import { useDisputeSocket } from '@/lib/socket';
+import NotificationBell from '@/components/NotificationBell';
 
 const navItems = [
   { to: '/admin', icon: LayoutDashboard, label: 'Dashboard', end: true },
@@ -77,6 +78,7 @@ export default function AdminLayout() {
           </div>
 
           <div className="flex items-center gap-2">
+            <NotificationBell to="/admin/notifications" />
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <button className="w-9 h-9 rounded-xl bg-gradient-to-br from-destructive/20 to-destructive/10 flex items-center justify-center text-sm font-bold text-destructive hover:from-destructive/30 hover:to-destructive/20 transition-all ring-1 ring-destructive/20">

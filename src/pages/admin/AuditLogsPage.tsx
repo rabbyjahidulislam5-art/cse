@@ -4,8 +4,9 @@ import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
 import { toast } from 'sonner';
-import { getAuditLogs, type GetAuditLogsOutputType } from '@/lib/api';
+import { getAuditLogs, generateAuditLogReport, type GetAuditLogsOutputType } from '@/lib/api';
 import { FadeIn } from '@/components/PageTransition';
+import ExportButton from '@/components/ExportButton';
 
 type Log = GetAuditLogsOutputType['logs'][0];
 
@@ -37,6 +38,10 @@ export default function AuditLogsPage() {
             <h1 className="text-xl font-bold text-foreground">System Audit Logs</h1>
             <p className="text-sm text-muted-foreground mt-0.5">Read-only activity history across the entire system</p>
           </div>
+          <ExportButton
+            supportRoute="/admin/disputes"
+            onExport={(format) => generateAuditLogReport({ format })}
+          />
         </div>
       </FadeIn>
 

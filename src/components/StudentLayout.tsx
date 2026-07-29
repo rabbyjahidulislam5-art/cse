@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Outlet, NavLink, useNavigate, useLocation } from 'react-router-dom';
-import { GraduationCap, Home, Store, FileWarning, History, UserCircle, Bell, ScanLine, LogOut, Settings, ScrollText, CreditCard } from 'lucide-react';
+import { GraduationCap, Home, Store, FileWarning, History, UserCircle, ScanLine, LogOut, Settings, ScrollText, CreditCard } from 'lucide-react';
 import { useAuth } from '@/lib/auth-context';
 import { UserProvider, useUser } from '@/lib/user-context';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -8,6 +8,7 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigge
 import { motion } from 'framer-motion';
 import { getDisputeBadgeCounts } from '@/lib/disputeApi';
 import { useDisputeSocket } from '@/lib/socket';
+import NotificationBell from '@/components/NotificationBell';
 
 const navItems = [
   { to: '/student', icon: Home, label: 'Home', end: true },
@@ -24,11 +25,11 @@ function LayoutInner() {
   const location = useLocation();
   const { user, loading } = useUser();
   const { logout } = useAuth();
-  const [unreadReplies, setUnreadReplies] = useState(0);
+  const [pendingCases, setPendingCases] = useState(0);
 
   useEffect(() => {
     if (!user) return;
-    const fetchBadge = () => getDisputeBadgeCounts().then(r => setUnreadReplies(r.unreadReplies)).catch(() => {});
+    const fetchBadge = () => getDisputeBadgeCounts().then(r => setPendingCases(r.pendingCases)).catch(() => {});
     fetchBadge();
     // Poll as a fallback (socket disconnects, tab was backgrounded, etc.) — the socket below is
     // what makes the badge update instantly in the common case.
@@ -36,7 +37,7 @@ function LayoutInner() {
     return () => clearInterval(interval);
   }, [user]);
 
-  useDisputeSocket(() => setUnreadReplies(c => c + 1));
+  useDisputeSocket(() => setPendingCases(c => c + 1));
 
   return (
     <div className="min-h-screen bg-background flex flex-col">
@@ -70,6 +71,9 @@ function LayoutInner() {
                     <span className="relative z-10 flex items-center gap-2">
                       <item.icon className="w-4 h-4" />
                       {item.label}
+                      {item.label === 'Disputes' && pendingCases > 0 && (
+                        <span className="min-w-[16px] h-4 px-1 rounded-full bg-destructive text-[9px] font-bold text-white flex items-center justify-center">{pendingCases > 99 ? '99+' : pendingCases}</span>
+                      )}
                     </span>
                   </>
                 )}
@@ -79,19 +83,7 @@ function LayoutInner() {
 
           {/* Right controls */}
           <div className="flex items-center gap-2">
-            <button
-              onClick={() => navigate('/student/disputes')}
-              className="relative p-2.5 rounded-xl hover:bg-accent/80 transition-all duration-200 group"
-            >
-              <Bell className="w-5 h-5 text-muted-foreground group-hover:text-foreground transition-colors" />
-              {unreadReplies > 0 ? (
-                <span className="absolute -top-0.5 -right-0.5 min-w-[16px] h-4 px-1 rounded-full bg-destructive text-[9px] font-bold text-white flex items-center justify-center ring-2 ring-background">
-                  {unreadReplies > 9 ? '9+' : unreadReplies}
-                </span>
-              ) : (
-                <span className="absolute top-2 right-2 w-2 h-2 bg-primary rounded-full ring-2 ring-background" />
-              )}
-            </button>
+            <NotificationBell to="/student/notifications" />
 
             {loading ? <Skeleton className="w-9 h-9 rounded-xl" /> : (
               <DropdownMenu>
@@ -146,7 +138,12 @@ function LayoutInner() {
                       transition={{ type: 'spring', stiffness: 400, damping: 30 }}
                     />
                   )}
-                  <item.icon className={`w-5 h-5 transition-all ${isActive ? 'scale-110' : ''}`} />
+                  <div className="relative">
+                    <item.icon className={`w-5 h-5 transition-all ${isActive ? 'scale-110' : ''}`} />
+                    {item.label === 'Disputes' && pendingCases > 0 && (
+                      <span className="absolute -top-1 -right-1.5 min-w-[14px] h-3.5 px-0.5 rounded-full bg-destructive text-[8px] font-bold text-white flex items-center justify-center">{pendingCases > 9 ? '9+' : pendingCases}</span>
+                    )}
+                  </div>
                   <span className="text-[10px] font-semibold">{item.label}</span>
                 </>
               )}

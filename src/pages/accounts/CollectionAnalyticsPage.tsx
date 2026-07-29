@@ -3,8 +3,9 @@ import { Filter, BarChart3 } from 'lucide-react';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip } from 'recharts';
-import { getCollectionAnalytics, type GetCollectionAnalyticsOutputType } from '@/lib/api';
+import { getCollectionAnalytics, generateCollectionAnalyticsReport, type GetCollectionAnalyticsOutputType } from '@/lib/api';
 import { motion } from 'framer-motion';
+import ExportButton from '@/components/ExportButton';
 
 export default function CollectionAnalyticsPage() {
   const [data, setData] = useState<GetCollectionAnalyticsOutputType | null>(null);
@@ -28,17 +29,23 @@ export default function CollectionAnalyticsPage() {
 
   return (
     <div className="container mx-auto px-4 sm:px-6 py-6 max-w-4xl">
-      <div className="flex items-center justify-between mb-6">
+      <div className="flex items-center justify-between mb-6 flex-wrap gap-3">
         <h1 className="text-xl font-bold text-foreground">Collection Analytics</h1>
-        <div className="flex items-center gap-2">
-          <Filter className="w-4 h-4 text-muted-foreground" />
-          <Select value={dept} onValueChange={v => { setDept(v); load(v === 'all' ? undefined : v); }}>
-            <SelectTrigger className="w-48 bg-accent/50 border-border/60"><SelectValue placeholder="All Departments" /></SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">All Departments</SelectItem>
-              {data?.departments?.map(d => <SelectItem key={d.name} value={d.name}>{d.name}</SelectItem>)}
-            </SelectContent>
-          </Select>
+        <div className="flex items-center gap-3 flex-wrap">
+          <div className="flex items-center gap-2">
+            <Filter className="w-4 h-4 text-muted-foreground" />
+            <Select value={dept} onValueChange={v => { setDept(v); load(v === 'all' ? undefined : v); }}>
+              <SelectTrigger className="w-48 bg-accent/50 border-border/60"><SelectValue placeholder="All Departments" /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All Departments</SelectItem>
+                {data?.departments?.map(d => <SelectItem key={d.name} value={d.name}>{d.name}</SelectItem>)}
+              </SelectContent>
+            </Select>
+          </div>
+          <ExportButton
+            supportRoute="/accounts/disputes"
+            onExport={(format) => generateCollectionAnalyticsReport({ format })}
+          />
         </div>
       </div>
 

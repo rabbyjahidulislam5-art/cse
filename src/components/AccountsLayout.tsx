@@ -6,6 +6,7 @@ import { motion } from 'framer-motion';
 import { useEffect, useState } from 'react';
 import { getDisputeBadgeCounts } from '@/lib/disputeApi';
 import { useDisputeSocket } from '@/lib/socket';
+import NotificationBell from '@/components/NotificationBell';
 
 const navItems = [
   { to: '/accounts', icon: LayoutDashboard, label: 'Home', end: true },
@@ -72,6 +73,8 @@ export default function AccountsLayout() {
             ))}
           </div>
 
+          <div className="flex items-center gap-2">
+          <NotificationBell to="/accounts/notifications" />
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <button className="w-9 h-9 rounded-xl bg-gradient-to-br from-[hsl(var(--chart-4))]/20 to-[hsl(var(--chart-4))]/10 flex items-center justify-center text-sm font-bold text-[hsl(var(--chart-4))] hover:from-[hsl(var(--chart-4))]/30 hover:to-[hsl(var(--chart-4))]/20 transition-all ring-1 ring-[hsl(var(--chart-4))]/20">
@@ -90,6 +93,7 @@ export default function AccountsLayout() {
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
+          </div>
         </div>
       </nav>
 

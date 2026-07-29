@@ -1,13 +1,13 @@
 import { useEffect, useRef, useState } from 'react';
 import { useSearchParams, useNavigate } from 'react-router-dom';
-import { ArrowLeft, Loader2, Send, Paperclip, X, FileText, Image as ImageIcon, StickyNote } from 'lucide-react';
+import { ArrowLeft, Loader2, Send, Paperclip, X, FileText, Image as ImageIcon, StickyNote, Download } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { toast } from 'sonner';
 import StatusBadge from '@/components/StatusBadge';
 import { FadeIn } from '@/components/PageTransition';
 import { formatCurrency } from '@/lib/mock-data';
-import { getShopDisputeDetail, replyToShopDispute, type AccountsDisputeDetail } from '@/lib/disputeApi';
+import { getShopDisputeDetail, replyToShopDispute, getDisputePdf, type AccountsDisputeDetail } from '@/lib/disputeApi';
 
 const MAX_FILES = 5;
 const TERMINAL = ['Resolved', 'Rejected', 'Refunded', 'Closed'];
@@ -23,10 +23,23 @@ export default function ShopDisputeDetailPage() {
   const [reply, setReply] = useState('');
   const [isInternal, setIsInternal] = useState(false);
   const [files, setFiles] = useState<File[]>([]);
+  const [pdfLoading, setPdfLoading] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const load = () => { if (!disputeId) return; setLoading(true); getShopDisputeDetail({ disputeId }).then(setDetail).catch((e: any) => toast.error(e.message)).finally(() => setLoading(false)); };
   useEffect(load, [disputeId]);
+
+  const handlePdf = async () => {
+    setPdfLoading(true);
+    try {
+      const { url } = await getDisputePdf({ disputeId });
+      window.open(url, '_blank', 'noopener,noreferrer');
+    } catch (e: any) {
+      toast.error(e.message || 'Failed to generate PDF.');
+    } finally {
+      setPdfLoading(false);
+    }
+  };
 
   const handleReply = async () => {
     if (!reply.trim()) return;
@@ -55,6 +68,12 @@ export default function ShopDisputeDetailPage() {
       </div>
 
       <FadeIn>
+        <div className="flex flex-wrap gap-2 mb-4">
+          <Button variant="outline" size="sm" className="rounded-lg gap-1.5 text-xs" disabled={pdfLoading} onClick={handlePdf}>
+            {pdfLoading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Download className="w-3.5 h-3.5" />} Download Case PDF
+          </Button>
+        </div>
+
         <div className="rounded-xl border border-border/60 bg-card p-4 mb-4">
           <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-1.5">Customer's Description</p>
           <p className="text-sm text-foreground leading-relaxed mb-3">{dispute.description}</p>

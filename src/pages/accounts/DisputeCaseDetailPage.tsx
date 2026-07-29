@@ -4,7 +4,7 @@ import { motion } from 'framer-motion';
 import {
   ArrowLeft, Loader2, Send, UserPlus, StickyNote, FileText, Snowflake, Forward as ForwardIcon,
   ArrowUpCircle, Banknote, GitMerge, Split, CheckCircle2, XCircle, History, Shield, AlertTriangle,
-  Hash, MapPin, Smartphone, Clock, CreditCard, User, Flag,
+  Hash, MapPin, Smartphone, Clock, CreditCard, User, Flag, Download,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
@@ -18,7 +18,7 @@ import {
   getAccountsDisputeDetail, getAccountsOfficers, assignDispute, replyToAccountsDispute, requestDocuments,
   freezeDispute, unfreezeDispute, forwardDispute, escalateDispute, resolveDispute, rejectDispute,
   initiateRefund, rejectRefund, mergeDisputes, splitDispute, closeAccountsDispute, DISPUTE_CATEGORIES,
-  type AccountsDisputeDetail, type RefundMethod,
+  getDisputePdf, type AccountsDisputeDetail, type RefundMethod,
 } from '@/lib/disputeApi';
 
 type Action = null | 'assign' | 'reply' | 'note' | 'docs' | 'forward' | 'escalate' | 'refund' | 'reject-refund' | 'merge' | 'split' | 'resolve' | 'reject';
@@ -43,6 +43,7 @@ export default function DisputeCaseDetailPage() {
   const [loading, setLoading] = useState(true);
   const [action, setAction] = useState<Action>(null);
   const [busy, setBusy] = useState(false);
+  const [pdfLoading, setPdfLoading] = useState(false);
   const [officers, setOfficers] = useState<Array<{ id: string; fullName: string | null }>>([]);
 
   // Form fields shared across action panels
@@ -63,6 +64,18 @@ export default function DisputeCaseDetailPage() {
   useEffect(() => { getAccountsOfficers().then(r => setOfficers(r.officers)); }, []);
 
   const resetAction = () => { setAction(null); setText(''); setSelectValue(''); setRefundAmount(''); };
+
+  const handlePdf = async () => {
+    setPdfLoading(true);
+    try {
+      const { url } = await getDisputePdf({ disputeId });
+      window.open(url, '_blank', 'noopener,noreferrer');
+    } catch (e: any) {
+      toast.error(e.message || 'Failed to generate PDF.');
+    } finally {
+      setPdfLoading(false);
+    }
+  };
 
   const run = async (fn: () => Promise<any>, successMsg: string) => {
     setBusy(true);
@@ -103,6 +116,9 @@ export default function DisputeCaseDetailPage() {
       <FadeIn>
         {/* Action toolbar */}
         <div className="flex flex-wrap gap-1.5 mb-4">
+          <Button size="sm" variant="outline" className="text-xs gap-1.5" disabled={pdfLoading} onClick={handlePdf}>
+            {pdfLoading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Download className="w-3.5 h-3.5" />} Download PDF
+          </Button>
           <Button size="sm" variant="outline" className="text-xs gap-1.5" onClick={() => setAction('assign')}><UserPlus className="w-3.5 h-3.5" /> Assign</Button>
           <Button size="sm" variant="outline" className="text-xs gap-1.5" onClick={() => setAction('reply')} disabled={isTerminal}><Send className="w-3.5 h-3.5" /> Reply</Button>
           <Button size="sm" variant="outline" className="text-xs gap-1.5" onClick={() => setAction('note')}><StickyNote className="w-3.5 h-3.5" /> Internal Note</Button>

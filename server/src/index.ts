@@ -12,6 +12,8 @@ import rateLimit, { ipKeyGenerator } from 'express-rate-limit';
 import prisma from './lib/prisma';
 import { authMiddleware, generateToken, requireRole, AuthRequest } from './lib/auth';
 import { sendEmail } from './lib/email';
+import { notifyUser } from './lib/notify';
+import { generateTabularReport, ReportFormat } from './lib/report';
 import http from 'http';
 import studentDisputeRouter from './routes/disputes/student';
 import accountsDisputeRouter from './routes/disputes/accounts';
@@ -555,6 +557,13 @@ router.post('/auth/forgot-password/reset', async (req, res) => {
     await prisma.user.update({ where: { id: otp.userId }, data: { password: hashed } });
     await prisma.otpCode.update({ where: { id: otp.id }, data: { status: 'Used' } });
 
+    void notifyUser({
+      recipientId: otp.userId, category: 'security', type: 'password.reset',
+      title: 'Password Changed', body: 'Your password was just reset. If this wasn\'t you, contact support immediately.',
+      link: '/student/profile',
+      emailSubject: 'Security Alert: Password Changed — Smart Campus',
+    });
+
     res.json({ success: true, message: 'Password updated successfully. You can now sign in with your new password.' });
   } catch (err: any) {
     res.status(500).json({ message: err.message });
@@ -685,6 +694,13 @@ router.post('/shops/pay', authMiddleware, async (req: AuthRequest, res) => {
       },
     });
 
+    void notifyUser({
+      recipientId: userId, category: 'payment', type: 'shop.paylater.created',
+      title: 'Pay-Later Due Created', body: `৳${amount.toLocaleString()} due at ${shopName || 'a shop'} by ${dueDate.toLocaleDateString()}.`,
+      link: '/student/dues',
+      emailSubject: `Pay-Later Due Created — ৳${amount} — Smart Campus`,
+    });
+
     res.json({ success: true, transactionId: tx.id, dueId: due.id });
   } catch (err: any) {
     res.status(500).json({ message: err.message });
@@ -793,25 +809,82 @@ router.post('/transactions', authMiddleware, async (req: AuthRequest, res) => {
 });
 
 // ─── NOTIFICATIONS ───
+// Merges the persisted Notification table (wallet/security/payment events — see lib/notify.ts)
+// with DisputeNotification (dispute-case events, already role-agnostic) into one feed per user,
+// each tagged with a role-aware deep link so the bell/list can navigate straight to the source.
+const ROLE_BASE_PATH: Record<string, string> = {
+  Student: '/student', 'Admin Office': '/admin', Library: '/library',
+  'Accounts Office': '/accounts', 'Shop Staff': '/shop',
+};
+
 router.post('/notifications', authMiddleware, async (req: AuthRequest, res) => {
   try {
     const userId = req.user!.id;
-    const txns = await prisma.transaction.findMany({ where: { userId }, take: 30, orderBy: { createdAt: 'desc' } });
-    const dues = await prisma.semesterFee.findMany({ where: { studentId: userId, status: 'Pending' }, take: 5 });
-    const libFines = await prisma.libraryFine.findMany({ where: { studentId: userId, status: 'Pending' }, take: 5 });
+    const base = ROLE_BASE_PATH[req.user!.role || ''] || '/student';
+    const { category, unreadOnly, search } = req.body as { category?: string; unreadOnly?: boolean; search?: string };
 
-    const notifications: any[] = [];
-    txns.forEach(t => {
-      const icon = t.direction === 'Credit' ? '💰' : t.type === 'Shop Payment' ? '🛍️' : '📤';
-      notifications.push({
-        id: t.id, type: t.type, title: t.type, message: t.description || '',
-        amount: t.amount, status: t.status, date: t.createdAt.toISOString(), icon,
-      });
-    });
-    dues.forEach(d => notifications.push({ id: d.id, type: 'Fee Due', title: 'Semester Fee', message: d.label || '', amount: d.amount, status: 'Pending', date: d.dueDate || '', icon: '🎓' }));
-    libFines.forEach(f => notifications.push({ id: f.id, type: 'Library Fine', title: 'Library Fine', message: f.label || '', amount: f.amount, status: 'Pending', date: f.dueDate || '', icon: '📚' }));
+    const [general, disputes] = await Promise.all([
+      prisma.notification.findMany({ where: { recipientId: userId }, orderBy: { createdAt: 'desc' }, take: 100 }),
+      prisma.disputeNotification.findMany({ where: { recipientId: userId }, orderBy: { createdAt: 'desc' }, take: 100 }),
+    ]);
 
-    res.json({ notifications: notifications.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()) });
+    let merged = [
+      ...general.map(n => ({
+        id: n.id, source: 'general' as const, category: n.category, type: n.type,
+        title: n.title, body: n.body, link: n.link || base,
+        read: !!n.readAt, createdAt: n.createdAt.toISOString(),
+      })),
+      ...disputes.map(n => ({
+        id: n.id, source: 'dispute' as const, category: 'dispute', type: n.type,
+        title: n.title, body: n.body,
+        link: n.disputeId ? `${base}/disputes/detail?disputeId=${n.disputeId}` : `${base}/disputes`,
+        read: !!n.readAt, createdAt: n.createdAt.toISOString(),
+      })),
+    ].sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+
+    const unreadCount = merged.filter(n => !n.read).length;
+
+    if (category) merged = merged.filter(n => n.category === category);
+    if (unreadOnly) merged = merged.filter(n => !n.read);
+    if (search?.trim()) {
+      const q = search.trim().toLowerCase();
+      merged = merged.filter(n => n.title.toLowerCase().includes(q) || n.body.toLowerCase().includes(q));
+    }
+
+    res.json({ notifications: merged.slice(0, 100), unreadCount });
+  } catch (err: any) {
+    res.status(500).json({ message: err.message });
+  }
+});
+
+router.post('/notifications/unread-count', authMiddleware, async (req: AuthRequest, res) => {
+  try {
+    const userId = req.user!.id;
+    const [a, b] = await Promise.all([
+      prisma.notification.count({ where: { recipientId: userId, readAt: null } }),
+      prisma.disputeNotification.count({ where: { recipientId: userId, readAt: null } }),
+    ]);
+    res.json({ unreadCount: a + b });
+  } catch (err: any) {
+    res.status(500).json({ message: err.message });
+  }
+});
+
+router.post('/notifications/mark-read', authMiddleware, async (req: AuthRequest, res) => {
+  try {
+    const userId = req.user!.id;
+    const { id, source } = req.body as { id?: string; source?: 'general' | 'dispute' };
+    if (id && source === 'dispute') {
+      await prisma.disputeNotification.updateMany({ where: { id, recipientId: userId }, data: { readAt: new Date() } });
+    } else if (id) {
+      await prisma.notification.updateMany({ where: { id, recipientId: userId }, data: { readAt: new Date() } });
+    } else {
+      await Promise.all([
+        prisma.notification.updateMany({ where: { recipientId: userId, readAt: null }, data: { readAt: new Date() } }),
+        prisma.disputeNotification.updateMany({ where: { recipientId: userId, readAt: null }, data: { readAt: new Date() } }),
+      ]);
+    }
+    res.json({ success: true });
   } catch (err: any) {
     res.status(500).json({ message: err.message });
   }
@@ -978,6 +1051,17 @@ router.post('/transfer', authMiddleware, async (req: AuthRequest, res) => {
       }
     } catch { /* best-effort */ }
 
+    void notifyUser({
+      recipientId: senderId, category: 'wallet', type: 'transfer.sent',
+      title: 'Transfer Sent', body: `You sent ৳${amount.toLocaleString()} to ${recipient.fullName || recipient.email}.`,
+      link: '/student/ledger',
+    });
+    void notifyUser({
+      recipientId: recipient.id, category: 'wallet', type: 'transfer.received',
+      title: 'Transfer Received', body: `You received ৳${amount.toLocaleString()} from ${req.user!.fullName || 'a student'}.`,
+      link: '/student/ledger',
+    });
+
     res.json({ success: true, newBalance: senderNewBalance, transactionId: sendTx.id, recipientName: recipient.fullName || recipient.email || 'Unknown' });
   } catch (err: any) {
     res.status(500).json({ message: err.message });
@@ -1059,6 +1143,12 @@ router.post('/wallet/withdraw', authMiddleware, async (req: AuthRequest, res) =>
       }
     } catch { /* best-effort */ }
 
+    void notifyUser({
+      recipientId: userId, category: 'wallet', type: 'withdraw.requested',
+      title: 'Withdrawal Requested', body: `Your withdrawal of ৳${withdrawAmt.toLocaleString()} to ${provider} (${cleanMobile}) is being processed.`,
+      link: '/student/ledger',
+    });
+
     res.json({ success: true, newBalance, transactionId: tx.id, reference: ref, message: 'Withdrawal request submitted successfully.' });
   } catch (err: any) {
     res.status(500).json({ message: err.message });
@@ -1098,6 +1188,14 @@ router.post('/pin/set', authMiddleware, async (req: AuthRequest, res) => {
     const hash = await hashPin(pin, salt);
     await prisma.user.update({ where: { id: userId }, data: { pinHash: hash, pinSalt: salt, pinSet: true, pinLength: NEW_PIN_LENGTH, pinAttempts: 0, pinLockedUntil: null } });
     await prisma.auditLog.create({ data: { action: user.pinSet ? 'PIN Changed' : 'PIN Set', actorId: userId, entityType: 'User', entityId: userId, details: user.pinSet ? 'Wallet PIN changed' : 'Wallet PIN set for first time', ipAddress: req.ip } });
+
+    void notifyUser({
+      recipientId: userId, category: 'security', type: user.pinSet ? 'pin.changed' : 'pin.set',
+      title: user.pinSet ? 'Wallet PIN Changed' : 'Wallet PIN Set',
+      body: user.pinSet ? 'Your wallet PIN was changed. If this wasn\'t you, contact support immediately.' : 'Your wallet PIN has been set.',
+      link: '/student/profile',
+      emailSubject: user.pinSet ? 'Security Alert: Wallet PIN Changed — Smart Campus' : 'Wallet PIN Set — Smart Campus',
+    });
 
     res.json({ success: true, message: user.pinSet ? 'PIN changed successfully' : 'PIN set successfully', pinLength: NEW_PIN_LENGTH });
   } catch (err: any) {
@@ -1266,6 +1364,13 @@ router.post('/profile/update', authMiddleware, async (req: AuthRequest, res) => 
     if (batch !== undefined) data.batch = batch;
 
     await prisma.user.update({ where: { id: userId }, data });
+
+    void notifyUser({
+      recipientId: userId, category: 'account', type: 'profile.updated',
+      title: 'Profile Updated', body: 'Your profile information was updated.',
+      link: '/student/profile',
+    });
+
     res.json({ success: true, message: 'Profile updated' });
   } catch (err: any) {
     res.status(500).json({ message: err.message });
@@ -1285,6 +1390,15 @@ const SSL_TYPE_MAP: Record<SslPurpose, string> = {
   semester_fee: 'Fee Payment', library_fine: 'Fine Payment', admin_fine: 'Fine Payment',
   pay_later: 'Shop Payment', shop_payment: 'Shop Payment', mass_pay: 'Mass Payment',
   wallet_topup: 'Top Up',
+};
+const SSL_NOTIF_META: Record<SslPurpose, { category: string; title: string; link: string }> = {
+  wallet_topup: { category: 'wallet', title: 'Wallet Top-Up Successful', link: '/student/ledger' },
+  semester_fee: { category: 'payment', title: 'Semester Fee Paid', link: '/student/dues' },
+  library_fine: { category: 'payment', title: 'Library Fine Paid', link: '/student/dues' },
+  admin_fine: { category: 'payment', title: 'Fine Paid', link: '/student/dues' },
+  pay_later: { category: 'payment', title: 'Pay-Later Due Settled', link: '/student/dues' },
+  shop_payment: { category: 'payment', title: 'Shop Payment Successful', link: '/student/ledger' },
+  mass_pay: { category: 'payment', title: 'Payment Successful', link: '/student/ledger' },
 };
 
 // Tiered payment authorization — enforced server-side, not just in the UI. A client that skips
@@ -1411,11 +1525,24 @@ async function confirmSslPayment(reference: string, source: 'ipn' | 'browser-val
       }
     } catch { /* best-effort */ }
 
+    const notifMeta = SSL_NOTIF_META[tx.purpose as SslPurpose] || { category: 'payment', title: 'Payment Successful', link: '/student/ledger' };
+    void notifyUser({
+      recipientId: tx.userId, category: notifMeta.category, type: `${tx.purpose}.success`,
+      title: notifMeta.title, body: `Your payment of ৳${amount.toLocaleString()} was verified and completed. Reference: ${reference}.`,
+      link: notifMeta.link,
+    });
+
     return { status: 'valid' as const, message: 'Payment successful' };
   }
 
   if (sslStatus === 'FAILED' || sslStatus === 'CANCELLED') {
     await prisma.transaction.update({ where: { id: tx.id }, data: { status: sslStatus === 'FAILED' ? 'Failed' : 'Cancelled' } });
+    void notifyUser({
+      recipientId: tx.userId, category: 'payment', type: 'payment.failed',
+      title: sslStatus === 'FAILED' ? 'Payment Failed' : 'Payment Cancelled',
+      body: `Your payment of ৳${amount.toLocaleString()} (reference ${reference}) was ${sslStatus.toLowerCase()}.`,
+      link: '/student/ledger',
+    });
     return { status: 'failed' as const, message: `Payment ${sslStatus.toLowerCase()}` };
   }
 
@@ -1767,6 +1894,19 @@ router.post('/semester-fees/pay', authMiddleware, paymentInitLimiter, async (req
         }
       } catch { /* best-effort */ }
 
+      void notifyUser({
+        recipientId: payerId, category: 'payment', type: 'semester_fee.success',
+        title: 'Semester Fee Paid', body: `৳${total.toLocaleString()} paid for ${target.fullName || target.studentId}. Reference: ${ref}.`,
+        link: '/student/dues',
+      });
+      if (isOnBehalf) {
+        void notifyUser({
+          recipientId: target.id, category: 'payment', type: 'semester_fee.paid_for_you',
+          title: 'Your Semester Fee Was Paid', body: `৳${total.toLocaleString()} was paid by ${payer.fullName || payer.email}. Reference: ${ref}.`,
+          link: '/student/dues',
+        });
+      }
+
       return res.json({
         success: true, method: 'wallet', amount: total, reference: ref, newBalance,
         paidByName: payer.fullName || payer.email, studentName: target.fullName || target.studentId,
@@ -1987,6 +2127,12 @@ router.post('/admin/withdrawals/process', authMiddleware, requireAdmin, async (r
       await prisma.auditLog.create({
         data: { action: 'Withdrawal Approved', actorId: req.user!.id, entityType: 'Transaction', entityId: tx.id, details: `Approved ৳${tx.amount} (${tx.reference})`, ipAddress: req.ip },
       });
+      void notifyUser({
+        recipientId: tx.userId, category: 'wallet', type: 'withdraw.approved',
+        title: 'Withdrawal Approved', body: `Your withdrawal of ৳${tx.amount.toLocaleString()} (${tx.reference}) was approved and sent.`,
+        link: '/student/ledger',
+        emailSubject: `Withdrawal Approved — ৳${tx.amount} — Smart Campus`,
+      });
       return res.json({ success: true, message: 'Withdrawal approved successfully' });
     } else if (action === 'reject') {
       // Refund balance back to student wallet
@@ -2000,6 +2146,12 @@ router.post('/admin/withdrawals/process', authMiddleware, requireAdmin, async (r
       });
       await prisma.auditLog.create({
         data: { action: 'Withdrawal Rejected', actorId: req.user!.id, entityType: 'Transaction', entityId: tx.id, details: `Rejected ৳${tx.amount} (${tx.reference}) — Balance refunded`, ipAddress: req.ip },
+      });
+      void notifyUser({
+        recipientId: tx.userId, category: 'wallet', type: 'withdraw.rejected',
+        title: 'Withdrawal Rejected', body: `Your withdrawal of ৳${tx.amount.toLocaleString()} (${tx.reference}) was rejected and refunded to your wallet.${notes ? ` Reason: ${notes}` : ''}`,
+        link: '/student/ledger',
+        emailSubject: `Withdrawal Rejected — ৳${tx.amount} — Smart Campus`,
       });
       return res.json({ success: true, message: 'Withdrawal rejected and balance refunded to student' });
     }
@@ -2030,6 +2182,36 @@ router.post('/admin/audit-logs', authMiddleware, requireAdmin, async (req: AuthR
       })),
       total,
     });
+  } catch (err: any) {
+    res.status(500).json({ message: err.message });
+  }
+});
+
+router.post('/admin/audit-logs/report', authMiddleware, requireAdmin, async (req: AuthRequest, res) => {
+  try {
+    const { format = 'csv', action, entityType } = req.body as { format?: ReportFormat; action?: string; entityType?: string };
+    const where: any = {};
+    if (action) where.action = { contains: action };
+    if (entityType) where.entityType = entityType;
+
+    const logs = await prisma.auditLog.findMany({ where, take: 1000, orderBy: { createdAt: 'desc' }, include: { actor: true } });
+    const url = await generateTabularReport({
+      title: 'Audit Log Report',
+      format,
+      columns: [
+        { key: 'createdAt', label: 'Date', width: 20 }, { key: 'action', label: 'Action', width: 26 },
+        { key: 'actorName', label: 'Actor', width: 20 }, { key: 'entityType', label: 'Entity Type', width: 16 },
+        { key: 'entityId', label: 'Entity ID', width: 22 }, { key: 'details', label: 'Details', width: 40 },
+        { key: 'ipAddress', label: 'IP Address', width: 16 },
+      ],
+      rows: logs.map(l => ({
+        createdAt: l.createdAt.toLocaleString('en-US', { timeZone: 'Asia/Dhaka' }), action: l.action,
+        actorName: l.actor?.fullName || '', entityType: l.entityType || '', entityId: l.entityId || '',
+        details: l.details || '', ipAddress: l.ipAddress || '',
+      })),
+      uploadsSubdir: 'audit-reports', filenamePrefix: 'audit-log',
+    });
+    res.json({ url });
   } catch (err: any) {
     res.status(500).json({ message: err.message });
   }
@@ -2112,6 +2294,12 @@ router.post('/admin/fines/assign', authMiddleware, requireAdmin, async (req: Aut
     const ref = `AF-${Date.now().toString(36).toUpperCase()}`;
     const fine = await prisma.adminFine.create({ data: { reason, studentId, amount, incidentDate: incidentDate || new Date().toISOString().split('T')[0], status: 'Pending', reference: ref } });
     await prisma.auditLog.create({ data: { action: 'Admin Fine Assigned', actorId: req.user!.id, entityType: 'AdminFine', entityId: fine.id, details: `Fine of ৳${amount}: ${reason}`, ipAddress: req.ip } });
+    void notifyUser({
+      recipientId: studentId, category: 'payment', type: 'admin_fine.assigned',
+      title: 'New Fine Assigned', body: `You have been fined ৳${Number(amount).toLocaleString()}: ${reason}`,
+      link: '/student/dues',
+      emailSubject: `Fine Assigned — ৳${amount} — Smart Campus`,
+    });
     res.json({ success: true, fineId: fine.id, message: 'Fine assigned successfully' });
   } catch (err: any) {
     res.status(500).json({ message: err.message });
@@ -2137,9 +2325,17 @@ router.post('/admin/waivers/update', authMiddleware, requireAdmin, async (req: A
   try {
     const { waiverId, type, action } = req.body;
     const newStatus = action === 'approve' ? 'Waived' : action === 'reject' ? 'Pending' : 'Pending';
-    if (type === 'admin') await prisma.adminFine.update({ where: { id: waiverId }, data: { status: newStatus } });
-    else await prisma.libraryFine.update({ where: { id: waiverId }, data: { status: newStatus } });
+    const updated = type === 'admin'
+      ? await prisma.adminFine.update({ where: { id: waiverId }, data: { status: newStatus } })
+      : await prisma.libraryFine.update({ where: { id: waiverId }, data: { status: newStatus } });
     await prisma.auditLog.create({ data: { action: `Waiver ${action === 'approve' ? 'Approved' : 'Rejected'}`, actorId: req.user!.id, entityType: type === 'admin' ? 'AdminFine' : 'LibraryFine', entityId: waiverId, ipAddress: req.ip } });
+    void notifyUser({
+      recipientId: updated.studentId, category: 'payment', type: `${type}_fine.waiver_${action}`,
+      title: action === 'approve' ? 'Fine Waived' : 'Waiver Request Rejected',
+      body: action === 'approve' ? 'Your fine dispute was approved and the fine has been waived.' : 'Your fine waiver request was rejected; the fine remains due.',
+      link: '/student/dues',
+      emailSubject: `Fine Waiver ${action === 'approve' ? 'Approved' : 'Rejected'} — Smart Campus`,
+    });
     res.json({ success: true, message: `Waiver ${action}d` });
   } catch (err: any) {
     res.status(500).json({ message: err.message });
@@ -2212,6 +2408,12 @@ router.post('/library/fines/assign', authMiddleware, requireLibrary, async (req:
     const ref = `LIB-${Date.now().toString(36).toUpperCase()}`;
     const fine = await prisma.libraryFine.create({ data: { label: label || `${fineType} Fine`, studentId, fineType, amount, dueDate, status: 'Pending', reference: ref } });
     await prisma.auditLog.create({ data: { action: 'Library Fine Assigned', actorId: req.user!.id, entityType: 'LibraryFine', entityId: fine.id, details: `${fineType} fine of ৳${amount}`, ipAddress: req.ip } });
+    void notifyUser({
+      recipientId: studentId, category: 'payment', type: 'library_fine.assigned',
+      title: 'New Library Fine', body: `A ${fineType} fine of ৳${Number(amount).toLocaleString()} has been added to your account.`,
+      link: '/student/dues',
+      emailSubject: `Library Fine Assigned — ৳${amount} — Smart Campus`,
+    });
     res.json({ success: true, fineId: fine.id, message: 'Library fine assigned' });
   } catch (err: any) {
     res.status(500).json({ message: err.message });
@@ -2221,8 +2423,14 @@ router.post('/library/fines/assign', authMiddleware, requireLibrary, async (req:
 router.post('/library/fines/waive', authMiddleware, requireLibrary, async (req: AuthRequest, res) => {
   try {
     const { fineId, reason } = req.body;
-    await prisma.libraryFine.update({ where: { id: fineId }, data: { status: 'Waived' } });
+    const waivedFine = await prisma.libraryFine.update({ where: { id: fineId }, data: { status: 'Waived' } });
     await prisma.auditLog.create({ data: { action: 'Library Fine Waived', actorId: req.user!.id, entityType: 'LibraryFine', entityId: fineId, details: reason || 'Fine waived', ipAddress: req.ip } });
+    void notifyUser({
+      recipientId: waivedFine.studentId, category: 'payment', type: 'library_fine.waived',
+      title: 'Library Fine Waived', body: `Your ${waivedFine.fineType || ''} fine of ৳${waivedFine.amount.toLocaleString()} has been waived.${reason ? ` Reason: ${reason}` : ''}`,
+      link: '/student/dues',
+      emailSubject: 'Library Fine Waived — Smart Campus',
+    });
     res.json({ success: true, message: 'Fine waived' });
   } catch (err: any) {
     res.status(500).json({ message: err.message });
@@ -2231,17 +2439,49 @@ router.post('/library/fines/waive', authMiddleware, requireLibrary, async (req: 
 
 router.post('/library/clearance', authMiddleware, requireLibrary, async (req: AuthRequest, res) => {
   try {
-    const students = await prisma.user.findMany({ where: { role: 'Student' }, take: 100 });
+    const { department } = req.body as { department?: string };
+    const students = await prisma.user.findMany({ where: { role: 'Student', ...(department ? { department } : {}) }, take: 100 });
     const result = [];
     for (const s of students) {
       const fines = await prisma.libraryFine.findMany({ where: { studentId: s.id, status: 'Pending' } });
-      const totalAmount = fines.reduce((sum, f) => sum + f.amount, 0);
+      const pendingAmount = fines.reduce((sum, f) => sum + f.amount, 0);
       result.push({
         id: s.id, fullName: s.fullName || '', studentId: s.studentId || '', department: s.department || '',
-        hasPendingFines: fines.length > 0, totalPending: fines.length, totalAmount,
+        status: fines.length > 0 ? 'Unpaid' as const : 'Cleared' as const,
+        pendingAmount, pendingCount: fines.length,
       });
     }
-    res.json({ students: result });
+    const departments = [...new Set(students.map(s => s.department).filter(Boolean) as string[])];
+    res.json({ students: result, departments });
+  } catch (err: any) {
+    res.status(500).json({ message: err.message });
+  }
+});
+
+router.post('/library/clearance/report', authMiddleware, requireLibrary, async (req: AuthRequest, res) => {
+  try {
+    const { format = 'csv', department } = req.body as { format?: ReportFormat; department?: string };
+    const students = await prisma.user.findMany({ where: { role: 'Student', ...(department ? { department } : {}) }, take: 1000 });
+    const rows = [];
+    for (const s of students) {
+      const fines = await prisma.libraryFine.findMany({ where: { studentId: s.id, status: 'Pending' } });
+      const pendingAmount = fines.reduce((sum, f) => sum + f.amount, 0);
+      rows.push({
+        studentId: s.studentId || '', fullName: s.fullName || '', department: s.department || '',
+        status: fines.length > 0 ? 'Unpaid' : 'Cleared', pendingCount: fines.length, pendingAmount,
+      });
+    }
+    const url = await generateTabularReport({
+      title: 'Library Clearance Report',
+      format,
+      columns: [
+        { key: 'studentId', label: 'Student ID', width: 16 }, { key: 'fullName', label: 'Name', width: 24 },
+        { key: 'department', label: 'Department', width: 20 }, { key: 'status', label: 'Status', width: 12 },
+        { key: 'pendingCount', label: 'Pending Fines', width: 14 }, { key: 'pendingAmount', label: 'Amount (৳)', width: 14 },
+      ],
+      rows, uploadsSubdir: 'library-reports', filenamePrefix: 'clearance-status',
+    });
+    res.json({ url });
   } catch (err: any) {
     res.status(500).json({ message: err.message });
   }
@@ -2344,6 +2584,44 @@ router.post('/accounts/analytics', authMiddleware, requireAccounts, async (req: 
   }
 });
 
+router.post('/accounts/analytics/report', authMiddleware, requireAccounts, async (req: AuthRequest, res) => {
+  try {
+    const { format = 'csv' } = req.body as { format?: ReportFormat };
+    const students = await prisma.user.findMany({ where: { role: 'Student' } });
+    const fees = await prisma.semesterFee.findMany({ include: { student: true } });
+
+    const deptMap: Record<string, { total: number; paid: number; pending: number }> = {};
+    fees.forEach(f => {
+      const dept = f.student?.department || 'Unknown';
+      if (!deptMap[dept]) deptMap[dept] = { total: 0, paid: 0, pending: 0 };
+      deptMap[dept].total += f.amount;
+      if (f.status === 'Paid') deptMap[dept].paid += f.amount;
+      else deptMap[dept].pending += f.amount;
+    });
+
+    const rows = Object.entries(deptMap).map(([department, d]) => ({
+      department,
+      students: students.filter(s => (s.department || 'Unknown') === department).length,
+      total: d.total, collected: d.paid, pending: d.pending,
+      collectionRate: d.total > 0 ? `${Math.round((d.paid / d.total) * 100)}%` : '0%',
+    }));
+
+    const url = await generateTabularReport({
+      title: 'Collection Analytics Report',
+      format,
+      columns: [
+        { key: 'department', label: 'Department', width: 24 }, { key: 'students', label: 'Students', width: 12 },
+        { key: 'total', label: 'Total Fees (৳)', width: 16 }, { key: 'collected', label: 'Collected (৳)', width: 16 },
+        { key: 'pending', label: 'Pending (৳)', width: 16 }, { key: 'collectionRate', label: 'Collection Rate', width: 14 },
+      ],
+      rows, uploadsSubdir: 'analytics-reports', filenamePrefix: 'collection-analytics',
+    });
+    res.json({ url });
+  } catch (err: any) {
+    res.status(500).json({ message: err.message });
+  }
+});
+
 // ─── SHOP DASHBOARD ROUTES ───
 router.post('/shop/dashboard', authMiddleware, requireShopStaff, async (req: AuthRequest, res) => {
   try {
@@ -2381,6 +2659,44 @@ router.post('/shop/dashboard', authMiddleware, requireShopStaff, async (req: Aut
       pendingPayLater: payLater.map(p => ({ id: p.id, reference: p.reference || '', amount: p.amount, status: p.status, studentName: p.student?.fullName || '', dueDate: p.dueDate || '', description: p.description || '' })),
       recentSettlements: recentSettlements.map(s => ({ id: s.id, amount: s.amount, notes: s.notes || '', settledAt: s.settledAt.toISOString() })),
     });
+  } catch (err: any) {
+    res.status(500).json({ message: err.message });
+  }
+});
+
+router.post('/shop/sales-ledger/report', authMiddleware, requireShopStaff, async (req: AuthRequest, res) => {
+  try {
+    const { format = 'csv', period = 'all' } = req.body as { format?: ReportFormat; period?: 'today' | 'week' | 'month' | 'all' };
+    const shop = await prisma.shop.findFirst({ where: { status: 'Active' } });
+    if (!shop) return res.status(404).json({ message: 'No shop found' });
+
+    const now = new Date();
+    const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    const weekStart = new Date(todayStart.getTime() - 7 * 24 * 60 * 60 * 1000);
+    const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+    const since = period === 'today' ? todayStart : period === 'week' ? weekStart : period === 'month' ? monthStart : undefined;
+
+    const txns = await prisma.transaction.findMany({
+      where: { shopId: shop.id, ...(since ? { createdAt: { gte: since } } : {}) },
+      orderBy: { createdAt: 'desc' }, take: 2000,
+    });
+
+    const url = await generateTabularReport({
+      title: `Sales Ledger — ${shop.name}`,
+      format,
+      columns: [
+        { key: 'createdAt', label: 'Date', width: 20 }, { key: 'reference', label: 'Reference', width: 20 },
+        { key: 'description', label: 'Description', width: 30 }, { key: 'paymentMethod', label: 'Method', width: 14 },
+        { key: 'amount', label: 'Amount (৳)', width: 14 }, { key: 'status', label: 'Status', width: 12 },
+      ],
+      rows: txns.map(t => ({
+        createdAt: t.createdAt.toLocaleString('en-US', { timeZone: 'Asia/Dhaka' }), reference: t.reference,
+        description: t.description || '', paymentMethod: t.paymentMethod || t.gateway || '',
+        amount: t.amount, status: t.status,
+      })),
+      uploadsSubdir: 'sales-reports', filenamePrefix: 'sales-ledger',
+    });
+    res.json({ url });
   } catch (err: any) {
     res.status(500).json({ message: err.message });
   }

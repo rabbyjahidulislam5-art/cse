@@ -39,6 +39,7 @@ import AuditLogsPage from './pages/admin/AuditLogsPage';
 import StaffAccountsPage from './pages/admin/StaffAccountsPage';
 import DisputeOversightPage from './pages/admin/DisputeOversightPage';
 import AdminDisputeDetailPage from './pages/admin/AdminDisputeDetailPage';
+import AdminNotificationsPage from './pages/admin/AdminNotificationsPage';
 
 // Library pages
 import LibraryHomePage from './pages/library/LibraryHomePage';
@@ -48,6 +49,7 @@ import FineWaiverPage from './pages/library/FineWaiverPage';
 import ClearanceStatusPage from './pages/library/ClearanceStatusPage';
 import LibraryDisputesPage from './pages/library/LibraryDisputesPage';
 import LibraryDisputeDetailPage from './pages/library/LibraryDisputeDetailPage';
+import LibraryNotificationsPage from './pages/library/LibraryNotificationsPage';
 
 // Accounts pages
 import AccountsHomePage from './pages/accounts/AccountsHomePage';
@@ -57,6 +59,7 @@ import CollectionAnalyticsPage from './pages/accounts/CollectionAnalyticsPage';
 import DisputesDashboardPage from './pages/accounts/DisputesDashboardPage';
 import DisputeCaseDetailPage from './pages/accounts/DisputeCaseDetailPage';
 import DisputeReportsPage from './pages/accounts/DisputeReportsPage';
+import AccountsNotificationsPage from './pages/accounts/AccountsNotificationsPage';
 
 // Shop pages
 import ShopHomePage from './pages/shop/ShopHomePage';
@@ -102,6 +105,7 @@ export default function App() {
           <Route path="staff" element={<StaffAccountsPage />} />
           <Route path="disputes" element={<DisputeOversightPage />} />
           <Route path="disputes/detail" element={<AdminDisputeDetailPage />} />
+          <Route path="notifications" element={<AdminNotificationsPage />} />
         </Route>
 
         {/* Library Dashboard */}
@@ -113,6 +117,7 @@ export default function App() {
           <Route path="clearance" element={<ClearanceStatusPage />} />
           <Route path="disputes" element={<LibraryDisputesPage />} />
           <Route path="disputes/detail" element={<LibraryDisputeDetailPage />} />
+          <Route path="notifications" element={<LibraryNotificationsPage />} />
         </Route>
 
         {/* Accounts Office Dashboard */}
@@ -124,6 +129,7 @@ export default function App() {
           <Route path="disputes" element={<DisputesDashboardPage />} />
           <Route path="disputes/detail" element={<DisputeCaseDetailPage />} />
           <Route path="disputes/reports" element={<DisputeReportsPage />} />
+          <Route path="notifications" element={<AccountsNotificationsPage />} />
         </Route>
 
         {/* Shop Dashboard */}

@@ -6,6 +6,7 @@ import { motion } from 'framer-motion';
 import { useEffect, useState } from 'react';
 import { getDisputeBadgeCounts } from '@/lib/disputeApi';
 import { useDisputeSocket } from '@/lib/socket';
+import NotificationBell from '@/components/NotificationBell';
 
 const navItems = [
   { to: '/library', icon: LayoutDashboard, label: 'Home', end: true },
@@ -73,6 +74,8 @@ export default function LibraryLayout() {
             ))}
           </div>
 
+          <div className="flex items-center gap-2">
+          <NotificationBell to="/library/notifications" />
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <button className="w-9 h-9 rounded-xl bg-gradient-to-br from-[hsl(var(--chart-3))]/20 to-[hsl(var(--chart-3))]/10 flex items-center justify-center text-sm font-bold text-[hsl(var(--chart-3))] hover:from-[hsl(var(--chart-3))]/30 hover:to-[hsl(var(--chart-3))]/20 transition-all ring-1 ring-[hsl(var(--chart-3))]/20">
@@ -91,6 +94,7 @@ export default function LibraryLayout() {
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
+          </div>
         </div>
       </nav>
 

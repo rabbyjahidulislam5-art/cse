@@ -5,7 +5,8 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigge
 import { motion } from 'framer-motion';
 import { useEffect, useState, useRef } from 'react';
 import { getDisputeBadgeCounts } from '@/lib/disputeApi';
-import { useDisputeSocket } from '@/lib/socket';
+import { useDisputeSocket, useNotificationSocket } from '@/lib/socket';
+import { getUnreadNotificationCount } from '@/lib/api';
 
 const navItems = [
   { to: '/shop', icon: LayoutDashboard, label: 'Home', end: true },
@@ -39,6 +40,7 @@ export default function ShopLayout() {
   const navigate = useNavigate();
   const { user, isLoading, loginWithRedirect, logout } = useAuth();
   const [pendingCases, setPendingCases] = useState(0);
+  const [unreadNotifs, setUnreadNotifs] = useState(0);
   const mounted = useRef(false);
 
   useEffect(() => {
@@ -62,6 +64,15 @@ export default function ShopLayout() {
     fetchBadge();
     if (mounted.current) playAlertSound();
   });
+
+  const fetchUnreadNotifs = () => getUnreadNotificationCount().then(r => setUnreadNotifs(r.unreadCount)).catch(() => {});
+  useEffect(() => {
+    if (!user) return;
+    fetchUnreadNotifs();
+    const interval = setInterval(fetchUnreadNotifs, 30000);
+    return () => clearInterval(interval);
+  }, [user]);
+  useNotificationSocket(() => setUnreadNotifs(c => c + 1));
 
   if (isLoading || !user) return null;
 
@@ -90,6 +101,9 @@ export default function ShopLayout() {
                       <item.icon className="w-4 h-4" /> {item.label}
                       {item.label === 'Disputes' && pendingCases > 0 && (
                         <span className="min-w-[16px] h-4 px-1 rounded-full bg-destructive text-[9px] font-bold text-white flex items-center justify-center">{pendingCases > 99 ? '99+' : pendingCases}</span>
+                      )}
+                      {item.label === 'Alerts' && unreadNotifs > 0 && (
+                        <span className="min-w-[16px] h-4 px-1 rounded-full bg-destructive text-[9px] font-bold text-white flex items-center justify-center">{unreadNotifs > 99 ? '99+' : unreadNotifs}</span>
                       )}
                     </span>
                   </>
@@ -133,6 +147,9 @@ export default function ShopLayout() {
                     <item.icon className={`w-5 h-5 transition-all ${isActive ? 'scale-110' : ''}`} />
                     {item.label === 'Disputes' && pendingCases > 0 && (
                       <span className="absolute -top-1 -right-1.5 min-w-[14px] h-3.5 px-0.5 rounded-full bg-destructive text-[8px] font-bold text-white flex items-center justify-center">{pendingCases > 9 ? '9+' : pendingCases}</span>
+                    )}
+                    {item.label === 'Alerts' && unreadNotifs > 0 && (
+                      <span className="absolute -top-1 -right-1.5 min-w-[14px] h-3.5 px-0.5 rounded-full bg-destructive text-[8px] font-bold text-white flex items-center justify-center">{unreadNotifs > 9 ? '9+' : unreadNotifs}</span>
                     )}
                   </div>
                   <span className="text-[10px] font-semibold">{item.label}</span>

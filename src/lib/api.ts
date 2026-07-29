@@ -84,11 +84,14 @@ export type GetTransactionsOutputType = {
   statusCounts?: Record<string, number>;
 };
 
+export type NotificationItem = {
+  id: string; source: 'general' | 'dispute'; category: string; type: string;
+  title: string; body: string; link: string; read: boolean; createdAt: string;
+};
+
 export type GetNotificationsOutputType = {
-  notifications: Array<{
-    id: string; type: 'payment' | 'due' | 'alert' | 'info'; title: string; message: string;
-    read?: boolean; amount?: number; status?: string; date?: string; icon?: string;
-  }>;
+  notifications: NotificationItem[];
+  unreadCount: number;
 };
 
 export type GetAdminOverviewOutputType = {
@@ -233,8 +236,14 @@ export const disputeFine = (input: { fineId: string; source?: string; reason: st
 export const getTransactions = (input: Record<string, unknown> = {}) =>
   apiCall<GetTransactionsOutputType>('/transactions', input);
 
-export const getNotifications = (input: Record<string, unknown> = {}) =>
+export const getNotifications = (input: { category?: string; unreadOnly?: boolean; search?: string } = {}) =>
   apiCall<GetNotificationsOutputType>('/notifications', input);
+
+export const getUnreadNotificationCount = () =>
+  apiCall<{ unreadCount: number }>('/notifications/unread-count', {});
+
+export const markNotificationRead = (input: { id?: string; source?: 'general' | 'dispute' } = {}) =>
+  apiCall<{ success: boolean }>('/notifications/mark-read', input);
 
 export const getReceipt = (input: { transactionId: string }) =>
   apiCall<{ url: string; [key: string]: any }>('/receipt', input);
@@ -332,6 +341,9 @@ export const manageShop = (input: Record<string, unknown>) =>
 export const getAuditLogs = (input: Record<string, unknown> = {}) =>
   apiCall<GetAuditLogsOutputType>('/admin/audit-logs', input);
 
+export const generateAuditLogReport = (input: { format: 'csv' | 'excel' | 'pdf'; action?: string; entityType?: string }) =>
+  apiCall<{ url: string }>('/admin/audit-logs/report', input);
+
 export const getStaff = (input: Record<string, unknown> = {}) =>
   apiCall<GetStaffOutputType>('/admin/staff', input);
 
@@ -366,6 +378,9 @@ export const waiveLibraryFine = (input: { fineId: string; reason?: string; actio
 export const getLibraryClearance = (input: Record<string, unknown> = {}) =>
   apiCall<GetLibraryClearanceOutputType>('/library/clearance', input);
 
+export const generateClearanceReport = (input: { format: 'csv' | 'excel' | 'pdf'; department?: string }) =>
+  apiCall<{ url: string }>('/library/clearance/report', input);
+
 // Accounts endpoints
 export const getAccountsOverview = (input: Record<string, unknown> = {}) =>
   apiCall<GetAccountsOverviewOutputType>('/accounts/overview', input);
@@ -379,9 +394,15 @@ export const adjustSemesterFee = (input: Record<string, unknown>) =>
 export const getCollectionAnalytics = (input: Record<string, unknown> = {}) =>
   apiCall<GetCollectionAnalyticsOutputType>('/accounts/analytics', input);
 
+export const generateCollectionAnalyticsReport = (input: { format: 'csv' | 'excel' | 'pdf' }) =>
+  apiCall<{ url: string }>('/accounts/analytics/report', input);
+
 // Shop endpoints
 export const getShopDashboard = (input: Record<string, unknown> = {}) =>
   apiCall<GetShopDashboardOutputType>('/shop/dashboard', input);
+
+export const generateSalesLedgerReport = (input: { format: 'csv' | 'excel' | 'pdf'; period?: 'today' | 'week' | 'month' | 'all' }) =>
+  apiCall<{ url: string }>('/shop/sales-ledger/report', input);
 
 export const regenerateShopQr = (input: Record<string, unknown> = {}) =>
   apiCall<{ success: boolean; qrToken: string; newQrToken: string; message: string }>('/shop/regenerate-qr', input);
