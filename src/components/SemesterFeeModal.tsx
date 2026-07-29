@@ -3,13 +3,12 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, Di
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { GraduationCap, Search, Wallet, CreditCard, ShieldCheck, Loader2, ArrowRight, ArrowLeft, CheckCircle2, UserRound, AlertTriangle } from 'lucide-react';
+import { GraduationCap, Search, CreditCard, Loader2, ArrowRight, ArrowLeft, CheckCircle2, UserRound, AlertTriangle } from 'lucide-react';
 import { toast } from 'sonner';
-import { lookupSemesterFeeStudent, paySemesterFee, PIN_REQUIRED_THRESHOLD, OTP_REQUIRED_THRESHOLD, type SemesterFeeLookupOutputType } from '@/lib/api';
+import { lookupSemesterFeeStudent, paySemesterFee, type SemesterFeeLookupOutputType } from '@/lib/api';
 import { formatCurrency } from '@/lib/mock-data';
-import PinDialog from '@/components/PinDialog';
-import OtpDialog from '@/components/OtpDialog';
 import { useUser } from '@/lib/user-context';
+import { getStoredToken, getStoredUser, setStoredToken, setStoredUser } from '@/lib/auth-storage';
 
 interface SemesterFeeModalProps {
   open: boolean;
@@ -47,7 +46,8 @@ export default function SemesterFeeModal({ open, onOpenChange }: SemesterFeeModa
 
   const totalDue = result?.totalDue || 0;
   const isOnBehalf = !!result?.student && !!user?.studentId && result.student.studentId !== user.studentId;
-  const insufficientWallet = method === 'wallet' && (wallet?.balance || 0) < totalDue;
+  const walletBalance = wallet?.balance || 0;
+  const insufficientWallet = walletBalance < totalDue;
 
   const handleSearch = async () => {
     const id = studentIdInput.trim();
@@ -61,7 +61,6 @@ export default function SemesterFeeModal({ open, onOpenChange }: SemesterFeeModa
         return;
       }
       setResult(res);
-      setMethod((wallet?.balance || 0) >= res.totalDue ? 'wallet' : 'sslcommerz');
       setStep('review');
     } catch (e: any) {
       toast.error(e.message || 'Student not found.');
@@ -72,37 +71,25 @@ export default function SemesterFeeModal({ open, onOpenChange }: SemesterFeeModa
 
   const handleInitiatePay = () => {
     if (!result?.student || totalDue <= 0) return;
-    if (method === 'wallet' && insufficientWallet) {
-      toast.error('Insufficient balance in your wallet');
+    if (insufficientWallet) {
+      toast.error('Insufficient Wallet Balance.');
       return;
     }
-    if (totalDue >= PIN_REQUIRED_THRESHOLD) {
-      setPinOpen(true);
-    } else {
-      executePay();
-    }
+    executePay();
   };
 
-  const onPinSuccess = () => {
-    if (totalDue >= OTP_REQUIRED_THRESHOLD && !validatedOtpId) {
-      setOtpOpen(true);
-    } else {
-      executePay();
-    }
-  };
-
-  const onOtpVerified = (otpId: string) => {
-    setValidatedOtpId(otpId);
-    executePay(otpId);
-  };
-
-  const executePay = async (otpId?: string) => {
+  const executePay = async () => {
     if (!result?.student) return;
     setPaying(true);
     try {
-      const res = await paySemesterFee({ studentId: result.student.studentId, method, otpId: otpId || validatedOtpId });
-      if (res.method === 'sslcommerz' && res.gatewayUrl) {
-        toast.success('Redirecting to payment gateway...');
+      const res = await paySemesterFee({ studentId: result.student.studentId, method: 'sslcommerz' });
+      if (res.gatewayUrl) {
+        const currentToken = getStoredToken();
+        const currentUser = getStoredUser();
+        if (currentToken) setStoredToken(currentToken);
+        if (currentUser) setStoredUser(currentUser);
+        localStorage.setItem('ssl_payment', JSON.stringify({ ref: res.transactionRef }));
+        toast.success('Redirecting to SSLCOMMERZ...');
         window.location.href = res.gatewayUrl;
         return;
       }
@@ -115,10 +102,7 @@ export default function SemesterFeeModal({ open, onOpenChange }: SemesterFeeModa
       setStep('success');
       refreshDashboard();
     } catch (err: any) {
-      if (err.requiresPin) setPinOpen(true);
-      else if (err.requiresOtp) setOtpOpen(true);
-      else toast.error(err.message || 'Payment failed.');
-    } finally {
+      toast.error(err.message || 'Payment failed.');
       setPaying(false);
     }
   };
@@ -222,48 +206,24 @@ export default function SemesterFeeModal({ open, onOpenChange }: SemesterFeeModa
                   <Label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-2 block">
                     Payment Method
                   </Label>
-                  <div className="grid grid-cols-2 gap-2.5">
-                    <button
-                      type="button"
-                      onClick={() => setMethod('wallet')}
-                      className={`flex flex-col items-center gap-1.5 p-3.5 rounded-xl border text-xs font-semibold transition-all ${
-                        method === 'wallet' ? 'bg-primary text-primary-foreground border-primary shadow-sm' : 'bg-card border-border/60 hover:border-primary/40 text-foreground'
-                      }`}
-                    >
-                      <Wallet className="w-5 h-5" />
-                      Campus Wallet
-                      <span className="text-[10px] font-normal opacity-80">Bal: {formatCurrency(wallet?.balance || 0)}</span>
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setMethod('sslcommerz')}
-                      className={`flex flex-col items-center gap-1.5 p-3.5 rounded-xl border text-xs font-semibold transition-all ${
-                        method === 'sslcommerz' ? 'bg-primary text-primary-foreground border-primary shadow-sm' : 'bg-card border-border/60 hover:border-primary/40 text-foreground'
-                      }`}
-                    >
-                      <CreditCard className="w-5 h-5" />
-                      SSLCommerz
-                      <span className="text-[10px] font-normal opacity-80">Card / MFS / Bank</span>
-                    </button>
+                  <div className="p-3.5 rounded-xl border border-primary/40 bg-primary/5 flex flex-col gap-1">
+                    <div className="flex items-center justify-between">
+                      <span className="flex items-center gap-2 text-xs font-bold text-foreground">
+                        <CreditCard className="w-4 h-4 text-primary" /> SSLCOMMERZ Hosted Payment
+                      </span>
+                      <span className="text-[10px] font-semibold text-muted-foreground">Bal: {formatCurrency(walletBalance)}</span>
+                    </div>
+                    <p className="text-[11px] text-muted-foreground mt-0.5">
+                      Payment will be completed using your Smart Campus Wallet through the SSLCOMMERZ secure gateway.
+                    </p>
                   </div>
                   {insufficientWallet && (
-                    <div className="flex items-center gap-2 mt-2 p-2.5 rounded-lg bg-destructive/10 border border-destructive/20 text-xs text-destructive font-medium">
+                    <div className="flex items-center gap-2 mt-2.5 p-2.5 rounded-lg bg-destructive/10 border border-destructive/20 text-xs text-destructive font-medium">
                       <AlertTriangle className="w-4 h-4 shrink-0" />
-                      <span>Insufficient balance in your wallet. Choose SSLCommerz or top up first.</span>
+                      <span>Insufficient Wallet Balance.</span>
                     </div>
                   )}
                 </div>
-
-                {totalDue >= PIN_REQUIRED_THRESHOLD && (
-                  <div className="flex items-center gap-2 p-2.5 rounded-lg bg-primary/10 border border-primary/20 text-xs text-primary font-medium">
-                    <ShieldCheck className="w-4 h-4 shrink-0" />
-                    <span>
-                      {totalDue >= OTP_REQUIRED_THRESHOLD
-                        ? 'PIN & Email OTP verification required for amounts ≥ ৳20,000'
-                        : 'PIN verification required for amounts ≥ ৳3,000'}
-                    </span>
-                  </div>
-                )}
               </div>
 
               <DialogFooter className="gap-2 sm:gap-0">
@@ -272,7 +232,7 @@ export default function SemesterFeeModal({ open, onOpenChange }: SemesterFeeModa
                 </Button>
                 <Button
                   onClick={handleInitiatePay}
-                  disabled={paying || (method === 'wallet' && insufficientWallet)}
+                  disabled={paying || insufficientWallet}
                   className="rounded-xl font-semibold gap-2"
                 >
                   {paying ? <Loader2 className="w-4 h-4 animate-spin" /> : <ArrowRight className="w-4 h-4" />}
@@ -320,23 +280,6 @@ export default function SemesterFeeModal({ open, onOpenChange }: SemesterFeeModa
           )}
         </DialogContent>
       </Dialog>
-
-      <PinDialog
-        open={pinOpen}
-        onOpenChange={setPinOpen}
-        mode="verify"
-        verifyLength={user?.pinLength || 4}
-        onSuccess={onPinSuccess}
-        title="Verify PIN to Pay"
-        description={`Confirm your wallet PIN to authorize this ৳${totalDue.toLocaleString()} semester fee payment.`}
-      />
-
-      <OtpDialog
-        open={otpOpen}
-        onOpenChange={setOtpOpen}
-        purpose="Large Payment"
-        onSuccess={onOtpVerified}
-      />
     </>
   );
 }
