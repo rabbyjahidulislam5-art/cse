@@ -63,7 +63,6 @@ const FeeWizardPage = lazy(() => import('./pages/accounts/FeeWizardPage'));
 const FeeAdjustmentsPage = lazy(() => import('./pages/accounts/FeeAdjustmentsPage'));
 const CollectionAnalyticsPage = lazy(() => import('./pages/accounts/CollectionAnalyticsPage'));
 const AccountsLedgerPage = lazy(() => import('./pages/accounts/LedgerPage'));
-const AccountsReportsPage = lazy(() => import('./pages/accounts/AccountsReportsPage'));
 const DisputesDashboardPage = lazy(() => import('./pages/accounts/DisputesDashboardPage'));
 const DisputeCaseDetailPage = lazy(() => import('./pages/accounts/DisputeCaseDetailPage'));
 const DisputeReportsPage = lazy(() => import('./pages/accounts/DisputeReportsPage'));
@@ -143,7 +142,6 @@ export default function App() {
           <Route path="fee-push" element={<SemesterFeePushPage />} />
           <Route path="fee-wizard" element={<FeeWizardPage />} />
           <Route path="ledger" element={<AccountsLedgerPage />} />
-          <Route path="reports" element={<AccountsReportsPage />} />
           <Route path="adjustments" element={<FeeAdjustmentsPage />} />
           <Route path="analytics" element={<CollectionAnalyticsPage />} />
           <Route path="disputes" element={<DisputesDashboardPage />} />

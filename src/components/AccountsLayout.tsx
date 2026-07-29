@@ -14,7 +14,6 @@ const navItems = [
   { to: '/accounts/adjustments', icon: Receipt, label: 'Adjust' },
   { to: '/accounts/analytics', icon: BarChart3, label: 'Analytics' },
   { to: '/accounts/ledger', icon: BookOpen, label: 'Ledger' },
-  { to: '/accounts/reports', icon: FileText, label: 'Reports' },
   { to: '/accounts/disputes', icon: ScrollText, label: 'Disputes' },
 ];
 
