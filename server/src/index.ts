@@ -2584,7 +2584,7 @@ router.post('/accounts/analytics', authMiddleware, requireAccounts, async (req: 
       if (!deptMap[dept]) deptMap[dept] = { total: 0, paid: 0, pending: 0 };
       deptMap[dept].total += f.amount;
       if (f.status === 'Paid') deptMap[dept].paid += f.amount;
-      else deptMap[dept].pending += f.amount;
+      else if (f.status === 'Pending') deptMap[dept].pending += f.amount;
     });
 
     const total = fees.reduce((s, f) => s + f.amount, 0);
@@ -2624,7 +2624,7 @@ router.post('/accounts/analytics/report', authMiddleware, requireAccounts, async
       if (!deptMap[dept]) deptMap[dept] = { total: 0, paid: 0, pending: 0 };
       deptMap[dept].total += f.amount;
       if (f.status === 'Paid') deptMap[dept].paid += f.amount;
-      else deptMap[dept].pending += f.amount;
+      else if (f.status === 'Pending') deptMap[dept].pending += f.amount;
     });
 
     const rows = Object.entries(deptMap).map(([department, d]) => ({

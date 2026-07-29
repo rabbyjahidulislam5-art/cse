@@ -46,7 +46,11 @@ export default function FeeAdjustmentsPage() {
     if (!actionFee || !reason.trim()) { toast.error('Reason is required'); return; }
     setSubmitting(true);
     try {
-      const res = await adjustSemesterFee({ feeId: actionFee.id, action: actionType, reason, newAmount: actionType === 'reduce' ? parseFloat(reduceAmt) : undefined });
+      const res = await adjustSemesterFee({
+        feeId: actionFee.id, action: actionType, reason,
+        newAmount: actionType === 'reduce' ? parseFloat(reduceAmt) : undefined,
+        newStatus: actionType === 'waive' ? 'Waived' : undefined,
+      });
       toast.success(res.message);
       setActionFee(null); setReduceAmt(''); setReason('');
       setFees(prev => prev.filter(f => f.id !== actionFee.id));
