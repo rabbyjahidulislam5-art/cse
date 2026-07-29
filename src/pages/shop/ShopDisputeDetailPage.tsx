@@ -8,6 +8,7 @@ import StatusBadge from '@/components/StatusBadge';
 import { FadeIn } from '@/components/PageTransition';
 import { formatCurrency } from '@/lib/mock-data';
 import { getShopDisputeDetail, replyToShopDispute, getDisputePdf, type AccountsDisputeDetail } from '@/lib/disputeApi';
+import { triggerDownload } from '@/lib/download';
 
 const MAX_FILES = 5;
 const TERMINAL = ['Resolved', 'Rejected', 'Refunded', 'Closed'];
@@ -33,7 +34,7 @@ export default function ShopDisputeDetailPage() {
     setPdfLoading(true);
     try {
       const { url } = await getDisputePdf({ disputeId });
-      window.open(url, '_blank', 'noopener,noreferrer');
+      triggerDownload(url);
     } catch (e: any) {
       toast.error(e.message || 'Failed to generate PDF.');
     } finally {

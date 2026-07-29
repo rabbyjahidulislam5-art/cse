@@ -8,6 +8,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { toast } from 'sonner';
 import { FadeIn } from '@/components/PageTransition';
 import { generateDisputeReport, DISPUTE_STATUSES } from '@/lib/disputeApi';
+import { triggerDownload } from '@/lib/download';
 
 const FORMATS: { value: 'csv' | 'excel' | 'pdf'; label: string; icon: typeof FileText }[] = [
   { value: 'csv', label: 'CSV', icon: FileJson },
@@ -27,7 +28,7 @@ export default function DisputeReportsPage() {
     setGenerating(true);
     try {
       const { url } = await generateDisputeReport({ format, status: status === 'all' ? undefined : status, fromDate: fromDate || undefined, toDate: toDate || undefined });
-      window.open(url, '_blank', 'noopener,noreferrer');
+      triggerDownload(url);
       toast.success('Report generated');
     } catch (e: any) {
       toast.error(e.message || 'Failed to generate report.');

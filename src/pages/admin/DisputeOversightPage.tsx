@@ -14,6 +14,7 @@ import {
   DISPUTE_STATUSES, type AccountsDisputeSummary, type AdminDisputeStats, type StaffPerformance, type FraudSignals,
 } from '@/lib/disputeApi';
 import { formatCurrency } from '@/lib/mock-data';
+import { triggerDownload } from '@/lib/download';
 
 export default function DisputeOversightPage() {
   const navigate = useNavigate();
@@ -43,7 +44,7 @@ export default function DisputeOversightPage() {
     setExporting(format);
     try {
       const { url } = await generateAdminDisputeReport({ format });
-      window.open(url, '_blank', 'noopener,noreferrer');
+      triggerDownload(url);
     } catch (e: any) {
       toast.error(e.message || 'Export failed.');
     } finally {

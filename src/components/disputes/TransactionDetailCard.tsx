@@ -10,6 +10,7 @@ import StatusBadge from '@/components/StatusBadge';
 import { getTransactionDetail, type TransactionDetail } from '@/lib/disputeApi';
 import { getReceipt } from '@/lib/api';
 import { formatCurrency } from '@/lib/mock-data';
+import { triggerDownload } from '@/lib/download';
 
 function Row({ icon: Icon, label, value, mono }: { icon?: typeof User; label: string; value: React.ReactNode; mono?: boolean }) {
   return (
@@ -49,7 +50,7 @@ export default function TransactionDetailCard({ transactionId, onRaiseDispute, d
     try {
       const url = receiptUrl || (await getReceipt({ transactionId })).url;
       setReceiptUrl(url);
-      if (openAfter) window.open(url, '_blank', 'noopener,noreferrer');
+      if (openAfter) triggerDownload(url);
     } catch (e: any) {
       toast.error(e.message || 'Could not generate receipt.');
     } finally {

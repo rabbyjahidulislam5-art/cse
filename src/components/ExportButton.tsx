@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { triggerDownload } from '@/lib/download';
 import {
   AlertDialog, AlertDialogContent, AlertDialogHeader, AlertDialogTitle,
   AlertDialogDescription, AlertDialogFooter, AlertDialogCancel, AlertDialogAction,
@@ -32,7 +33,7 @@ export default function ExportButton({ formats = ['csv', 'excel', 'pdf'], onExpo
     setLoadingFormat(format);
     try {
       const { url } = await onExport(format);
-      window.open(url, '_blank', 'noopener,noreferrer');
+      triggerDownload(url);
     } catch {
       setLastFailedFormat(format);
       setErrorOpen(true);

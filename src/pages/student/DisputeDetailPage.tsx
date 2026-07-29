@@ -14,6 +14,7 @@ import { FadeIn } from '@/components/PageTransition';
 import {
   getDisputeDetail, replyToDispute, closeDispute, getDisputePdf, type DisputeDetail,
 } from '@/lib/disputeApi';
+import { triggerDownload } from '@/lib/download';
 
 const TERMINAL_STATUSES = ['Resolved', 'Rejected', 'Refunded', 'Closed'];
 const MAX_FILES = 5;
@@ -74,7 +75,7 @@ export default function DisputeDetailPage() {
     setPdfLoading(true);
     try {
       const { url } = await getDisputePdf({ disputeId });
-      window.open(url, '_blank', 'noopener,noreferrer');
+      triggerDownload(url);
     } catch (e: any) {
       toast.error(e.message || 'Failed to generate PDF.');
     } finally {

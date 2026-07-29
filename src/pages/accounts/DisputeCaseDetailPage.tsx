@@ -20,6 +20,7 @@ import {
   initiateRefund, rejectRefund, mergeDisputes, splitDispute, closeAccountsDispute, DISPUTE_CATEGORIES,
   getDisputePdf, type AccountsDisputeDetail, type RefundMethod,
 } from '@/lib/disputeApi';
+import { triggerDownload } from '@/lib/download';
 
 type Action = null | 'assign' | 'reply' | 'note' | 'docs' | 'forward' | 'escalate' | 'refund' | 'reject-refund' | 'merge' | 'split' | 'resolve' | 'reject';
 
@@ -69,7 +70,7 @@ export default function DisputeCaseDetailPage() {
     setPdfLoading(true);
     try {
       const { url } = await getDisputePdf({ disputeId });
-      window.open(url, '_blank', 'noopener,noreferrer');
+      triggerDownload(url);
     } catch (e: any) {
       toast.error(e.message || 'Failed to generate PDF.');
     } finally {

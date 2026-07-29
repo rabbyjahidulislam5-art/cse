@@ -8,6 +8,7 @@ import StatusBadge from '@/components/StatusBadge';
 import { FadeIn } from '@/components/PageTransition';
 import { formatCurrency } from '@/lib/mock-data';
 import { getLibraryDisputeDetail, replyToLibraryDispute, recommendLibraryDecision, getDisputePdf, type AccountsDisputeDetail } from '@/lib/disputeApi';
+import { triggerDownload } from '@/lib/download';
 
 export default function LibraryDisputeDetailPage() {
   const [searchParams] = useSearchParams();
@@ -27,7 +28,7 @@ export default function LibraryDisputeDetailPage() {
     setPdfLoading(true);
     try {
       const { url } = await getDisputePdf({ disputeId });
-      window.open(url, '_blank', 'noopener,noreferrer');
+      triggerDownload(url);
     } catch (e: any) {
       toast.error(e.message || 'Failed to generate PDF.');
     } finally {
