@@ -405,7 +405,7 @@ export const generateSalesLedgerReport = (input: { format: 'csv' | 'excel' | 'pd
   apiCall<{ url: string }>('/shop/sales-ledger/report', input);
 
 export const regenerateShopQr = (input: Record<string, unknown> = {}) =>
-  apiCall<{ success: boolean; qrToken: string; newQrToken: string; message: string }>('/shop/regenerate-qr', input);
+  apiCall<{ success: boolean; qrToken: string; message: string }>('/shop/regenerate-qr', input);
 
 // File upload
 export const uploadFile = async (file: File | { data: File; filename?: string }): Promise<{ url: string; fileUrl: string }> => {

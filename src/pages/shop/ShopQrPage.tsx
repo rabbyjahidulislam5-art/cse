@@ -37,7 +37,7 @@ export default function ShopQrPage() {
     setRegenerating(true);
     try {
       const res = await regenerateShopQr({ shopId });
-      setQrToken(res.newQrToken);
+      setQrToken(res.qrToken);
       toast.success('QR code regenerated successfully');
     } catch (e: any) { toast.error(e.message); }
     finally { setRegenerating(false); setConfirmRefresh(false); }
