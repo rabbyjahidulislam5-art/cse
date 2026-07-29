@@ -22,7 +22,8 @@ const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:4000/api';
 // calls this on any 401 so the tab that actually hit the expired/invalid token logs itself out
 // and drops back to the login card. Each tab has its own JS module instance, so this never
 // reaches across tabs — a session expiring in one tab has zero effect on any other open tab.
-export const sessionEvents = { onExpire: () => {} };
+import { sessionEvents } from './session-events';
+export { sessionEvents };
 
 interface AuthUser {
   id: string;

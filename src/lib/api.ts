@@ -1,4 +1,4 @@
-import { sessionEvents } from './auth-context';
+import { sessionEvents } from './session-events';
 import { getAuthToken } from './auth-token';
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:4000/api';

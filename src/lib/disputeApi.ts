@@ -1,7 +1,7 @@
 // Financial Dispute & Case Management System — typed client functions, same apiCall/getToken
 // convention as api.ts (this file is kept separate rather than appended to the ~400-line api.ts,
 // so the dispute module stays a self-contained, easily reviewable slice).
-import { sessionEvents } from './auth-context';
+import { sessionEvents } from './session-events';
 import { getAuthToken } from './auth-token';
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:4000/api';
