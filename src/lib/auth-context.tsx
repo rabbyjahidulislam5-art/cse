@@ -453,12 +453,27 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setFormLoading(true);
     setError('');
     try {
-      const data = await safeAuthCall('/auth/forgot-password/reset', { otpId, code: otpCode, newPassword: password });
-      toast.success(data.message || 'Password reset successful!');
-      setAuthView('login');
+      await safeAuthCall('/auth/forgot-password/reset', { otpId, code: otpCode, newPassword: password });
       setPassword('');
       setConfirmPassword('');
       setOtpCode('');
+      // The button promises "& Sign In" — actually do it instead of dropping the user back at an
+      // empty login form after they just typed their new password once already. The reset itself
+      // already succeeded at this point, so a failure here is a sign-in issue, not a reset failure.
+      try {
+        const loginData = await safeAuthCall('/auth/login', { emailOrStudentId, password });
+        if (rememberMe) {
+          localStorage.setItem('auth_token', loginData.token);
+          localStorage.setItem('auth_user', JSON.stringify(loginData.user));
+        }
+        setToken(loginData.token);
+        setUser(loginData.user);
+        setShowAuth(false);
+        toast.success(`Password updated. Welcome back, ${loginData.user.fullName || 'Student'}!`);
+      } catch {
+        setAuthView('login');
+        toast.success('Password updated successfully. Please sign in with your new password.');
+      }
     } catch (err: any) {
       setError(err.message || 'Password reset failed');
     } finally {
