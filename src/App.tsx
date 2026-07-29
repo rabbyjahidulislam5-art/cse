@@ -1,5 +1,7 @@
+import { lazy, Suspense } from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { GoogleOAuthProvider } from '@react-oauth/google';
+import { RefreshCw } from 'lucide-react';
 import { Toaster } from '@/components/ui/sonner';
 import { AuthProvider } from '@/lib/auth-context';
 
@@ -8,75 +10,87 @@ import { AuthProvider } from '@/lib/auth-context';
 const GOOGLE_CLIENT_ID = (import.meta.env.VITE_GOOGLE_CLIENT_ID as string | undefined) || '';
 
 import LandingPage from './pages/LandingPage';
-import StudentLayout from './components/StudentLayout';
-import AdminLayout from './components/AdminLayout';
-import LibraryLayout from './components/LibraryLayout';
-import AccountsLayout from './components/AccountsLayout';
-import ShopLayout from './components/ShopLayout';
+
+// Each dashboard's layout + pages are lazy-loaded so a user only ever downloads the
+// bundle for the one role they're logged in as, instead of all 5 dashboards at once.
+const StudentLayout = lazy(() => import('./components/StudentLayout'));
+const AdminLayout = lazy(() => import('./components/AdminLayout'));
+const LibraryLayout = lazy(() => import('./components/LibraryLayout'));
+const AccountsLayout = lazy(() => import('./components/AccountsLayout'));
+const ShopLayout = lazy(() => import('./components/ShopLayout'));
 
 // Student pages
-import HomePage from './pages/student/HomePage';
-import ShopsPage from './pages/student/ShopsPage';
-import ShopDetailPage from './pages/student/ShopDetailPage';
-import DuesPage from './pages/student/DuesPage';
-import LedgerPage from './pages/student/LedgerPage';
-import ProfilePage from './pages/student/ProfilePage';
-import QrScannerPage from './pages/student/QrScannerPage';
-import TransferPage from './pages/student/TransferPage';
-import WithdrawPage from './pages/student/WithdrawPage';
-import PaymentResultPage from './pages/student/PaymentResultPage';
-import NotificationsPage from './pages/student/NotificationsPage';
-import ReceiptPage from './pages/student/ReceiptPage';
-import PaymentsDashboardPage from './pages/student/PaymentsDashboardPage';
-import DisputesPage from './pages/student/DisputesPage';
-import DisputeDetailPage from './pages/student/DisputeDetailPage';
+const HomePage = lazy(() => import('./pages/student/HomePage'));
+const ShopsPage = lazy(() => import('./pages/student/ShopsPage'));
+const ShopDetailPage = lazy(() => import('./pages/student/ShopDetailPage'));
+const DuesPage = lazy(() => import('./pages/student/DuesPage'));
+const LedgerPage = lazy(() => import('./pages/student/LedgerPage'));
+const ProfilePage = lazy(() => import('./pages/student/ProfilePage'));
+const QrScannerPage = lazy(() => import('./pages/student/QrScannerPage'));
+const TransferPage = lazy(() => import('./pages/student/TransferPage'));
+const WithdrawPage = lazy(() => import('./pages/student/WithdrawPage'));
+const PaymentResultPage = lazy(() => import('./pages/student/PaymentResultPage'));
+const NotificationsPage = lazy(() => import('./pages/student/NotificationsPage'));
+const ReceiptPage = lazy(() => import('./pages/student/ReceiptPage'));
+const PaymentsDashboardPage = lazy(() => import('./pages/student/PaymentsDashboardPage'));
+const DisputesPage = lazy(() => import('./pages/student/DisputesPage'));
+const DisputeDetailPage = lazy(() => import('./pages/student/DisputeDetailPage'));
 
 // Admin pages
-import AdminHomePage from './pages/admin/AdminHomePage';
-import ShopManagementPage from './pages/admin/ShopManagementPage';
-import FinesPage from './pages/admin/FinesPage';
-import AuditLogsPage from './pages/admin/AuditLogsPage';
-import StaffAccountsPage from './pages/admin/StaffAccountsPage';
-import DisputeOversightPage from './pages/admin/DisputeOversightPage';
-import AdminDisputeDetailPage from './pages/admin/AdminDisputeDetailPage';
-import AdminNotificationsPage from './pages/admin/AdminNotificationsPage';
+const AdminHomePage = lazy(() => import('./pages/admin/AdminHomePage'));
+const ShopManagementPage = lazy(() => import('./pages/admin/ShopManagementPage'));
+const FinesPage = lazy(() => import('./pages/admin/FinesPage'));
+const AuditLogsPage = lazy(() => import('./pages/admin/AuditLogsPage'));
+const StaffAccountsPage = lazy(() => import('./pages/admin/StaffAccountsPage'));
+const DisputeOversightPage = lazy(() => import('./pages/admin/DisputeOversightPage'));
+const AdminDisputeDetailPage = lazy(() => import('./pages/admin/AdminDisputeDetailPage'));
+const AdminNotificationsPage = lazy(() => import('./pages/admin/AdminNotificationsPage'));
 
 // Library pages
-import LibraryHomePage from './pages/library/LibraryHomePage';
-import StudentLookupPage from './pages/library/StudentLookupPage';
-import FineImpositionPage from './pages/library/FineImpositionPage';
-import FineWaiverPage from './pages/library/FineWaiverPage';
-import ClearanceStatusPage from './pages/library/ClearanceStatusPage';
-import LibraryDisputesPage from './pages/library/LibraryDisputesPage';
-import LibraryDisputeDetailPage from './pages/library/LibraryDisputeDetailPage';
-import LibraryNotificationsPage from './pages/library/LibraryNotificationsPage';
+const LibraryHomePage = lazy(() => import('./pages/library/LibraryHomePage'));
+const StudentLookupPage = lazy(() => import('./pages/library/StudentLookupPage'));
+const FineImpositionPage = lazy(() => import('./pages/library/FineImpositionPage'));
+const FineWaiverPage = lazy(() => import('./pages/library/FineWaiverPage'));
+const ClearanceStatusPage = lazy(() => import('./pages/library/ClearanceStatusPage'));
+const LibraryDisputesPage = lazy(() => import('./pages/library/LibraryDisputesPage'));
+const LibraryDisputeDetailPage = lazy(() => import('./pages/library/LibraryDisputeDetailPage'));
+const LibraryNotificationsPage = lazy(() => import('./pages/library/LibraryNotificationsPage'));
 
 // Accounts pages
-import AccountsHomePage from './pages/accounts/AccountsHomePage';
-import SemesterFeePushPage from './pages/accounts/SemesterFeePushPage';
-import FeeWizardPage from './pages/accounts/FeeWizardPage';
-import FeeAdjustmentsPage from './pages/accounts/FeeAdjustmentsPage';
-import CollectionAnalyticsPage from './pages/accounts/CollectionAnalyticsPage';
-import AccountsLedgerPage from './pages/accounts/LedgerPage';
-import AccountsReportsPage from './pages/accounts/AccountsReportsPage';
-import DisputesDashboardPage from './pages/accounts/DisputesDashboardPage';
-import DisputeCaseDetailPage from './pages/accounts/DisputeCaseDetailPage';
-import DisputeReportsPage from './pages/accounts/DisputeReportsPage';
-import AccountsNotificationsPage from './pages/accounts/AccountsNotificationsPage';
+const AccountsHomePage = lazy(() => import('./pages/accounts/AccountsHomePage'));
+const SemesterFeePushPage = lazy(() => import('./pages/accounts/SemesterFeePushPage'));
+const FeeWizardPage = lazy(() => import('./pages/accounts/FeeWizardPage'));
+const FeeAdjustmentsPage = lazy(() => import('./pages/accounts/FeeAdjustmentsPage'));
+const CollectionAnalyticsPage = lazy(() => import('./pages/accounts/CollectionAnalyticsPage'));
+const AccountsLedgerPage = lazy(() => import('./pages/accounts/LedgerPage'));
+const AccountsReportsPage = lazy(() => import('./pages/accounts/AccountsReportsPage'));
+const DisputesDashboardPage = lazy(() => import('./pages/accounts/DisputesDashboardPage'));
+const DisputeCaseDetailPage = lazy(() => import('./pages/accounts/DisputeCaseDetailPage'));
+const DisputeReportsPage = lazy(() => import('./pages/accounts/DisputeReportsPage'));
+const AccountsNotificationsPage = lazy(() => import('./pages/accounts/AccountsNotificationsPage'));
 
 // Shop pages
-import ShopHomePage from './pages/shop/ShopHomePage';
-import ShopQrPage from './pages/shop/ShopQrPage';
-import ShopNotificationsPage from './pages/shop/ShopNotificationsPage';
-import ShopSalesLedgerPage from './pages/shop/ShopSalesLedgerPage';
-import ShopDisputesPage from './pages/shop/ShopDisputesPage';
-import ShopDisputeDetailPage from './pages/shop/ShopDisputeDetailPage';
+const ShopHomePage = lazy(() => import('./pages/shop/ShopHomePage'));
+const ShopQrPage = lazy(() => import('./pages/shop/ShopQrPage'));
+const ShopNotificationsPage = lazy(() => import('./pages/shop/ShopNotificationsPage'));
+const ShopSalesLedgerPage = lazy(() => import('./pages/shop/ShopSalesLedgerPage'));
+const ShopDisputesPage = lazy(() => import('./pages/shop/ShopDisputesPage'));
+const ShopDisputeDetailPage = lazy(() => import('./pages/shop/ShopDisputeDetailPage'));
+
+function RouteFallback() {
+  return (
+    <div className="min-h-screen bg-background flex items-center justify-center">
+      <RefreshCw className="w-6 h-6 text-primary animate-spin" />
+    </div>
+  );
+}
 
 export default function App() {
   return (
     <GoogleOAuthProvider clientId={GOOGLE_CLIENT_ID} locale="en">
     <AuthProvider>
     <BrowserRouter>
+      <Suspense fallback={<RouteFallback />}>
       <Routes>
         <Route path="/" element={<LandingPage />} />
         
@@ -150,6 +164,7 @@ export default function App() {
 
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
+      </Suspense>
       <Toaster />
     </BrowserRouter>
     </AuthProvider>
