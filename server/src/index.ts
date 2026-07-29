@@ -2357,11 +2357,14 @@ router.post('/library/overview', authMiddleware, requireLibrary, async (req: Aut
       prisma.libraryFine.aggregate({ _sum: { amount: true }, where: { status: 'Pending' } }),
       prisma.libraryFine.aggregate({ _sum: { amount: true }, where: { status: 'Paid' } }),
     ]);
+    const pendingFinesForStudents = await prisma.libraryFine.findMany({ where: { status: 'Pending' }, select: { studentId: true } });
+    const studentsPendingClearance = new Set(pendingFinesForStudents.map(f => f.studentId)).size;
     const recent = await prisma.libraryFine.findMany({ take: 10, orderBy: { createdAt: 'desc' }, include: { student: true } });
 
     res.json({
       totalFines: total, pendingFines: pending, paidFines: paid,
       totalAmount: totalAmt._sum.amount || 0, pendingAmount: pendingAmt._sum.amount || 0, paidAmount: paidAmt._sum.amount || 0,
+      totalFinesOutstanding: pending, fineAmount: pendingAmt._sum.amount || 0, studentsPendingClearance,
       recentFines: recent.map(f => ({ id: f.id, label: f.label || '', studentName: f.student?.fullName || '', fineType: f.fineType || '', amount: f.amount, status: f.status, dueDate: f.dueDate || '' })),
     });
   } catch (err: any) {
@@ -2424,7 +2427,26 @@ router.post('/library/fines/assign', authMiddleware, requireLibrary, async (req:
 
 router.post('/library/fines/waive', authMiddleware, requireLibrary, async (req: AuthRequest, res) => {
   try {
-    const { fineId, reason } = req.body;
+    const { fineId, reason, action, newAmount } = req.body as { fineId: string; reason?: string; action?: 'waive' | 'reduce'; newAmount?: number };
+
+    if (action === 'reduce') {
+      const existing = await prisma.libraryFine.findUnique({ where: { id: fineId } });
+      if (!existing) return res.status(404).json({ message: 'Fine not found.' });
+      if (!newAmount || newAmount <= 0 || newAmount >= existing.amount) {
+        return res.status(400).json({ message: 'Reduced amount must be less than the current fine amount.' });
+      }
+      const originalAmount = existing.amount;
+      const reducedFine = await prisma.libraryFine.update({ where: { id: fineId }, data: { amount: newAmount } });
+      await prisma.auditLog.create({ data: { action: 'Library Fine Reduced', actorId: req.user!.id, entityType: 'LibraryFine', entityId: fineId, details: `Reduced from ৳${originalAmount} to ৳${newAmount}${reason ? ` — ${reason}` : ''}`, ipAddress: req.ip } });
+      void notifyUser({
+        recipientId: reducedFine.studentId, category: 'payment', type: 'library_fine.reduced',
+        title: 'Library Fine Reduced', body: `Your ${reducedFine.fineType || ''} fine was reduced from ৳${originalAmount.toLocaleString()} to ৳${newAmount.toLocaleString()}.${reason ? ` Reason: ${reason}` : ''}`,
+        link: '/student/dues',
+        emailSubject: 'Library Fine Reduced — Smart Campus',
+      });
+      return res.json({ success: true, message: `Fine reduced to ৳${newAmount.toLocaleString()}` });
+    }
+
     const waivedFine = await prisma.libraryFine.update({ where: { id: fineId }, data: { status: 'Waived' } });
     await prisma.auditLog.create({ data: { action: 'Library Fine Waived', actorId: req.user!.id, entityType: 'LibraryFine', entityId: fineId, details: reason || 'Fine waived', ipAddress: req.ip } });
     void notifyUser({
