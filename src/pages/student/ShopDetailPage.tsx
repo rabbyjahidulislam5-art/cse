@@ -222,51 +222,37 @@ export default function ShopDetailPage() {
       </button>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        <FadeIn>
-          <div className="rounded-2xl border border-border/60 bg-card overflow-hidden">
-            <div className="w-full aspect-[2/1] bg-accent flex items-center justify-center">
-              <Store className="w-14 h-14 text-muted-foreground/15" />
-            </div>
-            <div className="p-6">
-              <div className="flex items-start justify-between mb-3">
-                <div>
-                  <h1 className="text-2xl font-bold text-foreground">{shop.name}</h1>
-                  <p className="text-sm text-muted-foreground mt-0.5">{CATEGORY_LABELS[shop.category] || shop.category}</p>
-                </div>
-                <StatusBadge status={shop.status.toLowerCase()} />
+        <div className="space-y-4">
+          <FadeIn>
+            <div className="rounded-2xl border border-border/60 bg-card overflow-hidden">
+              <div className="w-full aspect-[2/1] bg-accent flex items-center justify-center">
+                <Store className="w-14 h-14 text-muted-foreground/15" />
               </div>
-              <div className="flex items-center gap-4 mt-4">
-                <div className="flex items-center gap-1.5">
-                  <Star className="w-4 h-4 text-primary fill-primary" />
-                  <span className="text-sm font-bold text-foreground">{shop.rating}</span>
-                </div>
-                {shop.location && (
-                  <div className="flex items-center gap-1 text-xs text-muted-foreground">
-                    <MapPin className="w-3.5 h-3.5" /> {shop.location}
+              <div className="p-6">
+                <div className="flex items-start justify-between mb-3">
+                  <div>
+                    <h1 className="text-2xl font-bold text-foreground">{shop.name}</h1>
+                    <p className="text-sm text-muted-foreground mt-0.5">{CATEGORY_LABELS[shop.category] || shop.category}</p>
                   </div>
-                )}
-              </div>
-            </div>
-          </div>
-        </FadeIn>
-
-        <div className="space-y-6">
-          <FadeIn delay={0.1}>
-            <div className="rounded-2xl border border-border/60 bg-card p-6">
-              <h2 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-4">Shop Information</h2>
-              <div className="space-y-3">
-                <InfoRow icon={FileText} label="About" value={shop.description} />
-                <InfoRow icon={MapPin} label="Location" value={shop.location} />
-                <InfoRow icon={Phone} label="Contact Number" value={shop.contactNumber} />
-                <InfoRow icon={Mail} label="Email" value={shop.ownerEmail} />
-                <InfoRow icon={CalendarClock} label="Operating Hours" value={shop.operatingHours} />
-                <InfoRow icon={UserIcon} label="Owner / Manager" value={shop.ownerName} />
+                  <StatusBadge status={shop.status.toLowerCase()} />
+                </div>
+                <div className="flex items-center gap-4 mt-4">
+                  <div className="flex items-center gap-1.5">
+                    <Star className="w-4 h-4 text-primary fill-primary" />
+                    <span className="text-sm font-bold text-foreground">{shop.rating}</span>
+                  </div>
+                  {shop.location && (
+                    <div className="flex items-center gap-1 text-xs text-muted-foreground">
+                      <MapPin className="w-3.5 h-3.5" /> {shop.location}
+                    </div>
+                  )}
+                </div>
               </div>
             </div>
           </FadeIn>
 
           <FadeIn delay={0.15}>
-            <div className="flex flex-col sm:flex-row gap-3">
+            <div className="flex flex-col gap-3">
               <Button className="w-full h-12 font-semibold" onClick={() => { setPayMode('sslcommerz'); setPayStep('amount'); }}>
                 <CreditCard className="w-4 h-4 mr-2" /> Pay Online
               </Button>
@@ -276,6 +262,20 @@ export default function ShopDetailPage() {
             </div>
           </FadeIn>
         </div>
+
+        <FadeIn delay={0.1}>
+          <div className="rounded-2xl border border-border/60 bg-card p-6">
+            <h2 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-4">Shop Information</h2>
+            <div className="space-y-3">
+              <InfoRow icon={FileText} label="About" value={shop.description} />
+              <InfoRow icon={MapPin} label="Location" value={shop.location} />
+              <InfoRow icon={Phone} label="Contact Number" value={shop.contactNumber} />
+              <InfoRow icon={Mail} label="Email" value={shop.ownerEmail} />
+              <InfoRow icon={CalendarClock} label="Operating Hours" value={shop.operatingHours} />
+              <InfoRow icon={UserIcon} label="Owner / Manager" value={shop.ownerName} />
+            </div>
+          </div>
+        </FadeIn>
       </div>
     </div>
   );
