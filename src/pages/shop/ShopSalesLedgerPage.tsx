@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { History, DollarSign } from 'lucide-react';
+import { History } from 'lucide-react';
 import { Skeleton } from '@/components/ui/skeleton';
 import { getShopDashboard, generateSalesLedgerReport, type GetShopDashboardOutputType } from '@/lib/api';
 import { motion } from 'framer-motion';
@@ -36,7 +36,7 @@ export default function ShopSalesLedgerPage() {
             <p className="text-3xl font-bold text-foreground tabular mt-1">৳{(data?.totalRevenue || 0).toLocaleString()}</p>
           </div>
           <div className="w-12 h-12 rounded-xl gradient-primary flex items-center justify-center">
-            <DollarSign className="w-6 h-6 text-primary-foreground" />
+            <span className="text-2xl font-bold text-primary-foreground leading-none">৳</span>
           </div>
         </div>
       </div>

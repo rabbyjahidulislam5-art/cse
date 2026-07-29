@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { DollarSign, ShoppingBag, Bell, QrCode, Loader2, Landmark, Clock, Wallet } from 'lucide-react';
+import { ShoppingBag, Bell, QrCode, Loader2, Landmark, Clock, Wallet } from 'lucide-react';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Button } from '@/components/ui/button';
 import { getShopDashboard, type GetShopDashboardOutputType } from '@/lib/api';
@@ -49,7 +49,7 @@ export default function ShopHomePage() {
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-4">
               <div className="w-14 h-14 rounded-xl gradient-primary flex items-center justify-center shadow-lg shadow-primary/20">
-                <DollarSign className="w-7 h-7 text-primary-foreground" />
+                <span className="text-3xl font-bold text-primary-foreground leading-none">৳</span>
               </div>
               <div>
                 <p className="text-xs text-muted-foreground">Total Revenue</p>
@@ -85,7 +85,7 @@ export default function ShopHomePage() {
           <p className="text-lg font-bold text-primary tabular">৳{(data?.wallet?.balance || 0).toLocaleString()}</p>
         </div>
         <div className="rounded-xl border border-border/60 bg-card p-4">
-          <div className="flex items-center gap-1.5 mb-1"><DollarSign className="w-3.5 h-3.5 text-muted-foreground" /><p className="text-xs text-muted-foreground">Total Received</p></div>
+          <div className="flex items-center gap-1.5 mb-1"><span className="text-sm font-bold text-muted-foreground leading-none">৳</span><p className="text-xs text-muted-foreground">Total Received</p></div>
           <p className="text-lg font-bold text-foreground tabular">৳{(data?.totalRevenue || 0).toLocaleString()}</p>
         </div>
         <div className="rounded-xl border border-border/60 bg-card p-4">
