@@ -19,13 +19,19 @@ export default function PaymentResultPage() {
   const [wizardOpen, setWizardOpen] = useState(false);
 
   useEffect(() => {
-    if (!ref || !user) return;
+    if (!ref) { setValidating(false); return; }
     if (statusParam === 'cancelled') { setResult({ status: 'failed', message: 'Payment was cancelled by user' }); setValidating(false); return; }
     validateSSLPayment({ transactionRef: ref })
-      .then(res => { setResult(res); if (res.status === 'valid') { refreshDashboard(); localStorage.removeItem('ssl_payment'); } })
+      .then(res => {
+        setResult(res);
+        if (res.status === 'valid') {
+          try { refreshDashboard(); } catch { /* best effort */ }
+          localStorage.removeItem('ssl_payment');
+        }
+      })
       .catch(e => setResult({ status: 'failed', message: e.message || 'Validation failed' }))
       .finally(() => setValidating(false));
-  }, [ref, user]);
+  }, [ref, statusParam]);
 
   if (validating) {
     return (

@@ -49,11 +49,8 @@ export function setStoredToken(token: string | null): void {
       localStorage.removeItem(TOKEN_KEY);
       return;
     }
-    if (isPerTabAuthMode()) {
-      sessionStorage.setItem(TOKEN_KEY, token);
-    } else {
-      localStorage.setItem(TOKEN_KEY, token);
-    }
+    sessionStorage.setItem(TOKEN_KEY, token);
+    localStorage.setItem(TOKEN_KEY, token);
   } catch { /* ignore storage errors */ }
 }
 
@@ -80,11 +77,8 @@ export function setStoredUser(user: any): void {
       return;
     }
     const raw = JSON.stringify(user);
-    if (isPerTabAuthMode()) {
-      sessionStorage.setItem(USER_KEY, raw);
-    } else {
-      localStorage.setItem(USER_KEY, raw);
-    }
+    sessionStorage.setItem(USER_KEY, raw);
+    localStorage.setItem(USER_KEY, raw);
   } catch { /* ignore storage errors */ }
 }
 

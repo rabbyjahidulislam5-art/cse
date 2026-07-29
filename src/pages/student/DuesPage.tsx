@@ -31,7 +31,8 @@ interface PendingPayment {
 }
 
 export default function DuesPage() {
-  const { user, refreshDashboard } = useUser();
+  const { user, wallet, refreshDashboard } = useUser();
+  const walletBalance = wallet?.balance ?? 0;
   const [dues, setDues] = useState<GetDuesOutputType | null>(null);
   const [loading, setLoading] = useState(true);
   const [selected, setSelected] = useState<Set<string>>(new Set());
@@ -68,6 +69,10 @@ export default function DuesPage() {
 
   const handlePaySelected = () => {
     if (payableItems.length === 0) { toast.error('Select pending items'); return; }
+    if (walletBalance < totalSelected) {
+      toast.error(`Insufficient Wallet Balance. Available: ৳${walletBalance.toLocaleString()}, Required: ৳${totalSelected.toLocaleString()}`);
+      return;
+    }
     const uniqueSources = new Set(payableItems.map(d => d.source));
     const receiverName = uniqueSources.size === 1 ? (RECEIVER_ROLE_MAP[[...uniqueSources][0]] || 'Campus Office') : 'Multiple Offices';
     setPending({
@@ -80,6 +85,10 @@ export default function DuesPage() {
   };
 
   const handlePaySingle = (item: DueItem) => {
+    if (walletBalance < item.amount) {
+      toast.error(`Insufficient Wallet Balance. Available: ৳${walletBalance.toLocaleString()}, Required: ৳${item.amount.toLocaleString()}`);
+      return;
+    }
     setPending({
       items: [{ id: item.id, source: item.source as SslPayItem['source'], amount: item.amount, label: item.label }],
       purpose: PURPOSE_MAP[item.source] || 'semester_fee',
@@ -119,7 +128,7 @@ export default function DuesPage() {
   const onOtpVerified = (otpId: string) => executePayment(otpId);
 
   const handleDispute = async () => {
-    if (!disputeFineId || disputeReason.length < 10 || !user) { toast.error('Provide a reason (min 10 chars)'); return; }
+    if (!disputeFineId || disputeReason.length < 10 || !user) { toast.error('Provide a reason (min 10 chars)...'); return; }
     try {
       await disputeFine({ fineId: disputeFineId, reason: disputeReason });
       setDisputeOpen(false); setDisputeReason('');
@@ -144,6 +153,7 @@ export default function DuesPage() {
         {[...pendingItems, ...done].map((item, idx) => {
           const canPay = item.status === 'pending' || item.status === 'overdue';
           const canDispute = source === 'admin' && item.status === 'pending';
+          const isInsufficient = walletBalance < item.amount;
           return (
             <motion.div key={item.id} initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: idx * 0.03 }}
               className={`flex items-center gap-3 p-4 rounded-xl border bg-card transition-colors ${canPay ? 'border-border/60 hover:border-primary/20' : 'border-border/40'}`}>
@@ -151,14 +161,28 @@ export default function DuesPage() {
               <div className="flex-1 min-w-0">
                 <div className="flex items-center justify-between gap-2 flex-wrap">
                   <span className="text-sm font-semibold text-foreground truncate">{item.label}</span>
-                  <StatusBadge status={item.status} />
+                  <div className="flex items-center gap-2">
+                    {canPay && isInsufficient && (
+                      <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-destructive/10 text-destructive border border-destructive/20">
+                        Insufficient Balance
+                      </span>
+                    )}
+                    <StatusBadge status={item.status} />
+                  </div>
                 </div>
                 {item.status === 'under review' && <p className="text-[10px] text-muted-foreground mt-1">Dispute submitted — awaiting review</p>}
+                {canPay && isInsufficient && <p className="text-[10px] text-destructive/80 mt-1">Wallet balance: {formatCurrency(walletBalance)} (Short by {formatCurrency(item.amount - walletBalance)})</p>}
               </div>
               <span className={`text-sm font-bold tabular-nums shrink-0 ${canPay ? 'text-foreground' : 'text-muted-foreground'}`}>{formatCurrency(item.amount)}</span>
               {canPay && (
                 <div className="flex items-center gap-1.5 shrink-0">
-                  <Button size="sm" className="h-8 text-xs px-3 font-semibold" onClick={() => handlePaySingle(item)} disabled={paying}>
+                  <Button
+                    size="sm"
+                    className="h-8 text-xs px-3 font-semibold"
+                    onClick={() => handlePaySingle(item)}
+                    disabled={paying || isInsufficient}
+                    title={isInsufficient ? `Insufficient Wallet Balance (${formatCurrency(walletBalance)} available)` : undefined}
+                  >
                     <CreditCard className="w-3 h-3 mr-1" /> Pay
                   </Button>
                   {canDispute && (
