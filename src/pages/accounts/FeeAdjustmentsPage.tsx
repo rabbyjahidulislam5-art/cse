@@ -36,11 +36,8 @@ export default function FeeAdjustmentsPage() {
   const selectStudent = async (id: string) => {
     setSelected(id); setLoadingFees(true);
     try {
-      const res = await getDues({});
-      // Filter pending semester fees (getDues returns for current user, so we use a workaround)
-      // Actually getDues is for the logged-in student. For admin lookup we need to be creative.
-      // We'll show a placeholder for now
-      setFees(res.semester.filter(f => f.status === 'Pending'));
+      const res = await getDues({ studentId: id });
+      setFees(res.semester.filter(f => f.status === 'pending'));
     } catch { setFees([]); }
     finally { setLoadingFees(false); }
   };

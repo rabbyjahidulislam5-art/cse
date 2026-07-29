@@ -8,7 +8,7 @@ import multer from 'multer';
 import path from 'path';
 import fs from 'fs';
 import PDFDocument from 'pdfkit';
-import rateLimit from 'express-rate-limit';
+import rateLimit, { ipKeyGenerator } from 'express-rate-limit';
 import prisma from './lib/prisma';
 import { authMiddleware, generateToken, requireRole, AuthRequest } from './lib/auth';
 import { sendEmail } from './lib/email';
@@ -29,7 +29,7 @@ const paymentInitLimiter = rateLimit({
   limit: 10,
   standardHeaders: true,
   legacyHeaders: false,
-  keyGenerator: (req: AuthRequest) => req.user?.id || req.ip || 'unknown',
+  keyGenerator: (req: AuthRequest) => req.user?.id || ipKeyGenerator(req.ip || 'unknown'),
   message: { message: 'Too many payment attempts. Please wait a moment and try again.' },
 });
 const paymentIpnLimiter = rateLimit({
@@ -714,7 +714,9 @@ router.post('/shops/validate-qr', authMiddleware, async (req: AuthRequest, res) 
 // ─── DUES ───
 router.post('/dues', authMiddleware, async (req: AuthRequest, res) => {
   try {
-    const userId = req.user!.id;
+    const { studentId: targetStudentId } = req.body as { studentId?: string };
+    const canOverride = targetStudentId && ['Accounts Office', 'Admin Office'].includes(req.user!.role || '');
+    const userId = canOverride ? targetStudentId! : req.user!.id;
     const [sem, lib, adm, pl] = await Promise.all([
       prisma.semesterFee.findMany({ where: { studentId: userId }, take: 100 }),
       prisma.libraryFine.findMany({ where: { studentId: userId }, take: 100 }),
@@ -1292,6 +1294,15 @@ const PIN_REQUIRED_THRESHOLD = 3000;    // ৳3,000+ requires a fresh PIN verifi
 const OTP_REQUIRED_THRESHOLD = 20000;   // ৳20,000+ additionally requires a fresh OTP
 const AUTH_FRESHNESS_WINDOW_MS = 5 * 60 * 1000; // both proofs expire after 5 minutes
 
+// A Pending SSLCommerz transaction whose checkout was genuinely abandoned (tab closed, network
+// drop, browser crash) never receives a FAILED/CANCELLED verdict from SSLCommerz — nothing else
+// in this codebase ever expires it. Without this window, the 3-pending-transaction anti-abuse
+// guard below would permanently lock a student out of every payment method after 3 abandoned
+// attempts, with no self-service recovery. Anything older than this is presumed abandoned and
+// excluded from the count; it stays in the ledger as-is (still visible, still resolvable via the
+// validator if SSLCommerz ever does respond) — this only unblocks new payment attempts.
+const PENDING_TXN_ABANDON_WINDOW_MS = 30 * 60 * 1000;
+
 interface PayItem { id: string; source: 'semester' | 'library' | 'admin' | 'payLater' | 'shop' | 'wallet'; amount: number; label: string }
 
 async function markItemPaid(item: PayItem, reference: string) {
@@ -1327,10 +1338,11 @@ async function confirmSslPayment(reference: string, source: 'ipn' | 'browser-val
 
   let data: Record<string, unknown>;
   try {
-    const params = new URLSearchParams({ store_id: process.env.SSLCOMMERZ_STORE_ID || '', store_passwd: process.env.SSLCOMMERZ_STORE_PASSWORD || '', merchanttran_id: reference, v: '1', format: 'json' });
+    const params = new URLSearchParams({ store_id: process.env.SSLCOMMERZ_STORE_ID || '', store_passwd: process.env.SSLCOMMERZ_STORE_PASSWORD || '', tran_id: reference, v: '1', format: 'json' });
     const response = await fetch(`${sslValidationUrl()}?${params.toString()}`);
     data = await response.json() as Record<string, unknown>;
-  } catch {
+  } catch (err: any) {
+    console.error(`[confirmSslPayment] Validator call failed for ${reference} (source=${source}):`, err.message || err);
     await prisma.paymentCallback.create({ data: { transactionId: tx.id, reference, source, rawPayload: JSON.stringify(rawPayload), sslStatus: 'VALIDATION_UNREACHABLE', verified: false, ipAddress: ip } }).catch(() => {});
     return { status: 'pending' as const, message: 'Could not reach the payment gateway validator. Please check again shortly.' };
   }
@@ -1410,6 +1422,18 @@ async function confirmSslPayment(reference: string, source: 'ipn' | 'browser-val
   return { status: 'pending' as const, message: 'Payment is still being processed' };
 }
 
+// SSLCommerz delivers success_url/fail_url/cancel_url as a browser-submitted HTML form POST, not
+// a GET — pointing those directly at the frontend's SPA route (as they used to) makes the browser
+// issue a raw POST to a static host, which has no handler for it and 404s before React ever loads.
+// This backend endpoint accepts that POST and does a standard Post/Redirect/Get: a 303 turns it
+// into a GET to the actual frontend route, which is what PaymentResultPage already expects.
+router.all('/payment/redirect', (req: AuthRequest, res) => {
+  const appUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
+  const status = (req.query.status as string) || 'failed';
+  const ref = (req.query.ref as string) || '';
+  res.redirect(303, `${appUrl}/student/payment-result?status=${encodeURIComponent(status)}&ref=${encodeURIComponent(ref)}`);
+});
+
 router.post('/payment/init', authMiddleware, paymentInitLimiter, async (req: AuthRequest, res) => {
   try {
     const userId = req.user!.id;
@@ -1482,7 +1506,7 @@ router.post('/payment/init', authMiddleware, paymentInitLimiter, async (req: Aut
 
     const ref = `SSL-${Date.now().toString(36).toUpperCase()}-${Math.random().toString(36).slice(2, 6).toUpperCase()}`;
 
-    const pendingTxns = await prisma.transaction.findMany({ where: { userId, status: 'Pending', gateway: 'SSLCommerz' }, take: 5 });
+    const pendingTxns = await prisma.transaction.findMany({ where: { userId, status: 'Pending', gateway: 'SSLCommerz', createdAt: { gte: new Date(Date.now() - PENDING_TXN_ABANDON_WINDOW_MS) } }, take: 5 });
     if (pendingTxns.length >= 3) return res.status(429).json({ message: 'Too many pending payments. Complete or cancel existing ones first.' });
 
     const topUpLabel = `Wallet Top-Up — ৳${amount.toLocaleString()}`;
@@ -1501,16 +1525,17 @@ router.post('/payment/init', authMiddleware, paymentInitLimiter, async (req: Aut
     const user = await prisma.user.findUnique({ where: { id: userId } });
     const isLive = process.env.SSLCOMMERZ_IS_LIVE === 'true';
     const SSLCOMMERZ_URL = isLive ? 'https://securepay.sslcommerz.com/gwprocess/v4/api.php' : 'https://sandbox.sslcommerz.com/gwprocess/v4/api.php';
-    const appUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
     const backendUrl = process.env.BACKEND_URL || `http://localhost:${PORT}`;
 
     const formData = new URLSearchParams({
       store_id: process.env.SSLCOMMERZ_STORE_ID || '',
       store_passwd: process.env.SSLCOMMERZ_STORE_PASSWORD || '',
       total_amount: amount.toString(), currency: 'BDT', tran_id: ref,
-      success_url: `${appUrl}/student/payment-result?status=success&ref=${ref}`,
-      fail_url: `${appUrl}/student/payment-result?status=failed&ref=${ref}`,
-      cancel_url: `${appUrl}/student/payment-result?status=cancelled&ref=${ref}`,
+      // SSLCommerz POSTs to these — they must hit a backend route that can accept a POST and
+      // redirect to the frontend's GET route (see /payment/redirect above), not the SPA directly.
+      success_url: `${backendUrl}/api/payment/redirect?status=success&ref=${ref}`,
+      fail_url: `${backendUrl}/api/payment/redirect?status=failed&ref=${ref}`,
+      cancel_url: `${backendUrl}/api/payment/redirect?status=cancelled&ref=${ref}`,
       // Real server-to-server IPN — this is what actually confirms payment now, not the browser's return trip.
       ipn_url: `${backendUrl}/api/payment/ipn`,
       cus_name: user?.fullName || 'Student',
@@ -1580,7 +1605,7 @@ const semesterFeeLookupLimiter = rateLimit({
   limit: 20,
   standardHeaders: true,
   legacyHeaders: false,
-  keyGenerator: (req: AuthRequest) => req.user?.id || req.ip || 'unknown',
+  keyGenerator: (req: AuthRequest) => req.user?.id || ipKeyGenerator(req.ip || 'unknown'),
   message: { message: 'Too many lookups. Please wait a moment and try again.' },
 });
 
@@ -1749,7 +1774,7 @@ router.post('/semester-fees/pay', authMiddleware, paymentInitLimiter, async (req
     }
 
     // method === 'sslcommerz'
-    const pendingTxns = await prisma.transaction.findMany({ where: { userId: payerId, status: 'Pending', gateway: 'SSLCommerz' }, take: 5 });
+    const pendingTxns = await prisma.transaction.findMany({ where: { userId: payerId, status: 'Pending', gateway: 'SSLCommerz', createdAt: { gte: new Date(Date.now() - PENDING_TXN_ABANDON_WINDOW_MS) } }, take: 5 });
     if (pendingTxns.length >= 3) return res.status(429).json({ message: 'Too many pending payments. Complete or cancel existing ones first.' });
 
     const tx = await prisma.transaction.create({
@@ -1768,16 +1793,17 @@ router.post('/semester-fees/pay', authMiddleware, paymentInitLimiter, async (req
 
     const isLive = process.env.SSLCOMMERZ_IS_LIVE === 'true';
     const SSLCOMMERZ_URL = isLive ? 'https://securepay.sslcommerz.com/gwprocess/v4/api.php' : 'https://sandbox.sslcommerz.com/gwprocess/v4/api.php';
-    const appUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
     const backendUrl = process.env.BACKEND_URL || `http://localhost:${PORT}`;
 
     const formData = new URLSearchParams({
       store_id: process.env.SSLCOMMERZ_STORE_ID || '',
       store_passwd: process.env.SSLCOMMERZ_STORE_PASSWORD || '',
       total_amount: total.toString(), currency: 'BDT', tran_id: ref,
-      success_url: `${appUrl}/student/payment-result?status=success&ref=${ref}`,
-      fail_url: `${appUrl}/student/payment-result?status=failed&ref=${ref}`,
-      cancel_url: `${appUrl}/student/payment-result?status=cancelled&ref=${ref}`,
+      // SSLCommerz POSTs to these — they must hit a backend route that can accept a POST and
+      // redirect to the frontend's GET route (see /payment/redirect above), not the SPA directly.
+      success_url: `${backendUrl}/api/payment/redirect?status=success&ref=${ref}`,
+      fail_url: `${backendUrl}/api/payment/redirect?status=failed&ref=${ref}`,
+      cancel_url: `${backendUrl}/api/payment/redirect?status=cancelled&ref=${ref}`,
       // Real server-to-server IPN — confirmSslPayment() re-validates against SSLCommerz's own
       // Merchant Transaction Validation API before marking anything Paid, exactly like every
       // other payment purpose in this app.
@@ -2054,7 +2080,7 @@ router.post('/admin/staff/manage', authMiddleware, requireAdmin, async (req: Aut
   }
 });
 
-router.post('/admin/search-students', authMiddleware, requireAdmin, async (req: AuthRequest, res) => {
+router.post('/admin/search-students', authMiddleware, requireRole('Admin Office', 'Accounts Office'), async (req: AuthRequest, res) => {
   try {
     const { query } = req.body;
     if (!query || query.length < 2) return res.json({ students: [] });
@@ -2147,16 +2173,34 @@ router.post('/library/overview', authMiddleware, requireLibrary, async (req: Aut
 
 router.post('/library/student-lookup', authMiddleware, requireLibrary, async (req: AuthRequest, res) => {
   try {
-    const { identifier } = req.body;
-    let student = await prisma.user.findUnique({ where: { email: identifier } });
-    if (!student) student = await prisma.user.findUnique({ where: { studentId: identifier } });
-    if (!student) return res.status(404).json({ message: 'Student not found' });
+    const { query } = req.body as { query?: string };
+    if (!query?.trim()) return res.json({ students: [] });
+    const q = query.trim();
 
-    const fines = await prisma.libraryFine.findMany({ where: { studentId: student.id } });
-    res.json({
-      student: { id: student.id, fullName: student.fullName || '', email: student.email, studentId: student.studentId || '', department: student.department || '', batch: student.batch || '' },
-      fines: fines.map(f => ({ id: f.id, label: f.label || '', fineType: f.fineType || '', amount: f.amount, status: f.status, dueDate: f.dueDate || '', reference: f.reference || '' })),
+    const students = await prisma.user.findMany({
+      where: {
+        role: 'Student',
+        OR: [
+          { fullName: { contains: q, mode: 'insensitive' } },
+          { studentId: { contains: q, mode: 'insensitive' } },
+          { email: { contains: q, mode: 'insensitive' } },
+        ],
+      },
+      take: 20,
     });
+
+    const result = await Promise.all(students.map(async student => {
+      const fines = await prisma.libraryFine.findMany({ where: { studentId: student.id } });
+      const mappedFines = fines.map(f => ({ id: f.id, label: f.label || '', fineType: f.fineType || '', amount: f.amount, status: f.status, dueDate: f.dueDate || '' }));
+      return {
+        id: student.id, fullName: student.fullName || '', email: student.email, studentId: student.studentId || '',
+        department: student.department || '', batch: student.batch || '',
+        fines: mappedFines,
+        totalPending: mappedFines.filter(f => f.status === 'Pending').reduce((s, f) => s + (f.amount || 0), 0),
+      };
+    }));
+
+    res.json({ students: result });
   } catch (err: any) {
     res.status(500).json({ message: err.message });
   }
@@ -2287,6 +2331,13 @@ router.post('/accounts/analytics', authMiddleware, requireAccounts, async (req: 
       timeline: [],
       totalStudents: students.length, totalFees: total, collected,
       collectionRate: total > 0 ? Math.round((collected / total) * 100) : 0,
+      overall: { paid: collected, pending: total - collected, percent: total > 0 ? Math.round((collected / total) * 100) : 0 },
+      departments: Object.entries(deptMap).map(([name, d]) => ({
+        name, collected: d.paid, pending: d.pending,
+        percent: d.total > 0 ? Math.round((d.paid / d.total) * 100) : 0,
+        students: students.filter(s => (s.department || 'Unknown') === name).length,
+        pendingAmount: d.pending,
+      })),
     });
   } catch (err: any) {
     res.status(500).json({ message: err.message });

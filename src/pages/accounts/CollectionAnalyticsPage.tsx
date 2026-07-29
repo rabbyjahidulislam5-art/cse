@@ -21,8 +21,8 @@ export default function CollectionAnalyticsPage() {
   if (loading && !data) return <div className="container mx-auto px-4 sm:px-6 py-6 max-w-4xl space-y-4"><Skeleton className="h-8 w-48" /><Skeleton className="h-60 rounded-2xl" /></div>;
 
   const chartData = [
-    { name: 'Paid', value: data?.overall.paid || 0 },
-    { name: 'Pending', value: data?.overall.pending || 0 },
+    { name: 'Paid', value: data?.overall?.paid || 0 },
+    { name: 'Pending', value: data?.overall?.pending || 0 },
   ];
   const COLORS = ['hsl(var(--chart-3))', 'hsl(var(--chart-4))'];
 
@@ -36,7 +36,7 @@ export default function CollectionAnalyticsPage() {
             <SelectTrigger className="w-48 bg-accent/50 border-border/60"><SelectValue placeholder="All Departments" /></SelectTrigger>
             <SelectContent>
               <SelectItem value="all">All Departments</SelectItem>
-              {data?.departments.map(d => <SelectItem key={d.name} value={d.name}>{d.name}</SelectItem>)}
+              {data?.departments?.map(d => <SelectItem key={d.name} value={d.name}>{d.name}</SelectItem>)}
             </SelectContent>
           </Select>
         </div>

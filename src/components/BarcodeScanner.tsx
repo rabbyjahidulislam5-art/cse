@@ -62,6 +62,11 @@ export default function BarcodeScanner({
 
   const formatsKey = formats.join(',');
   useEffect(() => {
+    if (typeof BarcodeDetector === 'undefined') {
+      setError('Barcode scanning isn’t supported in this browser. Please use Chrome on Android, or find the shop from the Shops list to pay directly.');
+      detectorRef.current = undefined;
+      return;
+    }
     BarcodeDetector.getSupportedFormats()
       .then(supported => {
         const toUse = formats.filter(f => supported.includes(f));

@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { ScanLine, FileWarning, ArrowRightLeft, Store, PlusCircle, GraduationCap, ShieldAlert, ArrowRight, RotateCcw, Lock, TrendingUp, TrendingDown, Receipt, ArrowUpRight, Wallet, ScrollText, CreditCard } from 'lucide-react';
@@ -8,7 +8,7 @@ import PinDialog from '@/components/PinDialog';
 import AddMoneyModal from '@/components/AddMoneyModal';
 import SemesterFeeModal from '@/components/SemesterFeeModal';
 import { useUser } from '@/lib/user-context';
-import { getStudentDashboard, type GetStudentDashboardOutputType } from '@/lib/api';
+import { type GetStudentDashboardOutputType } from '@/lib/api';
 import { formatCurrency } from '@/lib/mock-data';
 import { FadeIn } from '@/components/PageTransition';
 
@@ -52,16 +52,11 @@ function TransactionRow({ tx, onReceipt, index }: { tx: TxType; onReceipt: (id: 
 
 export default function HomePage() {
   const navigate = useNavigate();
-  const { user, wallet, loading, refreshDashboard } = useUser();
+  const { user, wallet, recentTransactions, loading, refreshDashboard } = useUser();
   const [pinOpen, setPinOpen] = useState(false);
   const [addMoneyOpen, setAddMoneyOpen] = useState(false);
   const [semesterFeeOpen, setSemesterFeeOpen] = useState(false);
-  const [recentTx, setRecentTx] = useState<TxType[]>([]);
-
-  useEffect(() => {
-    if (!user) return;
-    getStudentDashboard({}).then(data => setRecentTx(data.recentTransactions));
-  }, [user]);
+  const recentTx: TxType[] = recentTransactions;
 
   const quickActions = [
     { label: 'Scan & Pay', icon: ScanLine, onClick: () => navigate('/student/scan'), color: 'from-secondary/15 to-secondary/5', iconColor: 'text-secondary' },
