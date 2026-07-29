@@ -393,9 +393,9 @@ export default function FeeWizardPage() {
                     <th className="p-3">#</th>
                     <th className="p-3">Student ID</th>
                     <th className="p-3">Name</th>
-                    <th className="p-3">Tuition Fee</th>
-                    <th className="p-3">Lab Fee</th>
-                    <th className="p-3">Total Fee</th>
+                    <th className="p-3">Fee Amount</th>
+                    <th className="p-3">Waiver</th>
+                    <th className="p-3">Total Amount</th>
                     <th className="p-3">Status</th>
                   </tr>
                 </thead>
@@ -405,9 +405,9 @@ export default function FeeWizardPage() {
                       <td className="p-3 text-muted-foreground">{idx + 1}</td>
                       <td className="p-3 font-mono font-semibold text-foreground">{item.studentId}</td>
                       <td className="p-3 text-foreground">{item.studentName}</td>
-                      <td className="p-3 font-mono">৳{(item.tuition || 0).toLocaleString()}</td>
-                      <td className="p-3 font-mono text-muted-foreground">৳{(item.lab || 0).toLocaleString()}</td>
-                      <td className="p-3 font-mono font-bold text-primary">৳{(item.total || 0).toLocaleString()}</td>
+                      <td className="p-3 font-mono">৳{(item.amount || item.tuition || 0).toLocaleString()}</td>
+                      <td className="p-3 font-mono text-emerald-400">৳{(item.waiver || 0).toLocaleString()}</td>
+                      <td className="p-3 font-mono font-bold text-primary">৳{(item.amount || item.total || item.finalAmount || 0).toLocaleString()}</td>
                       <td className="p-3">
                         {item.valid ? (
                           <span className="px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-400 font-semibold text-[10px]">Valid</span>
@@ -465,7 +465,7 @@ export default function FeeWizardPage() {
                         <p className="text-[11px] text-muted-foreground">{item.studentName}</p>
                       </td>
                       <td className="p-3 text-muted-foreground font-medium">{item.feeLabel || autoFeeLabel}</td>
-                      <td className="p-3 font-mono">৳{(item.amount || 0).toLocaleString()}</td>
+                      <td className="p-3 font-mono">৳{(item.tuition || item.amount || 0).toLocaleString()}</td>
                       <td className="p-3 font-mono text-emerald-400">৳{(item.waiverAdjustment || 0).toLocaleString()}</td>
                       <td className="p-3 font-mono font-bold text-primary">৳{(item.finalAmount || 0).toLocaleString()}</td>
                       <td className="p-3 text-muted-foreground">{item.dueDate || '2026-08-30'}</td>
