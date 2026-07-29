@@ -1420,12 +1420,38 @@ const PENDING_TXN_ABANDON_WINDOW_MS = 30 * 60 * 1000;
 
 interface PayItem { id: string; source: 'semester' | 'library' | 'admin' | 'payLater' | 'shop' | 'wallet'; amount: number; label: string }
 
-async function markItemPaid(item: PayItem, reference: string) {
-  if (item.source === 'semester') await prisma.semesterFee.update({ where: { id: item.id }, data: { status: 'Paid', reference } }).catch(() => {});
+async function markItemPaid(item: PayItem, reference: string, userId?: string) {
+  if (item.source === 'semester') {
+    await prisma.semesterFee.update({ where: { id: item.id }, data: { status: 'Paid', reference } }).catch(() => {});
+    await prisma.feeInvoice.updateMany({ where: { OR: [{ id: item.id }, { batchItemId: item.id }] }, data: { status: 'Paid' } }).catch(() => {});
+  }
   else if (item.source === 'library') await prisma.libraryFine.update({ where: { id: item.id }, data: { status: 'Paid', reference } }).catch(() => {});
   else if (item.source === 'admin') await prisma.adminFine.update({ where: { id: item.id }, data: { status: 'Paid', reference } }).catch(() => {});
   else if (item.source === 'payLater') await prisma.payLaterDue.update({ where: { id: item.id }, data: { status: 'Paid', paymentReference: reference } }).catch(() => {});
-  // source === 'shop': no separate due row to update — the Transaction row itself is the payment record.
+
+  if (userId) {
+    const studentUser = await prisma.user.findUnique({ where: { id: userId } });
+    if (studentUser) {
+      const lastLedger = await prisma.ledgerEntry.findFirst({
+        where: { studentId: studentUser.id },
+        orderBy: { createdAt: 'desc' },
+      });
+      const previousBalance = lastLedger ? lastLedger.balanceAfter : 0;
+      const newBalance = Math.max(0, previousBalance - (item.amount || 0));
+
+      await prisma.ledgerEntry.create({
+        data: {
+          entryNumber: `LED-CR-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
+          studentId: studentUser.id,
+          type: 'CREDIT_PAYMENT',
+          creditAmount: Number(item.amount) || 0,
+          balanceAfter: newBalance,
+          reference: reference,
+          description: `${item.label || 'Fee Payment'} by Student (${studentUser.fullName || studentUser.studentId})`,
+        },
+      }).catch(() => {});
+    }
+  }
 }
 
 function sslValidationUrl() {
@@ -1498,7 +1524,7 @@ async function confirmSslPayment(reference: string, source: 'ipn' | 'browser-val
 
     let items: PayItem[] = [];
     try { items = tx.itemsJson ? JSON.parse(tx.itemsJson) : []; } catch { items = []; }
-    for (const item of items) await markItemPaid(item, reference);
+    for (const item of items) await markItemPaid(item, reference, tx.userId);
 
     // Wallet top-up: credit the user's wallet balance now that SSLCommerz has confirmed the payment.
     if (tx.purpose === 'wallet_topup') {
@@ -2526,23 +2552,38 @@ router.post('/library/clearance/report', authMiddleware, requireLibrary, async (
 // ─── ACCOUNTS ROUTES ───
 router.post('/accounts/overview', authMiddleware, requireAccounts, async (req: AuthRequest, res) => {
   try {
-    const [totalAgg, collectedAgg, pendingAgg, pendingCount, totalStudents] = await Promise.all([
+    const [
+      feeAgg, feePaidAgg,
+      invAgg, invPaidAgg, invUnpaidAgg,
+      pendingInvCount, totalStudents
+    ] = await Promise.all([
       prisma.semesterFee.aggregate({ _sum: { amount: true } }),
       prisma.semesterFee.aggregate({ _sum: { amount: true }, where: { status: 'Paid' } }),
-      prisma.semesterFee.aggregate({ _sum: { amount: true }, where: { status: 'Pending' } }),
-      prisma.semesterFee.count({ where: { status: 'Pending' } }),
+      prisma.feeInvoice.aggregate({ _sum: { amount: true } }),
+      prisma.feeInvoice.aggregate({ _sum: { amount: true }, where: { status: 'Paid' } }),
+      prisma.feeInvoice.aggregate({ _sum: { amount: true }, where: { status: 'Unpaid' } }),
+      prisma.feeInvoice.count({ where: { status: 'Unpaid' } }),
       prisma.user.count({ where: { role: 'Student' } }),
     ]);
-    const total = totalAgg._sum.amount || 0;
-    const collected = collectedAgg._sum.amount || 0;
-    const pending = pendingAgg._sum.amount || 0;
-    const collectionRate = total > 0 ? Math.round((collected / total) * 100) : 0;
+
+    const totalFromFees = feeAgg._sum.amount || 0;
+    const paidFromFees = feePaidAgg._sum.amount || 0;
+
+    const totalFromInvoices = invAgg._sum.amount || 0;
+    const paidFromInvoices = invPaidAgg._sum.amount || 0;
+    const unpaidFromInvoices = invUnpaidAgg._sum.amount || 0;
+
+    const totalAssigned = totalFromFees + totalFromInvoices;
+    const totalPaid = paidFromFees + paidFromInvoices;
+    const totalOutstanding = unpaidFromInvoices + Math.max(0, totalFromFees - paidFromFees);
+    const pendingCount = pendingInvCount > 0 ? pendingInvCount : (totalFromFees > 0 ? 1 : 0);
+    const collectionPercent = totalAssigned > 0 ? Math.round((totalPaid / totalAssigned) * 100) : 0;
 
     const recent = await prisma.semesterFee.findMany({ where: { status: 'Paid' }, take: 10, orderBy: { updatedAt: 'desc' }, include: { student: true } });
     res.json({
-      totalFees: total, totalCollected: collected, totalPending: pending, collectionRate,
-      totalAssigned: total, totalPaid: collected, totalOutstanding: pending,
-      collectionPercent: collectionRate, pendingCount, totalStudents,
+      totalFees: totalAssigned, totalCollected: totalPaid, totalPending: totalOutstanding, collectionRate: collectionPercent,
+      totalAssigned, totalPaid, totalOutstanding,
+      collectionPercent, pendingCount, totalStudents,
       recentPayments: recent.map(r => ({ id: r.id, studentName: r.student?.fullName || '', amount: r.amount, status: r.status, date: r.updatedAt.toISOString() })),
     });
   } catch (err: any) {

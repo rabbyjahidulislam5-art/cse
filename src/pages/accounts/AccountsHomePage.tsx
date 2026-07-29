@@ -1,10 +1,14 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { DollarSign, TrendingUp, Users, Loader2 } from 'lucide-react';
+import { TrendingUp, Users, Loader2 } from 'lucide-react';
 import { Skeleton } from '@/components/ui/skeleton';
 import { getAccountsOverview, type GetAccountsOverviewOutputType } from '@/lib/api';
 import { PieChart, Pie, Cell, ResponsiveContainer } from 'recharts';
 import { motion } from 'framer-motion';
+
+const TakaIcon = ({ className = "w-6 h-6" }: { className?: string }) => (
+  <span className={`font-bold text-xl leading-none flex items-center justify-center select-none ${className}`}>৳</span>
+);
 
 export default function AccountsHomePage() {
   const navigate = useNavigate();
@@ -48,7 +52,7 @@ export default function AccountsHomePage() {
           className="rounded-2xl border border-border/60 bg-card p-6 text-left hover:border-primary/30 transition-all">
           <div className="flex items-center justify-between mb-4">
             <div className="w-12 h-12 rounded-xl bg-destructive/10 flex items-center justify-center">
-              <DollarSign className="w-6 h-6 text-destructive" />
+              <TakaIcon className="w-6 h-6 text-destructive" />
             </div>
             <span className="text-2xl font-bold text-foreground tabular">৳{(data?.totalOutstanding || 0).toLocaleString()}</span>
           </div>
@@ -60,7 +64,7 @@ export default function AccountsHomePage() {
       <div className="grid grid-cols-3 gap-3">
         {[
           { label: 'Total Assigned', value: `৳${(data?.totalAssigned || 0).toLocaleString()}`, icon: TrendingUp, color: 'text-primary' },
-          { label: 'Total Paid', value: `৳${(data?.totalPaid || 0).toLocaleString()}`, icon: DollarSign, color: 'text-[hsl(var(--chart-3))]' },
+          { label: 'Total Paid', value: `৳${(data?.totalPaid || 0).toLocaleString()}`, icon: TakaIcon, color: 'text-[hsl(var(--chart-3))]' },
           { label: 'Total Students', value: String(data?.totalStudents || 0), icon: Users, color: 'text-[hsl(var(--chart-4))]' },
         ].map((s, i) => (
           <motion.div key={s.label} initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.1 + i * 0.05 }}

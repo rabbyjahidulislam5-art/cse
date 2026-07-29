@@ -463,8 +463,10 @@ export const processFeeBatchApproval = (input: Record<string, unknown>) =>
 export const executeFeePushBatch = (batchId: string) =>
   apiCall<{ success: boolean; message: string; pushedCount: number }>('/accounts/fee-import/push', { batchId });
 
-export const getAccountsLedger = (studentId?: string) =>
-  apiCall<{ entries: any[] }>('/accounts/ledger', studentId ? { studentId } : {});
+export const getAccountsLedger = (input?: { studentId?: string; type?: string } | string) => {
+  if (typeof input === 'string') return apiCall<{ entries: any[] }>('/accounts/ledger', { studentId: input });
+  return apiCall<{ entries: any[] }>('/accounts/ledger', input || {});
+};
 
 
 // Shop endpoints

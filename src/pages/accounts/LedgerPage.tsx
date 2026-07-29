@@ -9,11 +9,15 @@ export default function LedgerPage() {
   const [entries, setEntries] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchStudentId, setSearchStudentId] = useState('');
+  const [selectedType, setSelectedType] = useState<string>('ALL');
 
   const fetchLedger = async () => {
     setLoading(true);
     try {
-      const res = await getAccountsLedger(searchStudentId || undefined);
+      const res = await getAccountsLedger({
+        studentId: searchStudentId || undefined,
+        type: selectedType !== 'ALL' ? selectedType : undefined
+      });
       setEntries(res.entries || []);
     } catch (e: any) {
       toast.error(e.message || 'Failed to load ledger entries');
@@ -24,7 +28,7 @@ export default function LedgerPage() {
 
   useEffect(() => {
     fetchLedger();
-  }, []);
+  }, [selectedType]);
 
   return (
     <div className="container mx-auto px-4 sm:px-6 py-6 max-w-6xl space-y-6">
@@ -44,21 +48,33 @@ export default function LedgerPage() {
       </div>
 
       {/* Filter Bar */}
-      <div className="glass-strong p-4 rounded-xl flex items-center gap-3 border border-border/50">
-        <div className="relative flex-1">
+      <div className="glass-strong p-4 rounded-xl flex flex-col sm:flex-row items-center gap-3 border border-border/50">
+        <div className="relative flex-1 w-full">
           <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
           <Input
-            aria-label="Search by Student ID"
-            placeholder="Search by Student ID e.g. STU-2026-001"
+            aria-label="Search by Student ID or Name"
+            placeholder="Search by Student ID or Name e.g. STU-2026-001"
             value={searchStudentId}
             onChange={e => setSearchStudentId(e.target.value)}
             onKeyDown={e => e.key === 'Enter' && fetchLedger()}
             className="pl-9 bg-accent/40 border-border/60"
           />
         </div>
-        <Button onClick={fetchLedger} className="gap-1 font-semibold">
-          <Filter className="w-4 h-4" /> Filter Ledger
-        </Button>
+        <div className="flex items-center gap-2 w-full sm:w-auto">
+          <select
+            value={selectedType}
+            onChange={e => setSelectedType(e.target.value)}
+            aria-label="Filter by Entry Type"
+            className="h-9 px-3 bg-accent/40 border border-border/60 text-foreground text-xs rounded-md focus:outline-none focus:ring-1 focus:ring-primary/50"
+          >
+            <option value="ALL" className="bg-background text-foreground">All Entry Types</option>
+            <option value="DEBIT_DUE" className="bg-background text-foreground">Debit Dues (৳)</option>
+            <option value="CREDIT_PAYMENT" className="bg-background text-foreground">Credit Payments (৳)</option>
+          </select>
+          <Button onClick={fetchLedger} className="gap-1 font-semibold">
+            <Filter className="w-4 h-4" /> Filter
+          </Button>
+        </div>
       </div>
 
       {/* Ledger Table */}

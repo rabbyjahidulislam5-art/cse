@@ -587,9 +587,21 @@ router.post('/accounts/fee-import/push', async (req: AuthRequest, res: Response)
 
 router.get('/accounts/ledger', async (req: AuthRequest, res: Response): Promise<void> => {
   try {
-    const { studentId } = req.query;
+    const { studentId, type } = req.query;
+    const where: any = {};
+    if (studentId) {
+      const q = String(studentId).trim();
+      where.OR = [
+        { student: { studentId: { contains: q, mode: 'insensitive' } } },
+        { student: { fullName: { contains: q, mode: 'insensitive' } } },
+        { entryNumber: { contains: q, mode: 'insensitive' } }
+      ];
+    }
+    if (type && type !== 'ALL') {
+      where.type = String(type);
+    }
     const entries = await prisma.ledgerEntry.findMany({
-      where: studentId ? { student: { studentId: String(studentId) } } : {},
+      where,
       include: { student: { select: { fullName: true, studentId: true, department: true } }, invoice: true },
       orderBy: { createdAt: 'desc' },
       take: 100,
@@ -604,9 +616,21 @@ router.get('/accounts/ledger', async (req: AuthRequest, res: Response): Promise<
 // POST version for apiCall compatibility (frontend apiCall always POSTs)
 router.post('/accounts/ledger', async (req: AuthRequest, res: Response): Promise<void> => {
   try {
-    const { studentId } = req.body;
+    const { studentId, type } = req.body;
+    const where: any = {};
+    if (studentId) {
+      const q = String(studentId).trim();
+      where.OR = [
+        { student: { studentId: { contains: q, mode: 'insensitive' } } },
+        { student: { fullName: { contains: q, mode: 'insensitive' } } },
+        { entryNumber: { contains: q, mode: 'insensitive' } }
+      ];
+    }
+    if (type && type !== 'ALL') {
+      where.type = String(type);
+    }
     const entries = await prisma.ledgerEntry.findMany({
-      where: studentId ? { student: { studentId: String(studentId) } } : {},
+      where,
       include: { student: { select: { fullName: true, studentId: true, department: true } }, invoice: true },
       orderBy: { createdAt: 'desc' },
       take: 100,
