@@ -9,7 +9,7 @@ import ExcelJS from 'exceljs';
 import prisma from '../../lib/prisma';
 import { authMiddleware, AuthRequest } from '../../lib/auth';
 import { validateAttachment, sanitizeFilename, sha256Hex, scanFile, MAX_ATTACHMENT_BYTES } from '../../lib/disputes/fileValidation';
-import { processWalletRefund, recordManualAdjustment } from '../../lib/disputes/refundLedger';
+import { processWalletRefund, processOriginalPaymentRefund, recordManualAdjustment } from '../../lib/disputes/refundLedger';
 import { notify } from '../../lib/disputes/notify';
 import { emitToDisputeRoom } from '../../lib/disputes/realtimeBus';
 
@@ -488,6 +488,11 @@ export async function finalizeRefund(opts: {
         refundId: opts.refund.id, transactionId: opts.transactionId, disputeId: opts.refund.disputeId,
         recipientUserId: opts.recipientUserId, amount: opts.refund.amount, processedById: opts.processedById, ipAddress: opts.ipAddress,
       });
+    } else if (opts.refund.method === 'OriginalPayment') {
+      await processOriginalPaymentRefund({
+        refundId: opts.refund.id, transactionId: opts.transactionId, disputeId: opts.refund.disputeId,
+        amount: opts.refund.amount, processedById: opts.processedById, notes: opts.notes, ipAddress: opts.ipAddress,
+      });
     } else {
       await recordManualAdjustment({
         refundId: opts.refund.id, transactionId: opts.transactionId, disputeId: opts.refund.disputeId,
@@ -496,7 +501,7 @@ export async function finalizeRefund(opts: {
     }
   } catch (e: any) {
     await prisma.refund.update({ where: { id: opts.refund.id }, data: { status: 'Rejected', notes: `Auto-failed: ${e.message}` } });
-    return { ok: false, message: e.message === 'WALLET_NOT_FOUND' ? 'Payer has no wallet on file.' : 'Refund could not be processed.' };
+    return { ok: false, message: e.message === 'WALLET_NOT_FOUND' ? 'Payer has no wallet on file.' : (e.message || 'Refund could not be processed.') };
   }
 
   await changeDisputeStatus(opts.refund.disputeId, 'Refunded', opts.processedById, `Refunded ৳${opts.refund.amount.toLocaleString()} (${opts.refund.method})`);

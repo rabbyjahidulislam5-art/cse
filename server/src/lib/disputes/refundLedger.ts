@@ -1,4 +1,5 @@
 import prisma from '../prisma';
+import { callSslCommerzRefund } from '../sslcommerz';
 
 interface ProcessWalletRefundInput {
   refundId: string;
@@ -73,6 +74,60 @@ export async function processWalletRefund(input: ProcessWalletRefundInput): Prom
     });
 
     return { reversalTransactionId: reversalTx.id, newBalance: balanceAfter };
+  });
+}
+
+interface ProcessOriginalPaymentRefundInput {
+  refundId: string;
+  transactionId: string;
+  disputeId: string;
+  amount: number;
+  processedById: string;
+  notes?: string;
+  ipAddress?: string;
+}
+
+// "Refund to Original Payment" — actually calls SSLCommerz's refund API (using the bank_tran_id
+// captured when the payment was verified) instead of just logging a note. Only applies to
+// transactions that were genuinely paid through SSLCommerz; anything else should use WalletCredit
+// or ManualAdjustment. Throws (never marks the Refund as Processed) when the transaction wasn't a
+// gateway payment or SSLCommerz itself rejects the refund, so finalizeRefund's catch marks the
+// Refund Rejected with the real reason instead of silently pretending it succeeded.
+export async function processOriginalPaymentRefund(input: ProcessOriginalPaymentRefundInput): Promise<void> {
+  const { refundId, transactionId, disputeId, amount, processedById, notes, ipAddress } = input;
+
+  const tx = await prisma.transaction.findUnique({ where: { id: transactionId } });
+  if (!tx) throw new Error('Original transaction not found.');
+  if (tx.gateway !== 'SSLCommerz' || !tx.bankTxnId) {
+    throw new Error('This transaction was not paid via SSLCommerz — use Wallet Credit or Manual Adjustment instead.');
+  }
+
+  const result = await callSslCommerzRefund({
+    bankTranId: tx.bankTxnId,
+    amount,
+    remarks: notes || `Dispute refund for transaction ${tx.reference}`,
+  });
+  if (!result.success) throw new Error(result.message);
+
+  await prisma.$transaction(async (txClient) => {
+    await txClient.refund.update({
+      where: { id: refundId },
+      data: {
+        status: 'Processed',
+        processedAt: new Date(),
+        notes: `SSLCommerz refund ref: ${result.refundRefId || 'N/A'} — ${result.message}${notes ? ` — ${notes}` : ''}`,
+      },
+    });
+    await txClient.auditLog.create({
+      data: {
+        action: 'Dispute Refund Processed (SSLCommerz)',
+        actorId: processedById,
+        entityType: 'Dispute',
+        entityId: disputeId,
+        details: `Refunded ৳${amount} to original payment method via SSLCommerz for transaction ${transactionId} (ref: ${result.refundRefId || 'N/A'})`,
+        ipAddress,
+      },
+    });
   });
 }
 
