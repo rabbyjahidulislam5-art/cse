@@ -161,46 +161,14 @@ export default function FeeWizardPage() {
     }
   };
 
-  // Step 3 -> Step 4: Submit for Approval
-  const handleReviewToApproval = async () => {
+  // Step 3 -> Step 4: Proceed to Fee Push
+  const handleReviewToPush = () => {
     if (!batchData) return;
-    try {
-      const res = await processFeeBatchApproval({
-        batchId: batchData.id,
-        action: 'SUBMIT_FOR_REVIEW',
-      });
-      setBatchData(res.batch);
-      setCurrentStep(4);
-      toast.success('Submitted for Maker-Checker-Approver review.');
-    } catch (e: any) {
-      toast.error(e.message);
-    }
+    setCurrentStep(4);
+    toast.success('Proceeding to Fee Push.');
   };
 
-  // Step 4 Approval Actions
-  const handleApprovalAction = async (action: 'VERIFY_BATCH' | 'APPROVE_BATCH' | 'REJECT_BATCH') => {
-    if (!batchData) return;
-    try {
-      const res = await processFeeBatchApproval({
-        batchId: batchData.id,
-        action,
-        reason: rejectionReason,
-      });
-      setBatchData(res.batch);
-      if (action === 'APPROVE_BATCH') {
-        setCurrentStep(5);
-        toast.success('Batch approved! Ready for Fee Push.');
-      } else if (action === 'REJECT_BATCH') {
-        toast.error('Batch rejected by Approver.');
-      } else {
-        toast.success('Batch verified by Checker.');
-      }
-    } catch (e: any) {
-      toast.error(e.message || 'Approval action failed');
-    }
-  };
-
-  // Step 5: Execute Fee Push
+  // Step 4: Execute Fee Push
   const [pushError, setPushError] = useState<string | null>(null);
 
   const handleExecutePush = async () => {
@@ -210,7 +178,7 @@ export default function FeeWizardPage() {
     try {
       const res = await executeFeePushBatch(batchData.id);
       setPushResult(res);
-      setCurrentStep(6);
+      setCurrentStep(5);
       toast.success(res.message || 'Fee push execution completed!');
     } catch (e: any) {
       const errMsg = e.message || 'Push failed';
@@ -225,9 +193,8 @@ export default function FeeWizardPage() {
     { num: 1, label: 'Import Excel' },
     { num: 2, label: 'Validate' },
     { num: 3, label: 'Review' },
-    { num: 4, label: 'Approve' },
-    { num: 5, label: 'Push Fees' },
-    { num: 6, label: 'Completed' },
+    { num: 4, label: 'Push Fees' },
+    { num: 5, label: 'Completed' },
   ];
 
   return (
@@ -235,7 +202,7 @@ export default function FeeWizardPage() {
       {/* Header */}
       <div className="mb-8 text-center sm:text-left">
         <h1 className="text-2xl font-bold tracking-tight text-foreground">Semester Fee Management</h1>
-        <p className="text-sm text-muted-foreground mt-0.5">Automated File Validation & Maker-Checker-Approver Fee Push</p>
+        <p className="text-sm text-muted-foreground mt-0.5">Automated File Validation & Direct Fee Push</p>
       </div>
 
       {/* Step Wizard Progress Bar */}
@@ -326,11 +293,6 @@ export default function FeeWizardPage() {
             </div>
           </div>
 
-          <div>
-            <Label className="text-xs font-semibold text-muted-foreground">Auto Generated Fee Label</Label>
-            <Input value={autoFeeLabel} readOnly className="mt-1.5 bg-accent/30 font-semibold text-primary" />
-          </div>
-
           {/* File Upload Zone */}
           <div>
             <Label className="text-xs font-semibold text-muted-foreground">Upload Excel / CSV File *</Label>
@@ -349,17 +311,32 @@ export default function FeeWizardPage() {
                 </div>
               ) : (
                 <div>
-                  <p className="font-semibold text-foreground text-sm">Click or drag & drop Excel / CSV file here</p>
-                  <p className="text-xs text-muted-foreground mt-1">Supports .xlsx and .csv files up to 10MB</p>
+                  <p className="font-semibold text-foreground text-sm">Drop your student fee file here or click to browse</p>
+                  <p className="text-xs text-muted-foreground mt-1">Supports Excel (.xlsx) and CSV files</p>
                 </div>
               )}
             </div>
+            
+            <div className="flex items-center justify-between mt-3 text-xs text-muted-foreground">
+              <button onClick={downloadFeeImportTemplate} type="button" className="text-primary hover:underline font-semibold flex items-center gap-1">
+                <Download className="w-3.5 h-3.5" /> Download Standard Template (.xlsx)
+              </button>
+              <div className="flex items-center gap-2">
+                <button onClick={() => handleExportAdvising('excel')} type="button" className="text-xs text-muted-foreground hover:text-foreground">Excel</button>
+                <span>·</span>
+                <button onClick={() => handleExportAdvising('csv')} type="button" className="text-xs text-muted-foreground hover:text-foreground">CSV</button>
+                <span>·</span>
+                <button onClick={() => handleExportAdvising('pdf')} type="button" className="text-xs text-muted-foreground hover:text-foreground">PDF</button>
+              </div>
+            </div>
           </div>
 
-          <Button onClick={handleValidateFile} disabled={!selectedFile || validating} className="w-full h-12 text-base font-semibold gap-2">
-            {validating ? <RefreshCw className="w-5 h-5 animate-spin" /> : <ArrowRight className="w-5 h-5" />}
-            {validating ? 'Validating File Data...' : 'Validate File'}
-          </Button>
+          <div className="flex items-center justify-end pt-4 border-t border-border/50">
+            <Button onClick={handleValidateFile} disabled={validating || !selectedFile} className="h-11 px-8 font-semibold gap-2">
+              {validating ? <RefreshCw className="w-4 h-4 animate-spin" /> : <ShieldCheck className="w-4 h-4" />}
+              {validating ? 'Validating File...' : 'Validate File'}
+            </Button>
+          </div>
         </div>
       )}
 
@@ -368,59 +345,88 @@ export default function FeeWizardPage() {
         <div className="glass-strong rounded-2xl p-6 space-y-6">
           <div className="flex items-center justify-between pb-4 border-b border-border/50">
             <div>
-              <h2 className="text-lg font-bold flex items-center gap-2"><CheckCircle2 className="w-5 h-5 text-emerald-400" /> Step 2: Import File Validation Report</h2>
-              <p className="text-xs text-muted-foreground mt-0.5">{department} • {program} • {semester} {academicYear}</p>
+              <h2 className="text-lg font-bold flex items-center gap-2"><CheckCircle2 className="w-5 h-5 text-emerald-400" /> Step 2: Automated Validation Results</h2>
+              <p className="text-xs text-muted-foreground mt-0.5">Department: {department} · Program: {program} · Semester: {semester} {academicYear}</p>
             </div>
-            <Button variant="outline" size="sm" onClick={() => setCurrentStep(1)} className="gap-1">
-              <ArrowLeft className="w-4 h-4" /> Re-upload File
-            </Button>
           </div>
 
-          {/* Summary Row Cards */}
-          <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
-            <div className="bg-accent/40 p-4 rounded-xl border border-border/50 text-center">
+          {/* KPI Cards */}
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+            <div className="bg-accent/40 p-4 rounded-xl border border-border/50">
               <p className="text-xs text-muted-foreground font-semibold">Total Rows</p>
-              <p className="text-xl font-bold text-foreground mt-1">{validationResult.summary.totalRows}</p>
+              <p className="text-2xl font-black text-foreground mt-1">{validationResult.summary.totalRows}</p>
             </div>
-
-            <div className="bg-emerald-500/10 p-4 rounded-xl border border-emerald-500/20 text-center">
+            <div className="bg-emerald-500/10 p-4 rounded-xl border border-emerald-500/20">
               <p className="text-xs text-emerald-400 font-semibold">Valid Rows</p>
-              <p className="text-xl font-bold text-emerald-400 mt-1">{validationResult.summary.validRows}</p>
+              <p className="text-2xl font-black text-emerald-400 mt-1">{validationResult.summary.validRows}</p>
             </div>
-
-            <div className="bg-rose-500/10 p-4 rounded-xl border border-rose-500/20 text-center">
-              <p className="text-xs text-rose-400 font-semibold">Invalid Rows</p>
-              <p className="text-xl font-bold text-rose-400 mt-1">{validationResult.summary.invalidRows}</p>
+            <div className="bg-destructive/10 p-4 rounded-xl border border-destructive/20">
+              <p className="text-xs text-destructive font-semibold">Error Rows</p>
+              <p className="text-2xl font-black text-destructive mt-1">{validationResult.summary.errorRows || 0}</p>
             </div>
-
-            <div className="bg-amber-500/10 p-4 rounded-xl border border-amber-500/20 text-center">
-              <p className="text-xs text-amber-400 font-semibold">Duplicates</p>
-              <p className="text-xl font-bold text-amber-400 mt-1">{validationResult.summary.duplicateRows}</p>
-            </div>
-
-            <div className="bg-primary/10 p-4 rounded-xl border border-primary/20 text-center col-span-2 sm:col-span-1">
+            <div className="bg-primary/10 p-4 rounded-xl border border-primary/20">
               <p className="text-xs text-primary font-semibold">Total Amount</p>
-              <p className="text-xl font-bold text-primary mt-1">৳{validationResult.summary.totalAmount.toLocaleString()}</p>
+              <p className="text-2xl font-black text-primary mt-1">৳{(validationResult.summary.totalAmount || 0).toLocaleString()}</p>
             </div>
           </div>
 
-          {/* Warnings List if any */}
-          {validationResult.summary.warnings.length > 0 && (
-            <div className="bg-amber-500/10 border border-amber-500/30 rounded-xl p-4 space-y-2">
-              <h4 className="text-xs font-bold text-amber-400 flex items-center gap-1.5"><AlertTriangle className="w-4 h-4" /> Validation Warnings & Errors</h4>
-              <ul className="text-xs space-y-1 text-amber-200/90 max-h-32 overflow-y-auto">
-                {validationResult.summary.warnings.map((w: string, idx: number) => (
-                  <li key={idx}>• {w}</li>
+          {/* Validation Warnings/Errors */}
+          {validationResult.errors && validationResult.errors.length > 0 && (
+            <div className="bg-destructive/10 border border-destructive/30 p-4 rounded-xl space-y-2">
+              <h4 className="font-bold text-xs text-destructive uppercase tracking-wider flex items-center gap-1.5">
+                <AlertTriangle className="w-4 h-4" /> Validation Issues Found ({validationResult.errors.length})
+              </h4>
+              <div className="max-h-40 overflow-y-auto space-y-1 text-xs text-destructive font-mono">
+                {validationResult.errors.map((err: any, idx: number) => (
+                  <p key={idx}>Row {err.row}: {err.error} (Student: {err.studentId || 'N/A'})</p>
                 ))}
-              </ul>
+              </div>
             </div>
           )}
 
-          {/* Actions */}
+          {/* Items Preview Table */}
+          <div className="border border-border/60 rounded-xl overflow-hidden">
+            <div className="max-h-72 overflow-y-auto">
+              <table className="w-full text-xs text-left">
+                <thead className="bg-accent/60 text-muted-foreground uppercase tracking-wider font-semibold sticky top-0">
+                  <tr>
+                    <th className="p-3">#</th>
+                    <th className="p-3">Student ID</th>
+                    <th className="p-3">Name</th>
+                    <th className="p-3">Tuition Fee</th>
+                    <th className="p-3">Lab Fee</th>
+                    <th className="p-3">Total Fee</th>
+                    <th className="p-3">Status</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-border/40">
+                  {validationResult.items?.map((item: any, idx: number) => (
+                    <tr key={idx} className="hover:bg-accent/20 transition-colors">
+                      <td className="p-3 text-muted-foreground">{idx + 1}</td>
+                      <td className="p-3 font-mono font-semibold text-foreground">{item.studentId}</td>
+                      <td className="p-3 text-foreground">{item.studentName}</td>
+                      <td className="p-3 font-mono">৳{(item.tuition || 0).toLocaleString()}</td>
+                      <td className="p-3 font-mono text-muted-foreground">৳{(item.lab || 0).toLocaleString()}</td>
+                      <td className="p-3 font-mono font-bold text-primary">৳{(item.total || 0).toLocaleString()}</td>
+                      <td className="p-3">
+                        {item.valid ? (
+                          <span className="px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-400 font-semibold text-[10px]">Valid</span>
+                        ) : (
+                          <span className="px-2 py-0.5 rounded-full bg-destructive/20 text-destructive font-semibold text-[10px]">{item.error || 'Invalid'}</span>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
           <div className="flex items-center justify-between pt-4 border-t border-border/50">
             <Button variant="ghost" onClick={() => setCurrentStep(1)}>Back</Button>
-            <Button onClick={handleCreateBatch} disabled={submitting} className="h-11 px-8 font-semibold gap-2">
-              {submitting ? 'Creating Batch...' : 'Proceed to Review'} <ArrowRight className="w-4 h-4" />
+            <Button onClick={handleCreateBatch} disabled={submitting || validationResult.summary.validRows === 0} className="h-11 px-8 font-semibold gap-2">
+              {submitting ? <RefreshCw className="w-4 h-4 animate-spin" /> : <ArrowRight className="w-4 h-4" />}
+              {submitting ? 'Creating Batch...' : 'Proceed to Review'}
             </Button>
           </div>
         </div>
@@ -431,74 +437,66 @@ export default function FeeWizardPage() {
         <div className="glass-strong rounded-2xl p-6 space-y-6">
           <div className="flex items-center justify-between pb-4 border-b border-border/50">
             <div>
-              <h2 className="text-lg font-bold flex items-center gap-2"><Edit3 className="w-5 h-5 text-primary" /> Step 3: Accounts Fee Review Table</h2>
-              <p className="text-xs text-muted-foreground mt-0.5">Batch #{batchData.batchNumber} • Accounts officers can adjust amounts, labels & due dates</p>
-            </div>
-            <div className="text-right">
-              <p className="text-xs text-muted-foreground">Total Batch Amount</p>
-              <p className="text-lg font-bold text-primary">৳{batchData.totalAmount.toLocaleString()}</p>
+              <h2 className="text-lg font-bold flex items-center gap-2"><Edit3 className="w-5 h-5 text-primary" /> Step 3: Review & Adjust Fee Batch</h2>
+              <p className="text-xs text-muted-foreground mt-0.5">Batch Code: <span className="font-mono text-foreground font-semibold">{batchData.batchNumber}</span> · Total Students: {batchData.items?.length || 0}</p>
             </div>
           </div>
 
           {/* Data Table */}
-          <div className="overflow-x-auto rounded-xl border border-border/60">
-            <table className="w-full text-xs text-left">
-              <thead className="bg-accent/60 text-muted-foreground uppercase tracking-wider font-semibold">
-                <tr>
-                  <th className="p-3">Student ID</th>
-                  <th className="p-3">Name & Email</th>
-                  <th className="p-3">Department</th>
-                  <th className="p-3">Fee Label</th>
-                  <th className="p-3">Due Date</th>
-                  <th className="p-3 text-right">Amount (৳)</th>
-                  <th className="p-3 text-center">Status</th>
-                  <th className="p-3 text-center">Action</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-border/40">
-                {batchData.items.map((item: any) => (
-                  <tr key={item.id} className="hover:bg-accent/20 transition-colors">
-                    <td className="p-3 font-semibold text-foreground">{item.studentId}</td>
-                    <td className="p-3">
-                      <p className="font-medium text-foreground">{item.studentName}</p>
-                      <p className="text-[10px] text-muted-foreground">{item.studentEmail}</p>
-                    </td>
-                    <td className="p-3 text-muted-foreground">{item.department}</td>
-                    <td className="p-3 font-medium text-primary">{item.feeLabel}</td>
-                    <td className="p-3 text-muted-foreground">{item.dueDate || 'N/A'}</td>
-                    <td className="p-3 text-right font-bold text-foreground">৳{item.finalAmount.toLocaleString()}</td>
-                    <td className="p-3 text-center">
-                      <span className={`px-2 py-0.5 rounded-full font-bold text-[10px] ${item.status === 'Valid' ? 'bg-emerald-500/10 text-emerald-400' : 'bg-rose-500/10 text-rose-400'}`}>
-                        {item.status}
-                      </span>
-                    </td>
-                    <td className="p-3 text-center">
-                      <Button size="sm" variant="ghost" className="h-7 px-2 text-xs gap-1" onClick={() => startEditingItem(item)}>
-                        <Edit3 className="w-3.5 h-3.5 text-primary" /> Edit
-                      </Button>
-                    </td>
+          <div className="border border-border/60 rounded-xl overflow-hidden">
+            <div className="max-h-96 overflow-y-auto">
+              <table className="w-full text-xs text-left">
+                <thead className="bg-accent/60 text-muted-foreground uppercase tracking-wider font-semibold sticky top-0">
+                  <tr>
+                    <th className="p-3">Student ID & Name</th>
+                    <th className="p-3">Fee Label</th>
+                    <th className="p-3">Amount (৳)</th>
+                    <th className="p-3">Waiver (৳)</th>
+                    <th className="p-3">Final Amount</th>
+                    <th className="p-3">Due Date</th>
+                    <th className="p-3 text-right">Actions</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
+                </thead>
+                <tbody className="divide-y divide-border/40">
+                  {batchData.items.map((item: any) => (
+                    <tr key={item.id} className="hover:bg-accent/20 transition-colors">
+                      <td className="p-3">
+                        <p className="font-mono font-bold text-foreground">{item.studentId}</p>
+                        <p className="text-[11px] text-muted-foreground">{item.studentName}</p>
+                      </td>
+                      <td className="p-3 text-muted-foreground font-medium">{item.feeLabel || autoFeeLabel}</td>
+                      <td className="p-3 font-mono">৳{(item.amount || 0).toLocaleString()}</td>
+                      <td className="p-3 font-mono text-emerald-400">৳{(item.waiverAdjustment || 0).toLocaleString()}</td>
+                      <td className="p-3 font-mono font-bold text-primary">৳{(item.finalAmount || 0).toLocaleString()}</td>
+                      <td className="p-3 text-muted-foreground">{item.dueDate || '2026-08-30'}</td>
+                      <td className="p-3 text-right">
+                        <Button size="sm" variant="ghost" onClick={() => startEditingItem(item)} className="h-8 px-2 text-primary hover:bg-primary/10">
+                          <Edit3 className="w-3.5 h-3.5 mr-1" /> Adjust
+                        </Button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           </div>
 
-          {/* Edit Dialog Drawer Inline */}
+          {/* Inline Edit Drawer */}
           {editingItemId && (
-            <div className="bg-accent/30 p-4 rounded-xl border border-primary/40 space-y-4">
-              <h4 className="font-bold text-xs text-primary uppercase tracking-wider flex items-center gap-1.5"><Edit3 className="w-4 h-4" /> Edit Fee Item</h4>
+            <div className="bg-accent/40 p-5 rounded-xl border border-primary/30 space-y-4 animate-in fade-in slide-in-from-top-2 duration-200">
+              <h4 className="font-bold text-xs text-primary uppercase tracking-wider flex items-center gap-1.5"><Edit3 className="w-4 h-4" /> Edit Student Fee Adjustment</h4>
               <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
                 <div>
-                  <Label className="text-[10px] text-muted-foreground">Tuition Amount (৳)</Label>
-                  <Input value={editForm.amount} onChange={e => setEditForm({ ...editForm, amount: e.target.value })} className="mt-1 h-9 text-xs" />
+                  <Label className="text-[10px] text-muted-foreground">Fee Amount (৳)</Label>
+                  <Input value={editForm.amount} onChange={e => setEditForm({ ...editForm, amount: e.target.value })} className="mt-1 h-9 text-xs font-mono" />
                 </div>
                 <div>
-                  <Label className="text-[10px] text-muted-foreground">Late Fee (৳)</Label>
-                  <Input value={editForm.lateFee} onChange={e => setEditForm({ ...editForm, lateFee: e.target.value })} className="mt-1 h-9 text-xs" />
+                  <Label className="text-[10px] text-muted-foreground">Fee Label</Label>
+                  <Input value={editForm.feeLabel} onChange={e => setEditForm({ ...editForm, feeLabel: e.target.value })} className="mt-1 h-9 text-xs" />
                 </div>
                 <div>
                   <Label className="text-[10px] text-muted-foreground">Waiver Adj. (৳)</Label>
-                  <Input value={editForm.waiverAdjustment} onChange={e => setEditForm({ ...editForm, waiverAdjustment: e.target.value })} className="mt-1 h-9 text-xs" />
+                  <Input value={editForm.waiverAdjustment} onChange={e => setEditForm({ ...editForm, waiverAdjustment: e.target.value })} className="mt-1 h-9 text-xs font-mono" />
                 </div>
                 <div>
                   <Label className="text-[10px] text-muted-foreground">Due Date</Label>
@@ -515,114 +513,25 @@ export default function FeeWizardPage() {
 
           <div className="flex items-center justify-between pt-4 border-t border-border/50">
             <Button variant="ghost" onClick={() => setCurrentStep(2)}>Back</Button>
-            <Button onClick={handleReviewToApproval} className="h-11 px-8 font-semibold gap-2">
-              Submit for Maker-Checker Approval <ArrowRight className="w-4 h-4" />
-            </Button>
-          </div>
-        </div>
-      )}
-
-      {/* ─── STEP 4: APPROVAL WORKFLOW ─── */}
-      {currentStep === 4 && batchData && (
-        <div className="glass-strong rounded-2xl p-6 space-y-6">
-          <div className="flex items-center justify-between pb-4 border-b border-border/50">
-            <div>
-              <h2 className="text-lg font-bold flex items-center gap-2"><ShieldCheck className="w-5 h-5 text-amber-400" /> Step 4: Maker / Checker / Approver Approval Stage</h2>
-              <p className="text-xs text-muted-foreground mt-0.5">Approval is strictly enforced before Fee Push is unlocked</p>
-            </div>
-
-            {/* Role Switcher Demo */}
-            <div className="flex items-center gap-1 bg-accent/40 p-1 rounded-xl border border-border/50">
-              <span className="text-[10px] font-semibold text-muted-foreground px-2">Role:</span>
-              {(['Maker', 'Checker', 'Approver'] as const).map(r => (
-                <button key={r} onClick={() => setUserRole(r)}
-                  className={`px-3 py-1 rounded-lg text-xs font-semibold transition-all ${userRole === r ? 'bg-primary text-primary-foreground shadow-md' : 'text-muted-foreground'}`}>
-                  {r}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            <div className={`p-4 rounded-xl border ${batchData.status === 'Draft' || batchData.status === 'Validated' ? 'border-primary bg-primary/5' : 'border-border/50 bg-accent/20'}`}>
-              <h4 className="font-bold text-xs text-foreground uppercase tracking-wider">1. Maker Stage</h4>
-              <p className="text-xs text-muted-foreground mt-1">Uploaded & Initialized</p>
-              <p className="text-xs font-semibold text-emerald-400 mt-3 flex items-center gap-1"><CheckCircle2 className="w-3.5 h-3.5" /> Completed</p>
-            </div>
-
-            <div className={`p-4 rounded-xl border ${batchData.status === 'PendingApproval' ? 'border-amber-400 bg-amber-500/5' : 'border-border/50 bg-accent/20'}`}>
-              <h4 className="font-bold text-xs text-foreground uppercase tracking-wider">2. Checker Stage</h4>
-              <p className="text-xs text-muted-foreground mt-1">Verification Check</p>
-              {batchData.checkerId ? (
-                <p className="text-xs font-semibold text-emerald-400 mt-3 flex items-center gap-1"><CheckCircle2 className="w-3.5 h-3.5" /> Verified</p>
-              ) : (
-                <p className="text-xs font-semibold text-amber-400 mt-3">Awaiting Verification</p>
-              )}
-            </div>
-
-            <div className={`p-4 rounded-xl border ${batchData.status === 'Approved' ? 'border-emerald-400 bg-emerald-500/5' : 'border-border/50 bg-accent/20'}`}>
-              <h4 className="font-bold text-xs text-foreground uppercase tracking-wider">3. Approver Stage</h4>
-              <p className="text-xs text-muted-foreground mt-1">Final Authorization</p>
-              {batchData.status === 'Approved' ? (
-                <p className="text-xs font-semibold text-emerald-400 mt-3 flex items-center gap-1"><CheckCircle2 className="w-3.5 h-3.5" /> Approved</p>
-              ) : (
-                <p className="text-xs font-semibold text-muted-foreground mt-3">Pending Final Sign-off</p>
-              )}
-            </div>
-          </div>
-
-          {/* Action buttons based on Role */}
-          <div className="bg-accent/30 p-6 rounded-xl border border-border/60 space-y-4">
-            <h4 className="font-bold text-xs text-foreground uppercase tracking-wider">Current User Role: <span className="text-primary">{userRole}</span></h4>
-
-            {userRole === 'Maker' && (
-              <p className="text-xs text-amber-400 font-medium">As Maker, your batch is submitted for review. Switch to Checker or Approver role to complete authorization.</p>
-            )}
-
-            {userRole === 'Checker' && (
-              <div className="flex items-center gap-3">
-                <Button onClick={() => handleApprovalAction('VERIFY_BATCH')} className="bg-amber-500 hover:bg-amber-600 font-semibold gap-2">
-                  <CheckCircle2 className="w-4 h-4" /> Verify Batch Details
-                </Button>
-              </div>
-            )}
-
-            {userRole === 'Approver' && (
-              <div className="flex items-center gap-3">
-                <Button onClick={() => handleApprovalAction('APPROVE_BATCH')} className="bg-emerald-500 hover:bg-emerald-600 text-white font-semibold gap-2">
-                  <CheckCircle2 className="w-4 h-4" /> Approve Batch for Fee Push
-                </Button>
-                <Button variant="destructive" onClick={() => handleApprovalAction('REJECT_BATCH')} className="font-semibold gap-2">
-                  <X className="w-4 h-4" /> Reject Batch
-                </Button>
-              </div>
-            )}
-          </div>
-
-          <div className="flex items-center justify-between pt-4 border-t border-border/50">
-            <Button variant="ghost" onClick={() => setCurrentStep(3)}>Back to Review</Button>
-            <Button onClick={() => setCurrentStep(5)} disabled={batchData.status !== 'Approved'} className="h-11 px-8 font-semibold gap-2">
+            <Button onClick={handleReviewToPush} className="h-11 px-8 font-semibold gap-2">
               Proceed to Fee Push <ArrowRight className="w-4 h-4" />
             </Button>
           </div>
         </div>
       )}
 
-      {/* ─── STEP 5: FEE PUSH EXECUTION ─── */}
-      {currentStep === 5 && batchData && (
+      {/* ─── STEP 4: FEE PUSH EXECUTION ─── */}
+      {currentStep === 4 && batchData && (
         <div className="glass-strong rounded-2xl p-6 space-y-6">
           <div className="flex items-center justify-between pb-4 border-b border-border/50">
             <div>
-              <h2 className="text-lg font-bold flex items-center gap-2"><Send className="w-5 h-5 text-primary" /> Step 5: Execute Fee Push to Student Wallet & Ledger</h2>
+              <h2 className="text-lg font-bold flex items-center gap-2"><Send className="w-5 h-5 text-primary" /> Step 4: Execute Fee Push to Student Wallet & Ledger</h2>
               <p className="text-xs text-muted-foreground mt-0.5">Automated creation of Invoices, Ledger Entries, Dues & Gateway Sessions</p>
             </div>
           </div>
 
           <div className="bg-primary/10 border border-primary/30 p-6 rounded-xl space-y-4">
             <h4 className="font-bold text-sm text-primary flex items-center gap-2"><CheckCircle2 className="w-4.5 h-4.5" /> Ready for Fee Push Execution</h4>
-            <p className="text-xs text-muted-foreground leading-relaxed">
-              Upon clicking <strong className="text-foreground">Execute Fee Push</strong>, system will automatically execute:
-            </p>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs text-muted-foreground">
               {['Create Formal Fee Invoices with Invoice Numbers', 'Create Double-Entry Ledger Debit Entries', 'Publish Semester Fee Due to Student App Cards', 'Initialize Locked Payment Gateway Sessions', 'Generate Accounts Audit Logs', 'Dispatch Student Email & In-App Notifications'].map((op, i) => (
                 <div key={i} className="flex items-center gap-2 bg-accent/40 p-2.5 rounded-lg">
@@ -634,7 +543,7 @@ export default function FeeWizardPage() {
           </div>
 
           <div className="flex items-center justify-between pt-4 border-t border-border/50">
-            <Button variant="ghost" onClick={() => setCurrentStep(4)}>Back</Button>
+            <Button variant="ghost" onClick={() => setCurrentStep(3)}>Back</Button>
             <Button onClick={handleExecutePush} disabled={pushing} className="h-12 px-10 text-base font-bold bg-gradient-to-r from-primary to-primary/80 hover:from-primary/90 hover:to-primary/70 shadow-lg shadow-primary/25 gap-2">
               {pushing ? <RefreshCw className="w-5 h-5 animate-spin" /> : <Send className="w-5 h-5" />}
               {pushing ? 'Pushing Fees to Students...' : 'Execute Fee Push'}
@@ -646,8 +555,8 @@ export default function FeeWizardPage() {
         </div>
       )}
 
-      {/* ─── STEP 6: COMPLETED STAGE ─── */}
-      {currentStep === 6 && pushResult && (
+      {/* ─── STEP 5: COMPLETED STAGE ─── */}
+      {currentStep === 5 && pushResult && (
         <div className="glass-strong rounded-2xl p-8 text-center max-w-2xl mx-auto space-y-6">
           <div className="w-16 h-16 rounded-full bg-emerald-500/20 text-emerald-400 flex items-center justify-center mx-auto shadow-xl shadow-emerald-500/10">
             <CheckCircle2 className="w-10 h-10" />
@@ -662,7 +571,6 @@ export default function FeeWizardPage() {
             <p className="flex justify-between text-muted-foreground"><span className="font-medium">Pushed Student Count:</span> <strong className="text-foreground">{pushResult.pushedCount}</strong></p>
             <p className="flex justify-between text-muted-foreground"><span className="font-medium">Fee Label:</span> <strong className="text-primary">{autoFeeLabel}</strong></p>
             <p className="flex justify-between text-muted-foreground"><span className="font-medium">Student App Status:</span> <strong className="text-emerald-400">Semester Fee Due Active</strong></p>
-            <p className="flex justify-between text-muted-foreground"><span className="font-medium">Payment Gateway State:</span> <strong className="text-emerald-400">Locked Amount Active</strong></p>
           </div>
 
           <div className="flex items-center justify-center gap-4 pt-4">
