@@ -74,7 +74,7 @@ export default function ShopLayout() {
   }, [user]);
   useNotificationSocket(() => setUnreadNotifs(c => c + 1));
 
-  if (isLoading || !user) return null;
+  if (isLoading || !user || (user as any).role !== 'Shop Staff') return null;
 
   return (
     <div className="min-h-screen bg-background flex flex-col">

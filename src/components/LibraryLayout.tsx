@@ -39,7 +39,7 @@ export default function LibraryLayout() {
   }, [user]);
   useDisputeSocket(() => fetchBadge());
 
-  if (isLoading || !user) return null;
+  if (isLoading || !user || (user as any).role !== 'Library') return null;
 
   return (
     <div className="min-h-screen bg-background flex flex-col">

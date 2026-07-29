@@ -4,6 +4,7 @@ import { GraduationCap, Eye, EyeOff, Lock, Mail, User, Phone, CheckCircle2, Aler
 import { GoogleLogin, type CredentialResponse } from '@react-oauth/google';
 import { toast } from 'sonner';
 import { getGoogleClientId, isValidGoogleClientId } from '@/lib/google-auth-config';
+import { getAuthToken, setAuthToken, decodeTokenUserId } from '@/lib/auth-token';
 import {
   Dialog,
   DialogContent,
@@ -16,6 +17,12 @@ import {
 import { Button } from '@/components/ui/button';
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:4000/api';
+
+// Module-scoped, not React state — api.ts (a plain fetch client, outside the component tree)
+// calls this on any 401 so the tab that actually hit the expired/invalid token logs itself out
+// and drops back to the login card. Each tab has its own JS module instance, so this never
+// reaches across tabs — a session expiring in one tab has zero effect on any other open tab.
+export const sessionEvents = { onExpire: () => {} };
 
 interface AuthUser {
   id: string;
@@ -231,10 +238,54 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const saved = localStorage.getItem('auth_token');
     const savedUser = localStorage.getItem('auth_user');
     if (saved && savedUser) {
+      setAuthToken(saved);
       setToken(saved);
       setUser(JSON.parse(savedUser));
     }
     setIsLoading(false);
+  }, []);
+
+  // The one deliberate, controlled cross-tab hook — everything else in this app is intentionally
+  // tab-isolated (route, history, modals, in-progress workflows). `storage` only fires in tabs
+  // OTHER than the one that made the change, which is exactly what we want here:
+  //   - Logout elsewhere (auth_token removed): the shared session actually ended — propagate it,
+  //     the same way Gmail/Facebook/banking apps log every open tab out when you sign out of one.
+  //   - A DIFFERENT account logs in elsewhere (auth_token set to a token with a different user id):
+  //     do NOT adopt it here — silently switching what account this tab is acting as, mid-workflow,
+  //     is the actual bug being fixed. This tab keeps its own session untouched.
+  //   - The SAME account's token changes elsewhere (re-login, refresh): safe to adopt — it's still
+  //     the same person's session, not an identity switch or a forced navigation.
+  useEffect(() => {
+    function onStorage(e: StorageEvent) {
+      // auth_token and auth_user always change together (see every call site above) — auth_token
+      // is treated as the single authoritative signal; the paired auth_user event is redundant.
+      if (e.key !== 'auth_token') return;
+      const currentId = decodeTokenUserId(getAuthToken());
+
+      if (!e.newValue) {
+        // Token removed elsewhere. Only end THIS tab's session if the token that was just removed
+        // is actually the account this tab is using — if a different account logged in on the
+        // other tab first and is now the one logging out, this tab's own session never adopted
+        // that account and was never actually ended.
+        const removedId = decodeTokenUserId(e.oldValue);
+        if (!currentId || removedId === currentId) {
+          setAuthToken(null);
+          setUser(null);
+          setToken(null);
+        }
+        return;
+      }
+
+      const incomingId = decodeTokenUserId(e.newValue);
+      if (currentId && incomingId && currentId !== incomingId) return; // different account — ignore
+
+      setAuthToken(e.newValue);
+      setToken(e.newValue);
+      const newUserRaw = localStorage.getItem('auth_user');
+      if (newUserRaw) { try { setUser(JSON.parse(newUserRaw)); } catch { /* ignore malformed */ } }
+    }
+    window.addEventListener('storage', onStorage);
+    return () => window.removeEventListener('storage', onStorage);
   }, []);
 
   // OTP countdown timer
@@ -254,10 +305,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const logout = useCallback((opts?: { returnTo?: string }) => {
     localStorage.removeItem('auth_token');
     localStorage.removeItem('auth_user');
+    setAuthToken(null);
     setUser(null);
     setToken(null);
     if (opts?.returnTo) window.location.href = opts.returnTo;
   }, []);
+
+  // Register this tab's session-expiry handler. See sessionEvents' comment above.
+  useEffect(() => {
+    sessionEvents.onExpire = () => {
+      logout();
+      toast.error('Your session has expired. Please sign in again.');
+    };
+    return () => { sessionEvents.onExpire = () => {}; };
+  }, [logout]);
 
   // Auto studentId calculation
   const computedStudentId = emailOrStudentId.includes('@')
@@ -303,6 +364,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setError('');
     try {
       const data = await safeAuthCall('/auth/login', { emailOrStudentId, password });
+      // This tab's own session works either way — "Remember Me" only controls whether it's
+      // *persisted* (so a later new tab/restart also picks it up), not whether this tab can use it.
+      setAuthToken(data.token);
       if (rememberMe) {
         localStorage.setItem('auth_token', data.token);
         localStorage.setItem('auth_user', JSON.stringify(data.user));
@@ -326,6 +390,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setError('');
     try {
       const data = await safeAuthCall('/auth/google', { credential: response.credential });
+      setAuthToken(data.token);
       localStorage.setItem('auth_token', data.token);
       localStorage.setItem('auth_user', JSON.stringify(data.user));
       setToken(data.token);
@@ -400,6 +465,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         otpId,
       });
 
+      setAuthToken(data.token);
       localStorage.setItem('auth_token', data.token);
       localStorage.setItem('auth_user', JSON.stringify(data.user));
       setToken(data.token);
@@ -462,6 +528,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       // already succeeded at this point, so a failure here is a sign-in issue, not a reset failure.
       try {
         const loginData = await safeAuthCall('/auth/login', { emailOrStudentId, password });
+        setAuthToken(loginData.token);
         if (rememberMe) {
           localStorage.setItem('auth_token', loginData.token);
           localStorage.setItem('auth_user', JSON.stringify(loginData.user));

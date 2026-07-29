@@ -1,5 +1,6 @@
 import { useEffect, useRef } from 'react';
 import { io, type Socket } from 'socket.io-client';
+import { getAuthToken } from './auth-token';
 
 const SOCKET_URL = (import.meta.env.VITE_API_URL || 'http://localhost:4000/api').replace(/\/api\/?$/, '');
 
@@ -7,8 +8,13 @@ let socket: Socket | null = null;
 
 // Single shared connection for the whole app — every layout/page that needs realtime just calls
 // this again and gets the same live socket, reference-counted by React's effect cleanup.
+//
+// Reads this tab's own in-memory token (see auth-token.ts), not localStorage directly — a fresh
+// localStorage read here would mean a login/logout in another tab could reconnect this tab's
+// socket under a different account's identity, silently swapping whose notifications/dispute
+// events this tab receives.
 export function getSocket(): Socket | null {
-  const token = localStorage.getItem('auth_token');
+  const token = getAuthToken();
   if (!token) return null;
   if (socket?.connected || socket?.active) return socket;
   socket = io(SOCKET_URL, { auth: { token }, transports: ['websocket', 'polling'] });

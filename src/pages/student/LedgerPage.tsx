@@ -68,7 +68,7 @@ export default function LedgerPage() {
         <div className="flex flex-col sm:flex-row gap-3 mb-6">
           <div className="relative flex-1">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-            <Input placeholder="Search transactions..." value={search} onChange={(e) => { setSearch(e.target.value); debouncedSearch(e.target.value); }}
+            <Input aria-label="Search transactions" placeholder="Search transactions..." value={search} onChange={(e) => { setSearch(e.target.value); debouncedSearch(e.target.value); }}
               className="pl-9 bg-accent/50 border-border/60" />
           </div>
           <Select value={typeFilter} onValueChange={(v) => { setTypeFilter(v); setPage(0); }}>

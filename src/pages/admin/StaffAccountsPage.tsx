@@ -123,7 +123,7 @@ export default function StaffAccountsPage() {
       <FadeIn delay={0.05}>
         <div className="relative mb-5">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-          <Input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search staff..." className="pl-9 bg-accent/50 border-border/60" />
+          <Input aria-label="Search staff" value={search} onChange={e => setSearch(e.target.value)} placeholder="Search staff..." className="pl-9 bg-accent/50 border-border/60" />
         </div>
       </FadeIn>
 

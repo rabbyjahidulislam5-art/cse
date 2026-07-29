@@ -2793,6 +2793,19 @@ app.use((_req, res) => {
 const httpServer = http.createServer(app);
 attachRealtime(httpServer);
 
+// Loud, impossible-to-miss warning if the JWT signing secret is the hardcoded fallback (see
+// lib/auth.ts / lib/realtime.ts) — that fallback string is visible in public source, so anyone
+// could forge valid login tokens for any account. This never blocks startup (a hard crash on a
+// misconfigured free-tier restart would be worse than a loud log), it just makes the gap
+// impossible to miss in the Render log output.
+if (!process.env.JWT_SECRET) {
+  console.error(
+    '\n*** SECURITY WARNING: JWT_SECRET is not set — using the hardcoded fallback secret. ***\n' +
+    '*** Anyone can forge valid login tokens for any account. Set a real JWT_SECRET in the ***\n' +
+    '*** hosting environment (Render -> Environment) immediately.                          ***\n'
+  );
+}
+
 httpServer.listen(PORT, () => {
   console.log(`🎓 Smart Campus API running on port ${PORT}`);
 });

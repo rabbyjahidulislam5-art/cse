@@ -31,7 +31,7 @@ export default function StudentLookupPage() {
       <h1 className="text-xl font-bold text-foreground mb-6">Student Lookup</h1>
 
       <div className="flex gap-2 mb-6">
-        <Input placeholder="Search by name, Student ID, or email..." value={query} onChange={e => setQuery(e.target.value)}
+        <Input aria-label="Search by name, Student ID, or email" placeholder="Search by name, Student ID, or email..." value={query} onChange={e => setQuery(e.target.value)}
           onKeyDown={e => e.key === 'Enter' && handleSearch()} className="bg-accent/50 border-border/60" />
         <Button onClick={handleSearch} disabled={loading || !query.trim()}>
           {loading ? <span className="w-4 h-4 border-2 border-primary-foreground/30 border-t-primary-foreground rounded-full animate-spin" /> : <Search className="w-4 h-4" />}

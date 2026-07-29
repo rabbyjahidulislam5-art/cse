@@ -49,7 +49,7 @@ export default function AuditLogsPage() {
         <div className="flex gap-2 mb-5">
           <div className="relative flex-1">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-            <Input value={search} onChange={e => setSearch(e.target.value)} onKeyDown={e => e.key === 'Enter' && handleSearch()} placeholder="Search logs..." className="pl-9 bg-accent/50 border-border/60" />
+            <Input aria-label="Search logs" value={search} onChange={e => setSearch(e.target.value)} onKeyDown={e => e.key === 'Enter' && handleSearch()} placeholder="Search logs..." className="pl-9 bg-accent/50 border-border/60" />
           </div>
           <Button onClick={handleSearch} variant="outline" size="sm" className="h-10">Search</Button>
         </div>

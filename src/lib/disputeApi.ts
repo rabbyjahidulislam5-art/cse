@@ -1,10 +1,13 @@
 // Financial Dispute & Case Management System — typed client functions, same apiCall/getToken
 // convention as api.ts (this file is kept separate rather than appended to the ~400-line api.ts,
 // so the dispute module stays a self-contained, easily reviewable slice).
+import { sessionEvents } from './auth-context';
+import { getAuthToken } from './auth-token';
+
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:4000/api';
 
 function getToken(): string | null {
-  return localStorage.getItem('auth_token');
+  return getAuthToken();
 }
 
 async function apiCall<T>(endpoint: string, input: Record<string, unknown> = {}): Promise<T> {
@@ -16,7 +19,10 @@ async function apiCall<T>(endpoint: string, input: Record<string, unknown> = {})
       body: JSON.stringify(input),
     });
     const data = await res.json();
-    if (!res.ok) throw Object.assign(new Error(data.message || 'Request failed'), data);
+    if (!res.ok) {
+      if (res.status === 401) sessionEvents.onExpire();
+      throw Object.assign(new Error(data.message || 'Request failed'), data);
+    }
     return data;
   } catch (err: any) {
     if (err.message?.includes('Failed to fetch') || err.name === 'TypeError') {
@@ -38,7 +44,10 @@ async function multipartCall<T>(endpoint: string, fields: Record<string, string>
     body: formData,
   });
   const data = await res.json();
-  if (!res.ok) throw Object.assign(new Error(data.message || 'Request failed'), data);
+  if (!res.ok) {
+    if (res.status === 401) sessionEvents.onExpire();
+    throw Object.assign(new Error(data.message || 'Request failed'), data);
+  }
   return data;
 }
 

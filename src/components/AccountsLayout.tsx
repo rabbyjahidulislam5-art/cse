@@ -41,7 +41,7 @@ export default function AccountsLayout() {
 
   useDisputeSocket(() => fetchBadge());
 
-  if (isLoading || !user) return null;
+  if (isLoading || !user || (user as any).role !== 'Accounts Office') return null;
 
   return (
     <div className="min-h-screen bg-background flex flex-col">

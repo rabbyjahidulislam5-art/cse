@@ -172,6 +172,20 @@ function LayoutInner() {
 }
 
 export default function StudentLayout() {
+  const navigate = useNavigate();
+  const { user, isLoading } = useAuth();
+  const wrongRole = !isLoading && !!user && !!user.role && user.role !== 'Student';
+
+  // Guard at this outer level, before UserProvider ever mounts — UserProvider fetches the
+  // student dashboard unconditionally on mount, so a staff account landing on /student (e.g. a
+  // stale bookmark or manual URL edit) would otherwise briefly fetch and render with its own
+  // (non-student) account data before the redirect below takes effect.
+  useEffect(() => {
+    if (wrongRole) navigate('/', { replace: true });
+  }, [wrongRole, navigate]);
+
+  if (wrongRole) return null;
+
   return (
     <UserProvider>
       <LayoutInner />

@@ -1,7 +1,10 @@
+import { sessionEvents } from './auth-context';
+import { getAuthToken } from './auth-token';
+
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:4000/api';
 
 function getToken(): string | null {
-  return localStorage.getItem('auth_token');
+  return getAuthToken();
 }
 
 async function apiCall<T>(endpoint: string, input: Record<string, unknown> = {}): Promise<T> {
@@ -25,6 +28,10 @@ async function apiCall<T>(endpoint: string, input: Record<string, unknown> = {})
     }
     const data = await res.json();
     if (!res.ok) {
+      // 401 here only ever means authMiddleware rejected the token (missing/invalid/expired) —
+      // role/permission failures are 403 and don't hit this. Auto-logout this tab and drop back
+      // to the login card instead of leaving every open page silently broken.
+      if (res.status === 401) sessionEvents.onExpire();
       // Attach any extra fields the server sent (e.g. requiresPin/requiresOtp on a 403 from
       // /payment/init) so callers can react to the specific reason, not just show a generic error.
       throw Object.assign(new Error(data.message || 'Request failed'), data);

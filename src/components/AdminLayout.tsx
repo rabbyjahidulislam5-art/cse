@@ -40,7 +40,7 @@ export default function AdminLayout() {
   }, [user]);
   useDisputeSocket(() => fetchBadge());
 
-  if (isLoading || !user) return null;
+  if (isLoading || !user || user.role !== 'Admin Office') return null;
 
   return (
     <div className="min-h-screen bg-background flex flex-col">

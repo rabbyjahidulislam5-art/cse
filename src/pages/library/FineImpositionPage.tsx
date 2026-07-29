@@ -50,7 +50,7 @@ export default function FineImpositionPage() {
         {/* Search */}
         <div>
           <div className="flex gap-2 mb-4">
-            <Input placeholder="Search student..." value={query} onChange={e => setQuery(e.target.value)} onKeyDown={e => e.key === 'Enter' && handleSearch()} className="bg-accent/50 border-border/60" />
+            <Input aria-label="Search student" placeholder="Search student..." value={query} onChange={e => setQuery(e.target.value)} onKeyDown={e => e.key === 'Enter' && handleSearch()} className="bg-accent/50 border-border/60" />
             <Button onClick={handleSearch} disabled={searching}>{searching ? <Loader2 className="w-4 h-4 animate-spin" /> : <Search className="w-4 h-4" />}</Button>
           </div>
 

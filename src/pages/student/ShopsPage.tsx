@@ -37,7 +37,7 @@ export default function ShopsPage() {
           </div>
           <div className="relative w-full sm:w-64">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-            <Input placeholder="Search shops..." value={search} onChange={e => setSearch(e.target.value)} className="pl-9 bg-accent/50 border-border/60" />
+            <Input aria-label="Search shops" placeholder="Search shops..." value={search} onChange={e => setSearch(e.target.value)} className="pl-9 bg-accent/50 border-border/60" />
           </div>
         </div>
       </FadeIn>
