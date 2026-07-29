@@ -116,6 +116,8 @@ export type GetAdminShopsOutputType = {
   shops: Array<{
     id: string; name: string; category: string; rating: number;
     status: string; location: string; logoUrl: string; merchantId: string; qrToken: string;
+    ownerEmail: string; ownerName: string; contactNumber: string;
+    mustChangePassword: boolean; emailVerified: boolean;
     totalReceived: number; totalSettled: number; pendingSettlement: number;
   }>;
 };
@@ -200,8 +202,13 @@ export type GetShopDashboardOutputType = {
   shop: {
     id: string; name: string; category: string; rating?: number;
     status: string; location: string; logoUrl?: string; merchantId: string; qrToken: string;
-    qrSignature?: string;
+    qrSignature?: string; contactNumber?: string; description?: string; operatingHours?: string;
   };
+  owner: {
+    fullName: string; email: string; phone: string; profilePicture: string; bio: string;
+    pinSet: boolean; pinLength: number;
+  };
+  wallet: { id: string; balance: number };
   todayRevenue: number; todayCount: number; totalRevenue: number; totalCount?: number;
   totalSettled: number; pendingSettlement: number;
   recentTransactions: Array<{
@@ -343,7 +350,7 @@ export const getAdminShops = (input: Record<string, unknown> = {}) =>
   apiCall<GetAdminShopsOutputType>('/admin/shops', input);
 
 export const manageShop = (input: Record<string, unknown>) =>
-  apiCall<{ success: boolean; message: string; shopId?: string }>('/admin/shops/manage', input);
+  apiCall<{ success: boolean; message: string; shopId?: string; merchantId?: string; emailDelivered?: boolean; tempPassword?: string }>('/admin/shops/manage', input);
 
 export const getAuditLogs = (input: Record<string, unknown> = {}) =>
   apiCall<GetAuditLogsOutputType>('/admin/audit-logs', input);
@@ -478,6 +485,19 @@ export const generateSalesLedgerReport = (input: { format: 'csv' | 'excel' | 'pd
 
 export const regenerateShopQr = (input: Record<string, unknown> = {}) =>
   apiCall<{ success: boolean; qrToken: string; message: string }>('/shop/regenerate-qr', input);
+
+export const updateShopProfile = (input: { description?: string; operatingHours?: string; contactNumber?: string; location?: string; logoUrl?: string }) =>
+  apiCall<{ success: boolean; message: string }>('/shop/profile/update', input);
+
+// Merchant first-login onboarding — forced password change, then mandatory email OTP verification.
+export const changePassword = (input: { currentPassword?: string; newPassword: string }) =>
+  apiCall<{ success: boolean; message: string }>('/auth/change-password', input);
+
+export const sendShopEmailVerificationOtp = () =>
+  apiCall<{ success: boolean; message: string; otpId?: string; alreadyVerified?: boolean }>('/auth/shop/send-verification-otp', {});
+
+export const verifyShopEmail = (input: { otpId: string; code: string }) =>
+  apiCall<{ success: boolean; message: string }>('/auth/shop/verify-email', input);
 
 // File upload
 export const uploadFile = async (file: File | { data: File; filename?: string }): Promise<{ url: string; fileUrl: string }> => {

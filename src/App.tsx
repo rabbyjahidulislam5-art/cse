@@ -75,6 +75,9 @@ const ShopNotificationsPage = lazy(() => import('./pages/shop/ShopNotificationsP
 const ShopSalesLedgerPage = lazy(() => import('./pages/shop/ShopSalesLedgerPage'));
 const ShopDisputesPage = lazy(() => import('./pages/shop/ShopDisputesPage'));
 const ShopDisputeDetailPage = lazy(() => import('./pages/shop/ShopDisputeDetailPage'));
+const ShopChangeTempPasswordPage = lazy(() => import('./pages/shop/ShopChangeTempPasswordPage'));
+const ShopVerifyEmailPage = lazy(() => import('./pages/shop/ShopVerifyEmailPage'));
+const ShopProfilePage = lazy(() => import('./pages/shop/ShopProfilePage'));
 
 function RouteFallback() {
   return (
@@ -150,6 +153,10 @@ export default function App() {
           <Route path="notifications" element={<AccountsNotificationsPage />} />
         </Route>
 
+        {/* Shop first-login onboarding — standalone, outside ShopLayout (no nav chrome, mandatory) */}
+        <Route path="/shop/change-password" element={<ShopChangeTempPasswordPage />} />
+        <Route path="/shop/verify-email" element={<ShopVerifyEmailPage />} />
+
         {/* Shop Dashboard */}
         <Route path="/shop" element={<ShopLayout />}>
           <Route index element={<ShopHomePage />} />
@@ -158,6 +165,7 @@ export default function App() {
           <Route path="ledger" element={<ShopSalesLedgerPage />} />
           <Route path="disputes" element={<ShopDisputesPage />} />
           <Route path="disputes/detail" element={<ShopDisputeDetailPage />} />
+          <Route path="profile" element={<ShopProfilePage />} />
         </Route>
 
         <Route path="*" element={<Navigate to="/" replace />} />

@@ -31,6 +31,9 @@ export default function ShopManagementPage() {
   const [formName, setFormName] = useState('');
   const [formCategory, setFormCategory] = useState('Food & Beverage');
   const [formLocation, setFormLocation] = useState('');
+  const [formOwnerEmail, setFormOwnerEmail] = useState('');
+  const [formOwnerName, setFormOwnerName] = useState('');
+  const [formContactNumber, setFormContactNumber] = useState('');
 
   // Settlement state
   const [settleShop, setSettleShop] = useState<Shop | null>(null);
@@ -61,6 +64,7 @@ export default function ShopManagementPage() {
   const openCreate = () => {
     setEditShop(null);
     setFormName(''); setFormCategory('Food & Beverage'); setFormLocation('');
+    setFormOwnerEmail(''); setFormOwnerName(''); setFormContactNumber('');
     setFormOpen(true);
   };
 
@@ -72,16 +76,29 @@ export default function ShopManagementPage() {
 
   const handleSubmit = async () => {
     if (!formName.trim()) { toast.error('Shop name is required'); return; }
+    if (!editShop && !formOwnerEmail.trim()) { toast.error('Owner email is required to create the merchant login'); return; }
     setSaving(true);
     try {
-      await manageShop({
+      const result = await manageShop({
         action: editShop ? 'update' : 'create',
         shopId: editShop?.id,
         name: formName,
         category: formCategory,
         location: formLocation,
+        ...(editShop ? {} : {
+          ownerEmail: formOwnerEmail.trim(),
+          ownerName: formOwnerName.trim() || undefined,
+          contactNumber: formContactNumber.trim() || undefined,
+        }),
       });
-      toast.success(editShop ? 'Shop updated' : 'Shop created');
+      if (!editShop && result.emailDelivered === false && result.tempPassword) {
+        toast.warning(
+          `Shop created, but the credential email failed to send. Relay this temporary password to the owner manually: ${result.tempPassword}`,
+          { duration: 20000 },
+        );
+      } else {
+        toast.success(editShop ? 'Shop updated' : 'Shop created — login credentials emailed to the owner');
+      }
       setFormOpen(false);
       loadShops();
     } catch (e: any) { toast.error(e.message || 'Failed'); }
@@ -185,6 +202,14 @@ export default function ShopManagementPage() {
                       <span className="text-xs text-muted-foreground">{shop.category}</span>
                       {shop.location && <span className="text-xs text-muted-foreground flex items-center gap-1"><MapPin className="w-3 h-3" />{shop.location}</span>}
                     </div>
+                    {(shop.ownerEmail || shop.contactNumber) && (
+                      <div className="flex items-center gap-3 mt-1 flex-wrap">
+                        {shop.ownerEmail && <span className="text-[11px] text-muted-foreground font-mono">{shop.ownerEmail}</span>}
+                        {shop.contactNumber && <span className="text-[11px] text-muted-foreground">{shop.contactNumber}</span>}
+                        {shop.mustChangePassword && <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-amber-500/10 text-amber-500 font-semibold">Pending first login</span>}
+                        {!shop.mustChangePassword && !shop.emailVerified && <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-amber-500/10 text-amber-500 font-semibold">Email unverified</span>}
+                      </div>
+                    )}
                   </div>
                   <div className="text-right shrink-0 hidden sm:block">
                     <p className="text-xs text-muted-foreground">Pending Settlement</p>
@@ -237,6 +262,26 @@ export default function ShopManagementPage() {
               <Label className="text-xs text-muted-foreground">Location</Label>
               <Input value={formLocation} onChange={e => setFormLocation(e.target.value)} placeholder="e.g. Building A, Floor 2" className="mt-1.5 bg-accent/50" />
             </div>
+            {!editShop && (
+              <>
+                <div className="pt-2 border-t border-border/50">
+                  <p className="text-xs font-semibold text-foreground">Merchant Login</p>
+                  <p className="text-[11px] text-muted-foreground mt-0.5">A merchant account is created automatically and login credentials are emailed to the owner.</p>
+                </div>
+                <div>
+                  <Label className="text-xs text-muted-foreground">Owner Email *</Label>
+                  <Input type="email" value={formOwnerEmail} onChange={e => setFormOwnerEmail(e.target.value)} placeholder="owner@example.com" className="mt-1.5 bg-accent/50" />
+                </div>
+                <div>
+                  <Label className="text-xs text-muted-foreground">Owner Name</Label>
+                  <Input value={formOwnerName} onChange={e => setFormOwnerName(e.target.value)} placeholder="Optional" className="mt-1.5 bg-accent/50" />
+                </div>
+                <div>
+                  <Label className="text-xs text-muted-foreground">Contact Number</Label>
+                  <Input value={formContactNumber} onChange={e => setFormContactNumber(e.target.value)} placeholder="Optional" className="mt-1.5 bg-accent/50" />
+                </div>
+              </>
+            )}
             <Button onClick={handleSubmit} disabled={saving} className="w-full">
               {saving ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : null}
               {editShop ? 'Update Shop' : 'Create Shop'}

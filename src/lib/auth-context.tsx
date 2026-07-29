@@ -38,6 +38,8 @@ interface AuthUser {
   phone?: string;
   status?: string;
   pinSet?: boolean;
+  mustChangePassword?: boolean;
+  emailVerified?: boolean;
 }
 
 interface AuthContextType {
@@ -46,6 +48,9 @@ interface AuthContextType {
   loginWithRedirect: (opts?: { initialView?: string; redirectUrl?: string }) => void;
   logout: (opts?: { returnTo?: string }) => void;
   token: string | null;
+  // Patches the locally-cached user (e.g. clearing mustChangePassword/emailVerified after those
+  // onboarding steps complete) without a full re-login — mirrors saveUser/setUser below.
+  updateUser: (patch: Partial<AuthUser>) => void;
 }
 
 const AuthContext = createContext<AuthContextType>({
@@ -54,6 +59,7 @@ const AuthContext = createContext<AuthContextType>({
   loginWithRedirect: () => {},
   logout: () => {},
   token: null,
+  updateUser: () => {},
 });
 
 function evaluatePasswordStrength(pass: string) {
@@ -293,6 +299,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setAuthView(opts?.initialView === 'signup' ? 'signup' : 'login');
     setShowAuth(true);
     setError('');
+  }, []);
+
+  const updateUser = useCallback((patch: Partial<AuthUser>) => {
+    setUser(prev => {
+      if (!prev) return prev;
+      const next = { ...prev, ...patch };
+      saveUser(next);
+      return next;
+    });
   }, []);
 
   const logout = useCallback((opts?: { returnTo?: string }) => {
@@ -1019,7 +1034,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }
 
   return (
-    <AuthContext.Provider value={{ user, isLoading, loginWithRedirect, logout, token }}>
+    <AuthContext.Provider value={{ user, isLoading, loginWithRedirect, logout, token, updateUser }}>
       {children}
     </AuthContext.Provider>
   );

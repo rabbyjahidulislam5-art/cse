@@ -1,5 +1,5 @@
 import { Outlet, NavLink, useNavigate } from 'react-router-dom';
-import { LayoutDashboard, QrCode, BellRing, History, LogOut, Store, ScrollText } from 'lucide-react';
+import { LayoutDashboard, QrCode, BellRing, History, LogOut, Store, ScrollText, UserCircle } from 'lucide-react';
 import { useAuth } from '@/lib/auth-context';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger, DropdownMenuSeparator } from '@/components/ui/dropdown-menu';
 import { motion } from 'framer-motion';
@@ -51,6 +51,15 @@ export default function ShopLayout() {
     if (user && (user as any).role !== 'Shop Staff') navigate('/', { replace: true });
   }, [user, navigate]);
 
+  // Mandatory first-login onboarding — cannot reach the dashboard until both steps complete.
+  // These two steps live on standalone routes outside this layout (no nav chrome), so there's no
+  // redirect loop to guard against here.
+  useEffect(() => {
+    if (!user || (user as any).role !== 'Shop Staff') return;
+    if (user.mustChangePassword) { navigate('/shop/change-password', { replace: true }); return; }
+    if (!user.emailVerified) { navigate('/shop/verify-email', { replace: true }); return; }
+  }, [user, navigate]);
+
   const fetchBadge = () => getDisputeBadgeCounts().then(r => setPendingCases(r.pendingCases)).catch(() => {});
   useEffect(() => {
     if (!user) return;
@@ -75,6 +84,7 @@ export default function ShopLayout() {
   useNotificationSocket(() => setUnreadNotifs(c => c + 1));
 
   if (isLoading || !user || (user as any).role !== 'Shop Staff') return null;
+  if (user.mustChangePassword || !user.emailVerified) return null;
 
   return (
     <div className="min-h-screen bg-background flex flex-col">
@@ -124,6 +134,10 @@ export default function ShopLayout() {
                 <p className="text-xs text-muted-foreground truncate mt-0.5">{user?.email}</p>
                 <p className="text-[10px] text-secondary font-medium mt-1">Shop Staff</p>
               </div>
+              <DropdownMenuSeparator className="bg-border/50" />
+              <DropdownMenuItem onClick={() => navigate('/shop/profile')} className="rounded-lg">
+                <UserCircle className="w-4 h-4 mr-2" /> Profile
+              </DropdownMenuItem>
               <DropdownMenuSeparator className="bg-border/50" />
               <DropdownMenuItem onClick={() => logout({ returnTo: window.location.origin })} className="text-destructive focus:text-destructive rounded-lg">
                 <LogOut className="w-4 h-4 mr-2" /> Sign Out

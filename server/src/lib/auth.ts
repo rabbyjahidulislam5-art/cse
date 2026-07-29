@@ -17,6 +17,8 @@ export interface AuthRequest extends Request {
     status?: string;
     pinSet?: boolean;
     pinLength?: number;
+    mustChangePassword?: boolean;
+    emailVerified?: boolean;
     [key: string]: unknown;
   };
 }
@@ -50,6 +52,8 @@ export async function authMiddleware(req: AuthRequest, res: Response, next: Next
       status: user.status || undefined,
       pinSet: user.pinSet || false,
       pinLength: user.pinLength || 4,
+      mustChangePassword: user.mustChangePassword || false,
+      emailVerified: user.emailVerified || false,
     };
     next();
   } catch {

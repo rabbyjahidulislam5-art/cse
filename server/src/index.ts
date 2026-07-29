@@ -14,6 +14,10 @@ import { authMiddleware, generateToken, requireRole, AuthRequest } from './lib/a
 import { sendEmail } from './lib/email';
 import { notifyUser } from './lib/notify';
 import { generateTabularReport, ReportFormat } from './lib/report';
+import {
+  signQrToken as merchantSignQrToken, verifyQrSignature, generateTempPassword,
+  isStrongPassword, parseQrPayload,
+} from './lib/merchantService';
 import http from 'http';
 import studentDisputeRouter from './routes/disputes/student';
 import accountsDisputeRouter from './routes/disputes/accounts';
@@ -87,6 +91,18 @@ async function hashPin(pin: string, salt: string): Promise<string> {
   const data = new TextEncoder().encode(pin + salt);
   const hashBuffer = await crypto.subtle.digest('SHA-256', data);
   return Array.from(new Uint8Array(hashBuffer)).map(b => b.toString(16).padStart(2, '0')).join('');
+}
+
+// Merchant QR signing — falls back to JWT_SECRET so a fresh deploy without QR_SIGNING_SECRET set
+// still works (with a loud warning), same "don't hard-fail on a missing env var" posture as the
+// rest of this file, rather than a silent second fallback story. Pure logic lives in
+// lib/merchantService.ts (unit tested there); this file just supplies the secret.
+const QR_SIGNING_SECRET = process.env.QR_SIGNING_SECRET || process.env.JWT_SECRET || 'smart-campus-jwt-secret-change-me';
+if (!process.env.QR_SIGNING_SECRET) {
+  console.warn('[startup] QR_SIGNING_SECRET is not set — falling back to JWT_SECRET for merchant QR signing. Set QR_SIGNING_SECRET in production.');
+}
+function signQrToken(shopId: string, qrToken: string): string {
+  return merchantSignQrToken(shopId, qrToken, QR_SIGNING_SECRET);
 }
 
 // ─── AUTH ROUTES ───
@@ -349,6 +365,8 @@ router.post('/auth/login', async (req, res) => {
         status: user.status,
         pinSet: user.pinSet || false,
         pinLength: user.pinLength || 4,
+        mustChangePassword: user.mustChangePassword || false,
+        emailVerified: user.emailVerified || false,
       },
     });
   } catch (err: any) {
@@ -571,6 +589,111 @@ router.post('/auth/forgot-password/reset', async (req, res) => {
   }
 });
 
+// Change Password — authenticated. `currentPassword` may be omitted only when the account is
+// still flagged `mustChangePassword` (first-login-after-admin-created-account flow); otherwise it
+// must match the account's existing password.
+const passwordChangeLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  limit: 10,
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: (req: AuthRequest) => req.user?.id || ipKeyGenerator(req.ip || 'unknown'),
+  message: { message: 'Too many attempts. Please wait a moment and try again.' },
+});
+
+router.post('/auth/change-password', authMiddleware, passwordChangeLimiter, async (req: AuthRequest, res) => {
+  try {
+    const { currentPassword, newPassword } = req.body;
+    if (!newPassword) return res.status(400).json({ message: 'New password is required.' });
+
+    const strengthError = isStrongPassword(newPassword);
+    if (strengthError) return res.status(400).json({ message: strengthError });
+
+    const user = await prisma.user.findUnique({ where: { id: req.user!.id } });
+    if (!user) return res.status(404).json({ message: 'User not found.' });
+
+    if (!user.mustChangePassword) {
+      if (!currentPassword) return res.status(400).json({ message: 'Current password is required.' });
+      const matches = user.password ? await bcrypt.compare(currentPassword, user.password) : false;
+      if (!matches) return res.status(401).json({ message: 'Current password is incorrect.' });
+    }
+
+    const hashed = await bcrypt.hash(newPassword, 10);
+    await prisma.user.update({ where: { id: user.id }, data: { password: hashed, mustChangePassword: false } });
+    await prisma.auditLog.create({ data: { action: 'password.change', actorId: user.id, entityType: 'User', entityId: user.id, ipAddress: req.ip } });
+
+    void notifyUser({
+      recipientId: user.id, category: 'security', type: 'password.change',
+      title: 'Password Changed', body: 'Your password was just changed. If this wasn\'t you, contact support immediately.',
+      emailSubject: 'Security Alert: Password Changed — Smart Campus',
+    });
+
+    res.json({ success: true, message: 'Password updated successfully.' });
+  } catch (err: any) {
+    res.status(500).json({ message: err.message });
+  }
+});
+
+// Merchant email verification — reuses the exact OtpCode generate/verify pattern from
+// /auth/register-otp and /auth/forgot-password/reset above, `purpose: 'ShopEmailVerify'`.
+router.post('/auth/shop/send-verification-otp', authMiddleware, requireRole('Shop Staff'), passwordChangeLimiter, async (req: AuthRequest, res) => {
+  try {
+    const user = await prisma.user.findUnique({ where: { id: req.user!.id } });
+    if (!user || !user.email) return res.status(404).json({ message: 'User not found.' });
+    if (user.emailVerified) return res.json({ success: true, message: 'Email already verified.', alreadyVerified: true });
+
+    const code = String(Math.floor(100000 + Math.random() * 900000));
+    const expiresAt = new Date(Date.now() + 5 * 60 * 1000);
+    const otp = await prisma.otpCode.create({
+      data: { code, userId: user.id, purpose: 'ShopEmailVerify', status: 'Active', attempts: 0, expiresAt },
+    });
+
+    try {
+      await sendEmail(user.email, 'Verify Your Merchant Email — Smart Campus', [
+        { type: 'text', content: `<strong>Hi ${user.fullName || 'Merchant'},</strong>\n\nYour merchant email verification code is:\n\n<strong style="font-size: 28px; letter-spacing: 8px; color: #f59e0b;">${code}</strong>\n\nThis code is valid for 5 minutes.` },
+        { type: 'divider' },
+        { type: 'text', content: '🎓 East West University — Smart Campus Digital Wallet' },
+      ]);
+    } catch (err: any) {
+      await prisma.otpCode.delete({ where: { id: otp.id } }).catch(() => {});
+      return res.status(502).json({ message: `Could not send the verification email: ${err.message}` });
+    }
+
+    res.json({ success: true, message: 'OTP sent to your email.', otpId: otp.id });
+  } catch (err: any) {
+    res.status(500).json({ message: err.message });
+  }
+});
+
+router.post('/auth/shop/verify-email', authMiddleware, requireRole('Shop Staff'), async (req: AuthRequest, res) => {
+  try {
+    const { otpId, code } = req.body;
+    if (!otpId || !code) return res.status(400).json({ message: 'OTP is required.' });
+
+    const otp = await prisma.otpCode.findUnique({ where: { id: otpId } });
+    if (!otp || otp.userId !== req.user!.id || otp.purpose !== 'ShopEmailVerify' || otp.status !== 'Active') {
+      return res.status(400).json({ message: 'Invalid or expired OTP. Please request a new code.' });
+    }
+    if (otp.expiresAt && new Date(otp.expiresAt) < new Date()) {
+      await prisma.otpCode.update({ where: { id: otp.id }, data: { status: 'Expired' } });
+      return res.status(400).json({ message: 'OTP has expired. Please request a new code.' });
+    }
+    if (otp.code !== code) {
+      const attempts = (otp.attempts || 0) + 1;
+      await prisma.otpCode.update({ where: { id: otp.id }, data: { attempts } });
+      return res.status(400).json({ message: `Incorrect OTP code. ${5 - attempts} attempts remaining.` });
+    }
+
+    await prisma.otpCode.update({ where: { id: otp.id }, data: { status: 'Used' } });
+    await prisma.user.update({ where: { id: req.user!.id }, data: { emailVerified: true } });
+    await prisma.auditLog.create({ data: { action: 'email.verified', actorId: req.user!.id, entityType: 'User', entityId: req.user!.id, ipAddress: req.ip } });
+
+    res.json({ success: true, message: 'Email verified successfully.' });
+  } catch (err: any) {
+    res.status(500).json({ message: err.message });
+  }
+});
+
 // ─── FILE UPLOAD ───
 router.post('/upload', authMiddleware, upload.single('file'), (req: AuthRequest, res) => {
   if (!req.file) return res.status(400).json({ message: 'No file provided' });
@@ -709,15 +832,29 @@ router.post('/shops/pay', authMiddleware, async (req: AuthRequest, res) => {
 });
 
 // ─── QR VALIDATE ───
+// Accepts three payload shapes: the composite string the merchant's own QR image encodes
+// ("SMARTCAMPUS:SHOP:{shopId}:{qrToken}", see ShopQrPage.tsx), a JSON object ({token}/{qrToken}),
+// or a bare qrToken string. Every shape must resolve to a shop whose qrSignature verifies —
+// qrToken equality alone is forgeable by anyone who learns the string format.
 router.post('/shops/validate-qr', authMiddleware, async (req: AuthRequest, res) => {
   try {
     const { qrData } = req.body;
-    let parsed: any;
-    try { parsed = JSON.parse(qrData); } catch { parsed = { token: qrData }; }
+    if (typeof qrData !== 'string' || !qrData) return res.json({ valid: false, shop: null });
 
-    const token = parsed.token || parsed.qrToken || qrData;
-    const shop = await prisma.shop.findFirst({ where: { qrToken: token, status: 'Active' } });
+    const { token, shopId: shopIdHint } = parseQrPayload(qrData);
+    if (!token) return res.json({ valid: false, shop: null });
+
+    const shop = shopIdHint
+      ? await prisma.shop.findFirst({ where: { id: shopIdHint, qrToken: token, status: 'Active' } })
+      : await prisma.shop.findFirst({ where: { qrToken: token, status: 'Active' } });
     if (!shop) return res.json({ valid: false, shop: null });
+
+    if (!verifyQrSignature(shop.id, shop.qrToken || '', shop.qrSignature, QR_SIGNING_SECRET)) {
+      await prisma.auditLog.create({
+        data: { action: 'qr.signature_mismatch', actorId: req.user!.id, entityType: 'Shop', entityId: shop.id, details: 'Scanned QR failed signature verification — possible forgery or stale QR image.', ipAddress: req.ip },
+      });
+      return res.json({ valid: false, shop: null, message: 'This QR code could not be verified. Please ask the merchant to show their current QR code.' });
+    }
 
     res.json({
       valid: true,
@@ -1365,11 +1502,12 @@ router.post('/profile/update', authMiddleware, async (req: AuthRequest, res) => 
     if (batch !== undefined) data.batch = batch;
 
     await prisma.user.update({ where: { id: userId }, data });
+    await prisma.auditLog.create({ data: { action: 'profile.update', actorId: userId, entityType: 'User', entityId: userId, details: JSON.stringify(Object.keys(data)), ipAddress: req.ip } });
 
     void notifyUser({
       recipientId: userId, category: 'account', type: 'profile.updated',
       title: 'Profile Updated', body: 'Your profile information was updated.',
-      link: '/student/profile',
+      link: req.user!.role === 'Shop Staff' ? '/shop/profile' : '/student/profile',
     });
 
     res.json({ success: true, message: 'Profile updated' });
@@ -1420,26 +1558,26 @@ const PENDING_TXN_ABANDON_WINDOW_MS = 30 * 60 * 1000;
 
 interface PayItem { id: string; source: 'semester' | 'library' | 'admin' | 'payLater' | 'shop' | 'wallet'; amount: number; label: string }
 
-async function markItemPaid(item: PayItem, reference: string, userId?: string) {
+async function markItemPaid(item: PayItem, reference: string, userId?: string, db: any = prisma) {
   if (item.source === 'semester') {
-    await prisma.semesterFee.update({ where: { id: item.id }, data: { status: 'Paid', reference } }).catch(() => {});
-    await prisma.feeInvoice.updateMany({ where: { OR: [{ id: item.id }, { batchItemId: item.id }] }, data: { status: 'Paid' } }).catch(() => {});
+    await db.semesterFee.update({ where: { id: item.id }, data: { status: 'Paid', reference } }).catch(() => {});
+    await db.feeInvoice.updateMany({ where: { OR: [{ id: item.id }, { batchItemId: item.id }] }, data: { status: 'Paid' } }).catch(() => {});
   }
-  else if (item.source === 'library') await prisma.libraryFine.update({ where: { id: item.id }, data: { status: 'Paid', reference } }).catch(() => {});
-  else if (item.source === 'admin') await prisma.adminFine.update({ where: { id: item.id }, data: { status: 'Paid', reference } }).catch(() => {});
-  else if (item.source === 'payLater') await prisma.payLaterDue.update({ where: { id: item.id }, data: { status: 'Paid', paymentReference: reference } }).catch(() => {});
+  else if (item.source === 'library') await db.libraryFine.update({ where: { id: item.id }, data: { status: 'Paid', reference } }).catch(() => {});
+  else if (item.source === 'admin') await db.adminFine.update({ where: { id: item.id }, data: { status: 'Paid', reference } }).catch(() => {});
+  else if (item.source === 'payLater') await db.payLaterDue.update({ where: { id: item.id }, data: { status: 'Paid', paymentReference: reference } }).catch(() => {});
 
   if (userId) {
-    const studentUser = await prisma.user.findUnique({ where: { id: userId } });
+    const studentUser = await db.user.findUnique({ where: { id: userId } });
     if (studentUser) {
-      const lastLedger = await prisma.ledgerEntry.findFirst({
+      const lastLedger = await db.ledgerEntry.findFirst({
         where: { studentId: studentUser.id },
         orderBy: { createdAt: 'desc' },
       });
       const previousBalance = lastLedger ? lastLedger.balanceAfter : 0;
       const newBalance = Math.max(0, previousBalance - (item.amount || 0));
 
-      await prisma.ledgerEntry.create({
+      await db.ledgerEntry.create({
         data: {
           entryNumber: `LED-CR-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
           studentId: studentUser.id,
@@ -1511,36 +1649,41 @@ async function confirmSslPayment(reference: string, source: 'ipn' | 'browser-val
 
     const cardType = (element?.card_type as string) || '';
     const payMethod = cardType.includes('bkash') ? 'bKash' : cardType.includes('nagad') ? 'Nagad' : cardType.includes('rocket') ? 'Rocket' : cardType.includes('visa') || cardType.includes('master') ? 'Card' : (cardType || 'Online');
-    await prisma.transaction.update({
-      where: { id: tx.id },
-      data: {
-        status: 'Success', gatewayTxnId: validId, bankTxnId: bankTranId, paymentMethod: payMethod,
-        // Financial Dispute module — additive audit-context fields. deviceInfo is only trustworthy
-        // as "the customer's browser" when this call came from the browser's own status check —
-        // the IPN's user-agent would just be SSLCommerz's server, not the student.
-        ipAddress: ip, deviceInfo: source === 'browser-validate' ? (deviceInfo || null) : null,
-      },
-    });
 
-    let items: PayItem[] = [];
-    try { items = tx.itemsJson ? JSON.parse(tx.itemsJson) : []; } catch { items = []; }
-    for (const item of items) await markItemPaid(item, reference, tx.userId);
+    // Step 8 Requirement: Wrap all verification writes inside one atomic database transaction
+    await prisma.$transaction(async (txClient) => {
+      let items: PayItem[] = [];
+      try { items = tx.itemsJson ? JSON.parse(tx.itemsJson) : []; } catch { items = []; }
+      for (const item of items) await markItemPaid(item, reference, tx.userId, txClient);
 
-    // Wallet top-up: credit the user's wallet balance now that SSLCommerz has confirmed the payment.
-    if (tx.purpose === 'wallet_topup') {
-      const wallet = await prisma.wallet.findFirst({ where: { ownerId: tx.userId } });
-      const balanceBefore = wallet?.balance || 0;
-      if (wallet) {
-        await prisma.wallet.update({ where: { id: wallet.id }, data: { balance: { increment: amount } } });
+      if (tx.purpose === 'wallet_topup') {
+        const wallet = await txClient.wallet.findFirst({ where: { ownerId: tx.userId } });
+        const balanceBefore = wallet?.balance || 0;
+        if (wallet) {
+          await txClient.wallet.update({ where: { id: wallet.id }, data: { balance: { increment: amount } } });
+        } else {
+          await txClient.wallet.create({ data: { walletId: `W-${tx.userId.slice(0, 8)}`, ownerId: tx.userId, balance: amount } });
+        }
+        await txClient.transaction.update({
+          where: { id: tx.id },
+          data: { status: 'Success', gatewayTxnId: validId, bankTxnId: bankTranId, paymentMethod: payMethod, ipAddress: ip, deviceInfo: source === 'browser-validate' ? (deviceInfo || null) : null, balanceBefore, balanceAfter: balanceBefore + amount },
+        });
       } else {
-        await prisma.wallet.create({ data: { walletId: `W-${tx.userId.slice(0, 8)}`, ownerId: tx.userId, balance: amount } });
+        const wallet = await txClient.wallet.findFirst({ where: { ownerId: tx.userId } });
+        const balanceBefore = wallet?.balance || 0;
+        let balanceAfter = balanceBefore;
+        if (wallet && wallet.balance >= amount) {
+          await txClient.wallet.update({ where: { id: wallet.id }, data: { balance: { decrement: amount } } });
+          balanceAfter = Math.max(0, balanceBefore - amount);
+        }
+        await txClient.transaction.update({
+          where: { id: tx.id },
+          data: { status: 'Success', gatewayTxnId: validId, bankTxnId: bankTranId, paymentMethod: payMethod, ipAddress: ip, deviceInfo: source === 'browser-validate' ? (deviceInfo || null) : null, balanceBefore, balanceAfter },
+        });
       }
-      // Financial Dispute module — captured as a follow-up update since the credited amount isn't
-      // known until this branch runs, after the main status update above.
-      await prisma.transaction.update({ where: { id: tx.id }, data: { balanceBefore, balanceAfter: balanceBefore + amount } }).catch(() => {});
-    }
 
-    await prisma.auditLog.create({ data: { action: 'SSLCommerz Payment Verified', actorId: tx.userId, entityType: 'Transaction', entityId: tx.id, details: `Amount: ৳${amount}, Purpose: ${tx.purpose}, Val ID: ${validId}, Source: ${source}`, ipAddress: ip } }).catch(() => {});
+      await txClient.auditLog.create({ data: { action: 'SSLCommerz Payment Verified', actorId: tx.userId, entityType: 'Transaction', entityId: tx.id, details: `Amount: ৳${amount}, Purpose: ${tx.purpose}, Val ID: ${validId}, Source: ${source}`, ipAddress: ip } });
+    }, { timeout: 30000, maxWait: 15000 });
 
     try {
       const user = await prisma.user.findUnique({ where: { id: tx.userId } });
@@ -1558,6 +1701,22 @@ async function confirmSslPayment(reference: string, source: 'ipn' | 'browser-val
       title: notifMeta.title, body: `Your payment of ৳${amount.toLocaleString()} was verified and completed. Reference: ${reference}.`,
       link: notifMeta.link,
     });
+
+    // Merchant-side: the shop owner is a real authenticated user now (see Shop.ownerId), so a
+    // shop payment should alert and email them the same way the paying student gets alerted —
+    // this was previously silent on the merchant side entirely (no in-app row, no email).
+    if (tx.shopId) {
+      void (async () => {
+        const shop = await prisma.shop.findUnique({ where: { id: tx.shopId! } });
+        if (!shop?.ownerId) return;
+        await notifyUser({
+          recipientId: shop.ownerId, category: 'payment', type: 'shop.payment.received',
+          title: 'Payment Received', body: `You received a payment of ৳${amount.toLocaleString()}. Reference: ${reference}.`,
+          link: '/shop/ledger',
+          emailSubject: `Payment Received — ৳${amount.toLocaleString()} — Smart Campus`,
+        });
+      })().catch(() => {});
+    }
 
     return { status: 'valid' as const, message: 'Payment successful' };
   }
@@ -1825,9 +1984,14 @@ router.post('/semester-fees/pay', authMiddleware, paymentInitLimiter, async (req
 
     const isOnBehalf = target.id !== payerId;
 
-    // Same tiered PIN/OTP authorization as every other payment path in this app — enforced on
-    // the PAYER's freshly-verified PIN/OTP, regardless of whose fee is actually being settled.
-    if (total >= PIN_REQUIRED_THRESHOLD) {
+    // Step 4 Requirement: Check payer wallet balance before allowing payment session initialization
+    const payerWallet = await prisma.wallet.findFirst({ where: { ownerId: payerId } });
+    if (!payerWallet || payerWallet.frozen || (payerWallet.balance || 0) < total) {
+      return res.status(400).json({ message: 'Insufficient Wallet Balance.' });
+    }
+
+    // Step 5 Requirement: When method is sslcommerz, bypass pre-redirect PIN/OTP modals — authentication happens inside SSLCommerz.
+    if (method === 'wallet' && total >= PIN_REQUIRED_THRESHOLD) {
       const freshPayer = await prisma.user.findUnique({ where: { id: payerId } });
       const pinFresh = freshPayer?.pinVerifiedAt && (Date.now() - new Date(freshPayer.pinVerifiedAt).getTime()) < AUTH_FRESHNESS_WINDOW_MS;
       if (!pinFresh) return res.status(403).json({ message: 'Please verify your PIN before this payment.', requiresPin: true });
@@ -2055,7 +2219,7 @@ router.post('/admin/seed', authMiddleware, requireAdmin, async (req: AuthRequest
 
 router.post('/admin/shops', authMiddleware, requireAdmin, async (req: AuthRequest, res) => {
   try {
-    const shops = await prisma.shop.findMany({ take: 100, orderBy: { createdAt: 'desc' } });
+    const shops = await prisma.shop.findMany({ take: 100, orderBy: { createdAt: 'desc' }, include: { owner: true } });
     const results = await Promise.all(shops.map(async (s) => {
       const [revenueAgg, settledAgg] = await Promise.all([
         prisma.transaction.aggregate({ _sum: { amount: true }, where: { shopId: s.id, status: 'Success' } }),
@@ -2067,6 +2231,9 @@ router.post('/admin/shops', authMiddleware, requireAdmin, async (req: AuthReques
         id: s.id, name: s.name, category: s.category, rating: s.rating,
         status: s.status, location: s.location || '', logoUrl: s.logoUrl || '',
         merchantId: s.merchantId || '', qrToken: s.qrToken || '',
+        ownerEmail: s.owner?.email || '', ownerName: s.ownerName || s.owner?.fullName || '',
+        contactNumber: s.contactNumber || '', mustChangePassword: s.owner?.mustChangePassword || false,
+        emailVerified: s.owner?.emailVerified || false,
         totalReceived, totalSettled, pendingSettlement: Math.max(0, totalReceived - totalSettled),
       };
     }));
@@ -2080,9 +2247,70 @@ router.post('/admin/shops/manage', authMiddleware, requireAdmin, async (req: Aut
   try {
     const { action, shopId, ...data } = req.body;
     if (action === 'create') {
-      const shop = await prisma.shop.create({ data: { ...data, qrToken: `QR-${crypto.randomBytes(6).toString('hex')}`, merchantId: `MERCH-${crypto.randomBytes(4).toString('hex').toUpperCase()}` } });
-      await prisma.auditLog.create({ data: { action: 'Shop Created', actorId: req.user!.id, entityType: 'Shop', entityId: shop.id, details: `Created shop "${shop.name}"`, ipAddress: req.ip } });
-      return res.json({ success: true, message: 'Shop created', shopId: shop.id });
+      const { name, category, location, ownerEmail, ownerName, contactNumber, description, operatingHours } = data;
+      if (!name || !category) return res.status(400).json({ message: 'Shop name and category are required.' });
+      if (!ownerEmail) return res.status(400).json({ message: 'Owner email is required to create the merchant login.' });
+
+      const lowerEmail = String(ownerEmail).toLowerCase().trim();
+      const existingUser = await prisma.user.findUnique({ where: { email: lowerEmail } });
+      if (existingUser) return res.status(409).json({ message: `An account with email ${lowerEmail} already exists.` });
+
+      // Never stored/logged in plaintext — hashed immediately below, emailed once, then discarded.
+      const tempPassword = generateTempPassword();
+      const hashedPassword = await bcrypt.hash(tempPassword, 10);
+
+      const merchantUser = await prisma.user.create({
+        data: {
+          email: lowerEmail,
+          fullName: ownerName || name,
+          password: hashedPassword,
+          role: 'Shop Staff',
+          status: 'Active',
+          mustChangePassword: true,
+          emailVerified: false,
+        },
+      });
+
+      await prisma.wallet.create({
+        data: { walletId: `W-${merchantUser.id.slice(0, 8)}`, ownerId: merchantUser.id, balance: 0, dailyTransferLimit: 10000, dailyTransferred: 0 },
+      });
+
+      const merchantId = `MERCH-${crypto.randomBytes(4).toString('hex').toUpperCase()}`;
+      const qrToken = `QR-${crypto.randomBytes(6).toString('hex')}`;
+
+      const shop = await prisma.shop.create({
+        data: {
+          name, category, location: location || null, contactNumber: contactNumber || null,
+          ownerName: ownerName || null, description: description || null, operatingHours: operatingHours || null,
+          ownerId: merchantUser.id, merchantId, qrToken,
+        },
+      });
+
+      const qrSignature = signQrToken(shop.id, qrToken);
+      await prisma.shop.update({ where: { id: shop.id }, data: { qrSignature } });
+
+      const loginUrl = `${process.env.FRONTEND_URL || ''}/`;
+      let emailDelivered = true;
+      try {
+        await sendEmail(lowerEmail, 'Your Merchant Account — Smart Campus', [
+          { type: 'text', content: `<strong>Welcome, ${ownerName || name}!</strong>\n\nA merchant account for "<strong>${name}</strong>" has been created on Smart Campus.\n\n<strong>Login Email:</strong> ${lowerEmail}\n<strong>Temporary Password:</strong> ${tempPassword}\n<strong>Merchant ID:</strong> ${merchantId}\n\nYou will be required to set a new password and verify your email on first login.` },
+          { type: 'divider' },
+          { type: 'text', content: `Sign in at: ${loginUrl}` },
+          { type: 'text', content: '🎓 East West University — Smart Campus Digital Wallet' },
+        ]);
+      } catch (err: any) {
+        emailDelivered = false;
+        console.error(`[admin/shops/manage] Failed to email merchant credentials to ${lowerEmail}:`, err.message);
+      }
+
+      await prisma.auditLog.create({ data: { action: 'shop.create', actorId: req.user!.id, entityType: 'Shop', entityId: shop.id, details: `Created shop "${shop.name}" with merchant login ${lowerEmail}${emailDelivered ? '' : ' (credential email failed to send)'}`, ipAddress: req.ip } });
+
+      return res.json({
+        success: true, message: 'Shop and merchant account created', shopId: shop.id, merchantId, emailDelivered,
+        // Only surfaced when the email failed to send, so the Admin can relay it manually — never
+        // logged, never persisted in plaintext anywhere.
+        tempPassword: emailDelivered ? undefined : tempPassword,
+      });
     }
     if (action === 'update') {
       await prisma.shop.update({ where: { id: shopId }, data });
@@ -2111,6 +2339,17 @@ router.post('/admin/shops/manage', authMiddleware, requireAdmin, async (req: Aut
       if (!amount || amount <= 0) return res.status(400).json({ message: 'Enter a valid settlement amount.' });
       const settlement = await prisma.settlement.create({ data: { shopId, amount, notes: data.notes || null, settledBy: req.user!.id } });
       await prisma.auditLog.create({ data: { action: 'Shop Settlement Recorded', actorId: req.user!.id, entityType: 'Shop', entityId: shopId, details: `Settled ৳${amount}${data.notes ? ` — ${data.notes}` : ''}`, ipAddress: req.ip } });
+
+      const settledShop = await prisma.shop.findUnique({ where: { id: shopId } });
+      if (settledShop?.ownerId) {
+        void notifyUser({
+          recipientId: settledShop.ownerId, category: 'payment', type: 'shop.settlement.recorded',
+          title: 'Settlement Recorded', body: `Admin Office recorded a settlement of ৳${amount.toLocaleString()} for your shop.${data.notes ? ` Note: ${data.notes}` : ''}`,
+          link: '/shop',
+          emailSubject: `Settlement Recorded — ৳${amount.toLocaleString()} — Smart Campus`,
+        });
+      }
+
       return res.json({ success: true, message: 'Settlement recorded', settlementId: settlement.id });
     }
     res.status(400).json({ message: 'Unknown action' });
@@ -2707,17 +2946,15 @@ router.post('/accounts/analytics/report', authMiddleware, requireAccounts, async
 router.post('/shop/dashboard', authMiddleware, requireShopStaff, async (req: AuthRequest, res) => {
   try {
     const userId = req.user!.id;
-    const user = await prisma.user.findUnique({ where: { id: userId } });
-    // Find shop where the user is associated (by matching merchantId or just get the first shop for shop staff)
-    const shop = await prisma.shop.findFirst({ where: { status: 'Active' } });
-    if (!shop) return res.status(404).json({ message: 'No shop found' });
+    const shop = await prisma.shop.findFirst({ where: { ownerId: userId } });
+    if (!shop) return res.status(404).json({ message: 'No shop is linked to this account. Contact the Admin Office.' });
 
     const now = new Date();
     const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
     const weekStart = new Date(todayStart.getTime() - 7 * 24 * 60 * 60 * 1000);
     const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
 
-    const [todayTxns, weekTxns, monthTxns, allTimeAgg, recentTxns, payLater, settledAgg, recentSettlements] = await Promise.all([
+    const [todayTxns, weekTxns, monthTxns, allTimeAgg, recentTxns, payLater, settledAgg, recentSettlements, owner] = await Promise.all([
       prisma.transaction.findMany({ where: { shopId: shop.id, status: 'Success', createdAt: { gte: todayStart } } }),
       prisma.transaction.findMany({ where: { shopId: shop.id, status: 'Success', createdAt: { gte: weekStart } } }),
       prisma.transaction.findMany({ where: { shopId: shop.id, status: 'Success', createdAt: { gte: monthStart } } }),
@@ -2726,14 +2963,31 @@ router.post('/shop/dashboard', authMiddleware, requireShopStaff, async (req: Aut
       prisma.payLaterDue.findMany({ where: { shopId: shop.id, status: 'Pending' }, include: { student: true } }),
       prisma.settlement.aggregate({ _sum: { amount: true }, where: { shopId: shop.id } }),
       prisma.settlement.findMany({ where: { shopId: shop.id }, take: 10, orderBy: { settledAt: 'desc' } }),
+      prisma.user.findUnique({ where: { id: userId } }),
     ]);
+
+    let wallet = await prisma.wallet.findFirst({ where: { ownerId: userId } });
+    if (!wallet) {
+      wallet = await prisma.wallet.create({ data: { walletId: `W-${userId.slice(0, 8)}`, ownerId: userId, balance: 0, dailyTransferLimit: 10000, dailyTransferred: 0 } });
+    }
 
     const totalRevenue = allTimeAgg._sum.amount || 0;
     const totalSettled = settledAgg._sum.amount || 0;
     const totalCount = allTimeAgg._count._all || 0;
 
     res.json({
-      shop: { id: shop.id, name: shop.name, category: shop.category, rating: shop.rating, status: shop.status, location: shop.location || '', logoUrl: shop.logoUrl || '', merchantId: shop.merchantId || '', qrToken: shop.qrToken || '', qrSignature: shop.qrSignature || '' },
+      shop: {
+        id: shop.id, name: shop.name, category: shop.category, rating: shop.rating, status: shop.status,
+        location: shop.location || '', logoUrl: shop.logoUrl || '', merchantId: shop.merchantId || '',
+        qrToken: shop.qrToken || '', qrSignature: shop.qrSignature || '',
+        contactNumber: shop.contactNumber || '', description: shop.description || '', operatingHours: shop.operatingHours || '',
+      },
+      owner: {
+        fullName: owner?.fullName || '', email: owner?.email || '', phone: owner?.phone || '',
+        profilePicture: owner?.profilePicture || '', bio: owner?.bio || '',
+        pinSet: owner?.pinSet || false, pinLength: owner?.pinLength || 4,
+      },
+      wallet: { id: wallet.id, balance: wallet.balance || 0 },
       totalCount,
       todayRevenue: todayTxns.reduce((s, t) => s + t.amount, 0), todayCount: todayTxns.length,
       weekRevenue: weekTxns.reduce((s, t) => s + t.amount, 0), monthRevenue: monthTxns.reduce((s, t) => s + t.amount, 0),
@@ -2750,8 +3004,8 @@ router.post('/shop/dashboard', authMiddleware, requireShopStaff, async (req: Aut
 router.post('/shop/sales-ledger/report', authMiddleware, requireShopStaff, async (req: AuthRequest, res) => {
   try {
     const { format = 'csv', period = 'all' } = req.body as { format?: ReportFormat; period?: 'today' | 'week' | 'month' | 'all' };
-    const shop = await prisma.shop.findFirst({ where: { status: 'Active' } });
-    if (!shop) return res.status(404).json({ message: 'No shop found' });
+    const shop = await prisma.shop.findFirst({ where: { ownerId: req.user!.id } });
+    if (!shop) return res.status(404).json({ message: 'No shop is linked to this account. Contact the Admin Office.' });
 
     const now = new Date();
     const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
@@ -2787,12 +3041,40 @@ router.post('/shop/sales-ledger/report', authMiddleware, requireShopStaff, async
 
 router.post('/shop/regenerate-qr', authMiddleware, requireShopStaff, async (req: AuthRequest, res) => {
   try {
-    const shop = await prisma.shop.findFirst({ where: { status: 'Active' } });
-    if (!shop) return res.status(404).json({ message: 'Shop not found' });
+    const shop = await prisma.shop.findFirst({ where: { ownerId: req.user!.id } });
+    if (!shop) return res.status(404).json({ message: 'No shop is linked to this account. Contact the Admin Office.' });
 
     const newToken = `QR-${crypto.randomBytes(8).toString('hex')}`;
-    await prisma.shop.update({ where: { id: shop.id }, data: { qrToken: newToken } });
+    const newSignature = signQrToken(shop.id, newToken);
+    await prisma.shop.update({ where: { id: shop.id }, data: { qrToken: newToken, qrSignature: newSignature } });
+    await prisma.auditLog.create({ data: { action: 'qr.regenerate', actorId: req.user!.id, entityType: 'Shop', entityId: shop.id, ipAddress: req.ip } });
     res.json({ success: true, qrToken: newToken, message: 'QR regenerated' });
+  } catch (err: any) {
+    res.status(500).json({ message: err.message });
+  }
+});
+
+// Shop-level profile fields only (description, hours, contact, location, logo) — shop *name* is
+// intentionally excluded here and stays admin-only (per the enterprise onboarding requirement:
+// "shop name subject to admin approval"). Owner-level personal fields (phone/bio/profilePicture)
+// go through the existing generic /profile/update instead, same as every other role.
+router.post('/shop/profile/update', authMiddleware, requireShopStaff, async (req: AuthRequest, res) => {
+  try {
+    const shop = await prisma.shop.findFirst({ where: { ownerId: req.user!.id } });
+    if (!shop) return res.status(404).json({ message: 'No shop is linked to this account. Contact the Admin Office.' });
+
+    const { description, operatingHours, contactNumber, location, logoUrl } = req.body;
+    const data: any = {};
+    if (description !== undefined) data.description = description;
+    if (operatingHours !== undefined) data.operatingHours = operatingHours;
+    if (contactNumber !== undefined) data.contactNumber = contactNumber;
+    if (location !== undefined) data.location = location;
+    if (logoUrl !== undefined) data.logoUrl = logoUrl;
+
+    await prisma.shop.update({ where: { id: shop.id }, data });
+    await prisma.auditLog.create({ data: { action: 'shop.profile.update', actorId: req.user!.id, entityType: 'Shop', entityId: shop.id, details: JSON.stringify(Object.keys(data)), ipAddress: req.ip } });
+
+    res.json({ success: true, message: 'Shop profile updated' });
   } catch (err: any) {
     res.status(500).json({ message: err.message });
   }
