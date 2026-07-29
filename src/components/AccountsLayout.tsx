@@ -1,5 +1,5 @@
 import { Outlet, NavLink, useNavigate } from 'react-router-dom';
-import { LayoutDashboard, Users, Receipt, BarChart3, LogOut, Landmark, ScrollText } from 'lucide-react';
+import { LayoutDashboard, Users, BookOpen, FileText, ScrollText, LogOut, Landmark, Receipt, BarChart3 } from 'lucide-react';
 import { useAuth } from '@/lib/auth-context';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger, DropdownMenuSeparator } from '@/components/ui/dropdown-menu';
 import { motion } from 'framer-motion';
@@ -9,9 +9,12 @@ import { useDisputeSocket } from '@/lib/socket';
 import NotificationBell from '@/components/NotificationBell';
 
 const navItems = [
-  { to: '/accounts', icon: LayoutDashboard, label: 'Home', end: true },
-  { to: '/accounts/fee-push', icon: Users, label: 'Fee Push' },
+  { to: '/accounts', icon: LayoutDashboard, label: 'Dashboard', end: true },
+  { to: '/accounts/fee-wizard', icon: Users, label: 'Fee Push' },
   { to: '/accounts/adjustments', icon: Receipt, label: 'Adjust' },
+  { to: '/accounts/analytics', icon: BarChart3, label: 'Analytics' },
+  { to: '/accounts/ledger', icon: BookOpen, label: 'Ledger' },
+  { to: '/accounts/reports', icon: FileText, label: 'Reports' },
   { to: '/accounts/disputes', icon: ScrollText, label: 'Disputes' },
 ];
 

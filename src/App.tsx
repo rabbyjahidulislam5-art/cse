@@ -54,8 +54,11 @@ import LibraryNotificationsPage from './pages/library/LibraryNotificationsPage';
 // Accounts pages
 import AccountsHomePage from './pages/accounts/AccountsHomePage';
 import SemesterFeePushPage from './pages/accounts/SemesterFeePushPage';
+import FeeWizardPage from './pages/accounts/FeeWizardPage';
 import FeeAdjustmentsPage from './pages/accounts/FeeAdjustmentsPage';
 import CollectionAnalyticsPage from './pages/accounts/CollectionAnalyticsPage';
+import AccountsLedgerPage from './pages/accounts/LedgerPage';
+import AccountsReportsPage from './pages/accounts/AccountsReportsPage';
 import DisputesDashboardPage from './pages/accounts/DisputesDashboardPage';
 import DisputeCaseDetailPage from './pages/accounts/DisputeCaseDetailPage';
 import DisputeReportsPage from './pages/accounts/DisputeReportsPage';
@@ -124,6 +127,9 @@ export default function App() {
         <Route path="/accounts" element={<AccountsLayout />}>
           <Route index element={<AccountsHomePage />} />
           <Route path="fee-push" element={<SemesterFeePushPage />} />
+          <Route path="fee-wizard" element={<FeeWizardPage />} />
+          <Route path="ledger" element={<AccountsLedgerPage />} />
+          <Route path="reports" element={<AccountsReportsPage />} />
           <Route path="adjustments" element={<FeeAdjustmentsPage />} />
           <Route path="analytics" element={<CollectionAnalyticsPage />} />
           <Route path="disputes" element={<DisputesDashboardPage />} />

@@ -63,6 +63,16 @@ model User {
   disputeStatusChanges       DisputeStatusHistory[]
   disputeNotifications       DisputeNotification[]
   notifications              Notification[]
+
+  // Fee Management Workflow
+  feeBatchesMaker            SemesterFeeBatch[]     @relation("FeeBatchMaker")
+  feeBatchesChecker          SemesterFeeBatch[]     @relation("FeeBatchChecker")
+  feeBatchesApprover         SemesterFeeBatch[]     @relation("FeeBatchApprover")
+  feeImports                 SemesterFeeImport[]
+  feeInvoices                FeeInvoice[]
+  paymentRequests            PaymentRequest[]
+  gatewaySessions            PaymentGatewaySession[]
+  ledgerEntries              LedgerEntry[]
 }
 
 model Wallet {
@@ -457,3 +467,167 @@ model SequenceCounter {
   id    String @id
   value Int    @default(0)
 }
+
+// ─── FEE MANAGEMENT WORKFLOW MODELS ───
+
+model SemesterFeeBatch {
+  id            String             @id @default(cuid())
+  batchNumber   String             @unique
+  department    String
+  program       String
+  semester      String
+  academicYear  String
+  label         String
+  status        String             @default("Draft") // Draft, Validated, PendingApproval, Approved, Rejected, Pushed
+  totalRows     Int                @default(0)
+  validRows     Int                @default(0)
+  invalidRows   Int                @default(0)
+  duplicateRows Int                @default(0)
+  totalAmount   Float              @default(0)
+  
+  makerId       String
+  maker         User               @relation("FeeBatchMaker", fields: [makerId], references: [id])
+  checkerId     String?
+  checker       User?              @relation("FeeBatchChecker", fields: [checkerId], references: [id])
+  approverId    String?
+  approver      User?              @relation("FeeBatchApprover", fields: [approverId], references: [id])
+
+  rejectionReason String?
+  approvedAt      DateTime?
+  pushedAt        DateTime?
+  createdAt       DateTime           @default(now())
+  updatedAt       DateTime           @updatedAt
+
+  imports       SemesterFeeImport[]
+  items         SemesterFeeItem[]
+  pushJobs      FeePushJob[]
+}
+
+model SemesterFeeImport {
+  id           String           @id @default(cuid())
+  batchId      String
+  batch        SemesterFeeBatch @relation(fields: [batchId], references: [id], onDelete: Cascade)
+  fileName     String
+  fileType     String           @default("excel")
+  uploadedById String
+  uploadedBy   User             @relation(fields: [uploadedById], references: [id])
+  createdAt    DateTime         @default(now())
+}
+
+model SemesterFeeItem {
+  id                   String           @id @default(cuid())
+  batchId              String
+  batch                SemesterFeeBatch @relation(fields: [batchId], references: [id], onDelete: Cascade)
+  studentId            String
+  studentName          String
+  studentEmail         String
+  department           String
+  program              String
+  credit               Float            @default(0)
+  tuition              Float            @default(0)
+  waiver               Float            @default(0)
+  waiverAdjustment     Float            @default(0)
+  lateFee              Float            @default(0)
+  finalAmount          Float            @default(0)
+  dueDate              String?
+  feeLabel             String?
+  remark               String?
+  status               String           @default("Valid") // Valid, Invalid, Duplicate, Pushed, Error
+  validationErrorsJson String?
+  createdAt            DateTime         @default(now())
+  updatedAt            DateTime         @updatedAt
+
+  invoices             FeeInvoice[]
+}
+
+model FeePushJob {
+  id             String           @id @default(cuid())
+  batchId        String
+  batch          SemesterFeeBatch @relation(fields: [batchId], references: [id], onDelete: Cascade)
+  status         String           @default("Pending") // Pending, Processing, Completed, Failed
+  processedCount Int              @default(0)
+  totalCount     Int              @default(0)
+  errorLog       String?
+  startedAt      DateTime?
+  completedAt    DateTime?
+  createdAt      DateTime         @default(now())
+}
+
+model FeeInvoice {
+  id            String           @id @default(cuid())
+  invoiceNumber String           @unique
+  batchItemId   String?
+  batchItem     SemesterFeeItem? @relation(fields: [batchItemId], references: [id])
+  studentId     String
+  student       User             @relation(fields: [studentId], references: [id])
+  amount        Float
+  feeLabel      String
+  dueDate       String?
+  pdfUrl        String?
+  status        String           @default("Unpaid") // Unpaid, Paid, Cancelled
+  createdAt     DateTime         @default(now())
+  updatedAt     DateTime         @updatedAt
+
+  paymentRequests PaymentRequest[]
+  ledgerEntries   LedgerEntry[]
+}
+
+model PaymentRequest {
+  id         String      @id @default(cuid())
+  requestRef String      @unique
+  invoiceId  String?
+  invoice    FeeInvoice? @relation(fields: [invoiceId], references: [id])
+  studentId  String
+  student    User        @relation(fields: [studentId], references: [id])
+  amount     Float
+  status     String      @default("Pending") // Pending, Processing, Completed, Expired, Failed
+  createdAt  DateTime    @default(now())
+  updatedAt  DateTime    @updatedAt
+
+  gatewaySessions PaymentGatewaySession[]
+  statusHistory   PaymentStatusHistory[]
+}
+
+model PaymentGatewaySession {
+  id               String          @id @default(cuid())
+  sessionKey       String          @unique
+  paymentRequestId String?
+  paymentRequest   PaymentRequest? @relation(fields: [paymentRequestId], references: [id])
+  studentId        String
+  student          User            @relation(fields: [studentId], references: [id])
+  amount           Float
+  feeLabel         String
+  gateway          String          @default("SSLCommerz") // SSLCommerz, Stripe, Braintree, ManualBank, Wallet
+  status           String          @default("Active") // Active, Completed, Cancelled, Expired
+  gatewayUrl       String?
+  expiresAt        DateTime?
+  createdAt        DateTime        @default(now())
+  updatedAt        DateTime        @updatedAt
+}
+
+model PaymentStatusHistory {
+  id               String          @id @default(cuid())
+  paymentRequestId String
+  paymentRequest   PaymentRequest  @relation(fields: [paymentRequestId], references: [id], onDelete: Cascade)
+  fromStatus       String
+  toStatus         String
+  notes            String?
+  createdAt        DateTime        @default(now())
+}
+
+model LedgerEntry {
+  id            String      @id @default(cuid())
+  entryNumber   String      @unique
+  studentId     String?
+  student       User?       @relation(fields: [studentId], references: [id])
+  invoiceId     String?
+  invoice       FeeInvoice? @relation(fields: [invoiceId], references: [id])
+  type          String      // DEBIT_DUE, CREDIT_PAYMENT, WAIVER_ADJUSTMENT, REFUND
+  debitAmount   Float       @default(0)
+  creditAmount  Float       @default(0)
+  balanceAfter  Float       @default(0)
+  reference     String?
+  description   String?
+  createdAt     DateTime    @default(now())
+}
+

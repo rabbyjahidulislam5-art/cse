@@ -397,6 +397,69 @@ export const getCollectionAnalytics = (input: Record<string, unknown> = {}) =>
 export const generateCollectionAnalyticsReport = (input: { format: 'csv' | 'excel' | 'pdf' }) =>
   apiCall<{ url: string }>('/accounts/analytics/report', input);
 
+// ─── EWU Fee Management Redesign API Endpoints ───
+
+export const exportAdvisingFees = async (format: 'excel' | 'csv' | 'pdf') => {
+  const token = getToken();
+  const res = await fetch(`${API_URL}/advising/export`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+    body: JSON.stringify({ format }),
+  });
+  if (!res.ok) throw new Error('Advising export failed');
+  const blob = await res.blob();
+  const url = window.URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `advising_completed_fees.${format === 'excel' ? 'xlsx' : format}`;
+  a.click();
+};
+
+export const downloadFeeImportTemplate = async () => {
+  const token = getToken();
+  const res = await fetch(`${API_URL}/accounts/fee-import/template`, {
+    headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+  });
+  if (!res.ok) throw new Error('Template download failed');
+  const blob = await res.blob();
+  const url = window.URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = 'fee_import_template.xlsx';
+  a.click();
+};
+
+export const validateFeeImport = async (formData: FormData) => {
+  const token = getToken();
+  const res = await fetch(`${API_URL}/accounts/fee-import/validate`, {
+    method: 'POST',
+    headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+    body: formData,
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || data.message || 'Validation failed');
+  return data;
+};
+
+export const submitFeeBatch = (input: Record<string, unknown>) =>
+  apiCall<{ success: boolean; message: string; batch: any }>('/accounts/fee-import/submit', input);
+
+export const getFeeBatchDetails = (batchId: string) =>
+  apiCall<{ batch: any }>('/accounts/fee-import/batch-detail', { batchId });
+
+export const updateFeeBatchItem = (input: Record<string, unknown>) =>
+  apiCall<{ success: boolean; item: any }>('/accounts/fee-import/item', input);
+
+export const processFeeBatchApproval = (input: Record<string, unknown>) =>
+  apiCall<{ success: boolean; message: string; batch: any }>('/accounts/fee-import/approve', input);
+
+export const executeFeePushBatch = (batchId: string) =>
+  apiCall<{ success: boolean; message: string; pushedCount: number }>('/accounts/fee-import/push', { batchId });
+
+export const getAccountsLedger = (studentId?: string) =>
+  apiCall<{ entries: any[] }>('/accounts/ledger', studentId ? { studentId } : {});
+
+
 // Shop endpoints
 export const getShopDashboard = (input: Record<string, unknown> = {}) =>
   apiCall<GetShopDashboardOutputType>('/shop/dashboard', input);

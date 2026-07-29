@@ -9,7 +9,8 @@
     "start": "node dist/index.js",
     "prisma:generate": "prisma generate",
     "prisma:push": "prisma db push",
-    "prisma:migrate": "prisma migrate deploy"
+    "prisma:migrate": "prisma migrate deploy",
+    "test": "vitest run"
   },
   "dependencies": {
     "@prisma/client": "^6.9.0",
@@ -36,6 +37,7 @@
     "@types/pdfkit": "^0.17.6",
     "prisma": "^6.9.0",
     "tsx": "^4.19.4",
-    "typescript": "~5.7.2"
+    "typescript": "~5.7.2",
+    "vitest": "^3.0.0"
   }
 }

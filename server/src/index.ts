@@ -21,6 +21,7 @@ import adminDisputeRouter from './routes/disputes/admin';
 import libraryDisputeRouter from './routes/disputes/library';
 import shopDisputeRouter from './routes/disputes/shop';
 import { disputeNotificationsRouter } from './routes/disputes/shared';
+import feeRouter from './routes/fees.js';
 import { attachRealtime } from './lib/realtime';
 
 // Abuse backstops for the two payment-confirmation entry points. Render's free tier runs a
@@ -2778,6 +2779,8 @@ app.use('/api', shopDisputeRouter);
 app.use('/', shopDisputeRouter);
 app.use('/api', disputeNotificationsRouter);
 app.use('/', disputeNotificationsRouter);
+app.use('/api', feeRouter);
+app.use('/', feeRouter);
 
 // Fallback JSON 404 handler (ensures HTML is NEVER returned)
 app.use((_req, res) => {
