@@ -2062,10 +2062,20 @@ router.post('/admin/shops/manage', authMiddleware, requireAdmin, async (req: Aut
       await prisma.auditLog.create({ data: { action: 'Shop Updated', actorId: req.user!.id, entityType: 'Shop', entityId: shopId, details: JSON.stringify(data), ipAddress: req.ip } });
       return res.json({ success: true, message: 'Shop updated' });
     }
-    if (action === 'delete' || action === 'deactivate') {
+    if (action === 'delete' || action === 'deactivate' || action === 'remove') {
       await prisma.shop.update({ where: { id: shopId }, data: { status: 'Inactive' } });
       await prisma.auditLog.create({ data: { action: 'Shop Deactivated', actorId: req.user!.id, entityType: 'Shop', entityId: shopId, ipAddress: req.ip } });
       return res.json({ success: true, message: 'Shop deactivated' });
+    }
+    if (action === 'suspend') {
+      await prisma.shop.update({ where: { id: shopId }, data: { status: 'Suspended' } });
+      await prisma.auditLog.create({ data: { action: 'Shop Suspended', actorId: req.user!.id, entityType: 'Shop', entityId: shopId, ipAddress: req.ip } });
+      return res.json({ success: true, message: 'Shop suspended' });
+    }
+    if (action === 'activate') {
+      await prisma.shop.update({ where: { id: shopId }, data: { status: 'Active' } });
+      await prisma.auditLog.create({ data: { action: 'Shop Activated', actorId: req.user!.id, entityType: 'Shop', entityId: shopId, ipAddress: req.ip } });
+      return res.json({ success: true, message: 'Shop activated' });
     }
     if (action === 'settle') {
       // Manual internal reconciliation — SSLCommerz doesn't expose a "funds disbursed" API, so
