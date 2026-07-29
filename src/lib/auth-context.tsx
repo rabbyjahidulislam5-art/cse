@@ -283,7 +283,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setAuthToken(e.newValue);
       setToken(e.newValue);
       const newUserRaw = localStorage.getItem('auth_user');
-      if (newUserRaw) { try { setUser(JSON.parse(newUserRaw)); } catch { /* ignore malformed */ } }
+      if (newUserRaw) {
+        try {
+          setUser(JSON.parse(newUserRaw));
+          setShowAuth(false);
+          setError('');
+        } catch { /* ignore malformed */ }
+      }
     }
     window.addEventListener('storage', onStorage);
     return () => window.removeEventListener('storage', onStorage);
