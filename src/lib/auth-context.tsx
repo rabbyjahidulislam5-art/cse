@@ -5,6 +5,7 @@ import { GoogleLogin, type CredentialResponse } from '@react-oauth/google';
 import { toast } from 'sonner';
 import { getGoogleClientId, isValidGoogleClientId } from '@/lib/google-auth-config';
 import { getAuthToken, setAuthToken, decodeTokenUserId } from '@/lib/auth-token';
+import { getStoredToken, setStoredToken as saveToken, getStoredUser, setStoredUser as saveUser, clearStoredAuth, isPerTabAuthMode, setPerTabAuthMode } from '@/lib/auth-storage';
 import {
   Dialog,
   DialogContent,
@@ -235,39 +236,26 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [error, setError] = useState('');
   const [formLoading, setFormLoading] = useState(false);
 
+  const [perTabMode, setPerTabMode] = useState(() => isPerTabAuthMode());
+
   useEffect(() => {
-    const saved = localStorage.getItem('auth_token');
-    const savedUser = localStorage.getItem('auth_user');
+    const saved = getStoredToken();
+    const savedUser = getStoredUser();
     if (saved && savedUser) {
       setAuthToken(saved);
       setToken(saved);
-      setUser(JSON.parse(savedUser));
+      setUser(savedUser);
     }
     setIsLoading(false);
   }, []);
 
-  // The one deliberate, controlled cross-tab hook — everything else in this app is intentionally
-  // tab-isolated (route, history, modals, in-progress workflows). `storage` only fires in tabs
-  // OTHER than the one that made the change, which is exactly what we want here:
-  //   - Logout elsewhere (auth_token removed): the shared session actually ended — propagate it,
-  //     the same way Gmail/Facebook/banking apps log every open tab out when you sign out of one.
-  //   - A DIFFERENT account logs in elsewhere (auth_token set to a token with a different user id):
-  //     do NOT adopt it here — silently switching what account this tab is acting as, mid-workflow,
-  //     is the actual bug being fixed. This tab keeps its own session untouched.
-  //   - The SAME account's token changes elsewhere (re-login, refresh): safe to adopt — it's still
-  //     the same person's session, not an identity switch or a forced navigation.
   useEffect(() => {
     function onStorage(e: StorageEvent) {
-      // auth_token and auth_user always change together (see every call site above) — auth_token
-      // is treated as the single authoritative signal; the paired auth_user event is redundant.
+      if (isPerTabAuthMode()) return; // Per-Tab Dev/Test Mode ignores cross-tab storage events
       if (e.key !== 'auth_token') return;
       const currentId = decodeTokenUserId(getAuthToken());
 
       if (!e.newValue) {
-        // Token removed elsewhere. Only end THIS tab's session if the token that was just removed
-        // is actually the account this tab is using — if a different account logged in on the
-        // other tab first and is now the one logging out, this tab's own session never adopted
-        // that account and was never actually ended.
         const removedId = decodeTokenUserId(e.oldValue);
         if (!currentId || removedId === currentId) {
           setAuthToken(null);
@@ -278,17 +266,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }
 
       const incomingId = decodeTokenUserId(e.newValue);
-      if (currentId && incomingId && currentId !== incomingId) return; // different account — ignore
+      if (currentId && incomingId && currentId !== incomingId) return;
 
       setAuthToken(e.newValue);
       setToken(e.newValue);
-      const newUserRaw = localStorage.getItem('auth_user');
-      if (newUserRaw) {
-        try {
-          setUser(JSON.parse(newUserRaw));
-          setShowAuth(false);
-          setError('');
-        } catch { /* ignore malformed */ }
+      const newUser = getStoredUser();
+      if (newUser) {
+        setUser(newUser);
+        setShowAuth(false);
+        setError('');
       }
     }
     window.addEventListener('storage', onStorage);
@@ -310,8 +296,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const logout = useCallback((opts?: { returnTo?: string }) => {
-    localStorage.removeItem('auth_token');
-    localStorage.removeItem('auth_user');
+    clearStoredAuth();
     setAuthToken(null);
     setUser(null);
     setToken(null);
@@ -374,10 +359,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       // This tab's own session works either way — "Remember Me" only controls whether it's
       // *persisted* (so a later new tab/restart also picks it up), not whether this tab can use it.
       setAuthToken(data.token);
-      if (rememberMe) {
-        localStorage.setItem('auth_token', data.token);
-        localStorage.setItem('auth_user', JSON.stringify(data.user));
-      }
+      saveToken(data.token);
+      saveUser(data.user);
       setToken(data.token);
       setUser(data.user);
       setShowAuth(false);
@@ -398,8 +381,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     try {
       const data = await safeAuthCall('/auth/google', { credential: response.credential });
       setAuthToken(data.token);
-      localStorage.setItem('auth_token', data.token);
-      localStorage.setItem('auth_user', JSON.stringify(data.user));
+      saveToken(data.token);
+      saveUser(data.user);
       setToken(data.token);
       setUser(data.user);
       setShowAuth(false);
@@ -473,8 +456,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       });
 
       setAuthToken(data.token);
-      localStorage.setItem('auth_token', data.token);
-      localStorage.setItem('auth_user', JSON.stringify(data.user));
+      saveToken(data.token);
+      saveUser(data.user);
       setToken(data.token);
       setUser(data.user);
       setShowAuth(false);
@@ -536,10 +519,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       try {
         const loginData = await safeAuthCall('/auth/login', { emailOrStudentId, password });
         setAuthToken(loginData.token);
-        if (rememberMe) {
-          localStorage.setItem('auth_token', loginData.token);
-          localStorage.setItem('auth_user', JSON.stringify(loginData.user));
-        }
+        saveToken(loginData.token);
+        saveUser(loginData.user);
         setToken(loginData.token);
         setUser(loginData.user);
         setShowAuth(false);
@@ -1007,12 +988,29 @@ export function AuthProvider({ children }: { children: ReactNode }) {
               </form>
             )}
 
-            {/* Footer info */}
-            <div className="pt-2 border-t border-border/40 text-center">
+            {/* Footer info & Dev Mode Toggle */}
+            <div className="pt-2.5 border-t border-border/40 text-center space-y-2">
               <p className="text-[11px] text-muted-foreground flex items-center justify-center gap-1">
                 <ShieldCheck className="w-3.5 h-3.5 text-primary" />
                 Bank-Grade 256-bit SSL Encryption · EWU Campus Network
               </p>
+              <div className="flex justify-center pt-1">
+                <button
+                  type="button"
+                  onClick={() => {
+                    const next = !perTabMode;
+                    setPerTabAuthMode(next);
+                    setPerTabMode(next);
+                    toast.info(next ? 'Per-Tab Sessions enabled (Dev/Test Mode)' : 'Standard Shared Sessions enabled');
+                  }}
+                  className={`text-[10px] px-3 py-1 rounded-full border transition-all flex items-center gap-1.5 ${
+                    perTabMode ? 'bg-primary/10 border-primary/40 text-primary font-semibold shadow-sm' : 'bg-accent/40 border-border/60 text-muted-foreground hover:text-foreground'
+                  }`}
+                >
+                  <span className={`w-1.5 h-1.5 rounded-full ${perTabMode ? 'bg-primary animate-pulse' : 'bg-muted-foreground/40'}`} />
+                  {perTabMode ? 'Per-Tab Auth Mode: ACTIVE (Dev Mode)' : 'Per-Tab Auth Mode: OFF (Click to Enable)'}
+                </button>
+              </div>
             </div>
           </motion.div>
         </div>

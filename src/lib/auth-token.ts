@@ -14,7 +14,9 @@
 // Gmail/Facebook) and after that is only ever changed by this tab's own explicit auth actions, or
 // by the controlled cross-tab listener in auth-context.tsx (see the comment there for exactly
 // which cross-tab events are allowed to reach it).
-let inMemoryToken: string | null = localStorage.getItem('auth_token');
+import { getStoredToken } from './auth-storage';
+
+let inMemoryToken: string | null = getStoredToken();
 
 export function getAuthToken(): string | null {
   return inMemoryToken;
