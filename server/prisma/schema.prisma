@@ -47,6 +47,7 @@ model User {
   semesterFees SemesterFee[]
   libraryFines LibraryFine[]
   adminFines   AdminFine[]
+  adminFinesIssued AdminFine[] @relation("AdminFineIssuedBy")
   payLaterDues PayLaterDue[]
   otpCodes     OtpCode[]
   auditLogs    AuditLog[]
@@ -223,6 +224,19 @@ model Library {
   updatedAt      DateTime @updatedAt
 }
 
+// Singleton-style entity for Accounts Office's permanent QR/identity — mirrors the Library
+// singleton pattern (one shared record for every Accounts Office staff account, no per-staff
+// isolation). ensureAccountsOfficeSingleton() in accountsService.ts creates the one row on first
+// access via a fixed-id upsert (avoids the TOCTOU race the Library singleton originally hit).
+model AccountsOffice {
+  id          String   @id @default("singleton-accounts")
+  name        String   @default("Accounts Office")
+  qrToken     String?
+  qrSignature String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
 model LibraryFine {
   id        String   @id @default(cuid())
   label     String?
@@ -238,16 +252,25 @@ model LibraryFine {
 }
 
 model AdminFine {
-  id           String   @id @default(cuid())
-  reason       String?
-  student      User     @relation(fields: [studentId], references: [id])
-  studentId    String
-  amount       Float
-  incidentDate String?
-  status       String   @default("Pending")
-  reference    String?
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
+  id             String    @id @default(cuid())
+  reason         String?
+  student        User      @relation(fields: [studentId], references: [id])
+  studentId      String
+  amount         Float
+  incidentDate   String?
+  status         String    @default("Pending") // Pending, Disputed, Paid, Waived, Cancelled
+  reference      String?
+  // Admin Office issues fines only — it is never the payment receiver. These fields track who
+  // issued/cancelled/reconciled the fine for audit purposes; Accounts Office is the sole financial
+  // authority that collects and reconciles payment (see AccountsOffice model below).
+  issuedBy       User?     @relation("AdminFineIssuedBy", fields: [issuedById], references: [id])
+  issuedById     String?
+  cancelledAt    DateTime?
+  cancelledById  String?
+  reconciledAt   DateTime?
+  reconciledById String?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
 }
 
 model PayLaterDue {

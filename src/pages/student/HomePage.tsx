@@ -7,6 +7,7 @@ import WalletCard from '@/components/WalletCard';
 import PinDialog from '@/components/PinDialog';
 import AddMoneyModal from '@/components/AddMoneyModal';
 import SemesterFeeModal from '@/components/SemesterFeeModal';
+import PaymentCategoryModal from '@/components/PaymentCategoryModal';
 import { useUser } from '@/lib/user-context';
 import { type GetStudentDashboardOutputType } from '@/lib/api';
 import { formatCurrency } from '@/lib/mock-data';
@@ -56,6 +57,7 @@ export default function HomePage() {
   const [pinOpen, setPinOpen] = useState(false);
   const [addMoneyOpen, setAddMoneyOpen] = useState(false);
   const [semesterFeeOpen, setSemesterFeeOpen] = useState(false);
+  const [payCategoryOpen, setPayCategoryOpen] = useState(false);
   const recentTx: TxType[] = recentTransactions;
 
   const quickActions = [
@@ -63,6 +65,9 @@ export default function HomePage() {
     { label: 'Add Money', icon: PlusCircle, onClick: () => setAddMoneyOpen(true), color: 'from-primary/15 to-primary/5', iconColor: 'text-primary' },
     { label: 'Transfer', icon: ArrowRightLeft, onClick: () => navigate('/student/transfer'), color: 'from-[hsl(var(--chart-3))]/15 to-[hsl(var(--chart-3))]/5', iconColor: 'text-[hsl(var(--chart-3))]' },
     { label: 'Withdraw', icon: ArrowUpRight, onClick: () => navigate('/student/withdraw'), color: 'from-[hsl(var(--chart-4))]/15 to-[hsl(var(--chart-4))]/5', iconColor: 'text-[hsl(var(--chart-4))]' },
+    // Opens the payment-category chooser (all unpaid dues — semester fee, admin fines, library
+    // fines, shop dues) rather than jumping straight into one payment type.
+    { label: 'Pay Dues', icon: ShieldAlert, onClick: () => setPayCategoryOpen(true), color: 'from-[hsl(var(--chart-5))]/15 to-[hsl(var(--chart-5))]/5', iconColor: 'text-[hsl(var(--chart-5))]' },
     { label: 'Semester Fee', icon: GraduationCap, onClick: () => setSemesterFeeOpen(true), color: 'from-secondary/15 to-secondary/5', iconColor: 'text-secondary' },
     { label: 'Payments', icon: CreditCard, onClick: () => navigate('/student/payments'), color: 'from-primary/15 to-primary/5', iconColor: 'text-primary' },
     { label: 'Financial Disputes', icon: ScrollText, onClick: () => navigate('/student/disputes'), color: 'from-destructive/15 to-destructive/5', iconColor: 'text-destructive' },
@@ -161,6 +166,7 @@ export default function HomePage() {
       <PinDialog open={pinOpen} onOpenChange={setPinOpen} mode="set" onSuccess={() => refreshDashboard()} />
       <AddMoneyModal open={addMoneyOpen} onOpenChange={setAddMoneyOpen} />
       <SemesterFeeModal open={semesterFeeOpen} onOpenChange={setSemesterFeeOpen} />
+      <PaymentCategoryModal open={payCategoryOpen} onOpenChange={setPayCategoryOpen} />
     </div>
   );
 }

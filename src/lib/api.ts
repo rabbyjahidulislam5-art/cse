@@ -80,7 +80,11 @@ export type GetShopDetailOutputType = {
 export type GetDuesOutputType = {
   semester: DueItem[]; library: DueItem[]; admin: DueItem[]; payLater: DueItem[];
 };
-type DueItem = { id: string; source: string; label: string; amount: number; status: string; dueDate: string };
+type DueItem = {
+  id: string; source: string; label: string; amount: number; status: string; dueDate: string; reference?: string;
+  // Admin fine items only — issuing administrator + issue date, for full audit visibility.
+  issuedAt?: string; issuedByName?: string;
+};
 
 export type GetTransactionsOutputType = {
   transactions: Array<{
@@ -107,8 +111,10 @@ export type GetAdminOverviewOutputType = {
   totalStudents: number; totalShops: number; totalTransactions: number;
   totalRevenue: number; pendingFines: number;
   activeShops?: number; suspendedShops?: number;
-  activeFines?: number; totalFineAmount?: number;
-  recentFines?: Array<any>;
+  // Fine issuance monitoring only — Admin Office issues fines but is never their payment
+  // receiver, so deliberately no amount-owed total here. Accounts Office owns the receivable
+  // view (getAccountsAdminFines).
+  finesIssuedCount?: number; finesPendingCount?: number; finesPaidCount?: number; finesCancelledCount?: number;
   recentActivity: Array<{
     id: string; action: string; actor: string; entityType: string; details: string; createdAt: string;
   }>;
@@ -377,6 +383,66 @@ export const getWaivers = (input: Record<string, unknown> = {}) =>
 
 export const updateWaiver = (input: Record<string, unknown>) =>
   apiCall<{ success: boolean; message: string }>('/admin/waivers/update', input);
+
+// Admin's own issued-fines list — status monitoring only, Cancel/Edit (Pending fines only). Admin
+// Office never touches payment/reconciliation state; that lives on the Accounts side below.
+export type ListAdminFinesOutputType = {
+  fines: Array<{
+    id: string; reason: string; amount: number; reference: string; status: string;
+    incidentDate: string; createdAt: string; studentName: string; studentId: string;
+  }>;
+};
+
+export const listAdminFines = (input: { status?: string; search?: string } = {}) =>
+  apiCall<ListAdminFinesOutputType>('/admin/fines/list', input);
+
+export const cancelAdminFine = (input: { fineId: string; reason?: string }) =>
+  apiCall<{ success: boolean; message: string }>('/admin/fines/cancel', input);
+
+export const updateAdminFine = (input: { fineId: string; reason?: string; amount?: number; incidentDate?: string }) =>
+  apiCall<{ success: boolean; message: string }>('/admin/fines/update', input);
+
+// Accounts Office — Administrative Fines (the actual financial/receivable view). Admin Office's
+// fine data feeds this directly; Accounts Office is the sole financial authority that collects
+// and reconciles payment.
+export type AdminFineRow = {
+  id: string; reason: string; amount: number; reference: string; status: string;
+  incidentDate: string; createdAt: string; updatedAt: string;
+  student: { id: string; fullName: string; studentId: string; email: string };
+  issuedBy: { id: string; fullName: string; email: string } | null;
+  cancelledAt: string | null; reconciledAt: string | null;
+};
+
+export type ListAccountsAdminFinesOutputType = {
+  fines: AdminFineRow[]; total: number; page: number; pageSize: number; statusCounts: Record<string, number>;
+};
+
+export const listAccountsAdminFines = (input: { status?: string; search?: string; dateFrom?: string; dateTo?: string; page?: number; pageSize?: number } = {}) =>
+  apiCall<ListAccountsAdminFinesOutputType>('/accounts/admin-fines', input);
+
+export type AccountsAdminFineDetailOutputType = {
+  fine: AdminFineRow;
+  transaction: { id: string; reference: string; status: string; amount: number; paymentMethod: string; updatedAt: string } | null;
+  ledgerEntries: Array<{ id: string; entryNumber: string; type: string; debitAmount: number; creditAmount: number; balanceAfter: number; createdAt: string }>;
+  auditTrail: Array<{ id: string; action: string; actorName: string; details: string; createdAt: string }>;
+};
+
+export const getAccountsAdminFineDetail = (input: { fineId: string }) =>
+  apiCall<AccountsAdminFineDetailOutputType>('/accounts/admin-fines/detail', input);
+
+export const reconcileAdminFine = (input: { fineId: string }) =>
+  apiCall<{ success: boolean; message: string }>('/accounts/admin-fines/reconcile', input);
+
+// Accounts Office QR — singleton (mirrors Library). Scanning it opens the payment-category
+// chooser rather than one flat payment, since Accounts collects many payment categories.
+export const getAccountsQr = (input: Record<string, unknown> = {}) =>
+  apiCall<{ office: { id: string; name: string; qrToken: string; qrSignature?: string } }>('/accounts/qr/details', input);
+
+export const regenerateAccountsQr = (input: Record<string, unknown> = {}) =>
+  apiCall<{ success: boolean; qrToken: string; message: string }>('/accounts/qr/regenerate', input);
+
+export const validateAccountsQr = (input: { qrData: string }) =>
+  apiCall<{ valid: boolean; office?: { id: string; name: string }; message?: string }>('/accounts/qr/validate', input);
 
 // Library endpoints
 export const getLibraryOverview = (input: Record<string, unknown> = {}) =>

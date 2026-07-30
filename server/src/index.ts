@@ -19,6 +19,7 @@ import {
   isStrongPassword, parseQrPayload,
 } from './lib/merchantService';
 import { parseLibraryQrPayload, ensureLibrarySingleton } from './lib/libraryService';
+import { parseAccountsQrPayload, ensureAccountsOfficeSingleton } from './lib/accountsService';
 import http from 'http';
 import studentDisputeRouter from './routes/disputes/student';
 import accountsDisputeRouter from './routes/disputes/accounts';
@@ -881,14 +882,19 @@ router.post('/dues', authMiddleware, async (req: AuthRequest, res) => {
     const [sem, lib, adm, pl] = await Promise.all([
       prisma.semesterFee.findMany({ where: { studentId: userId }, take: 100 }),
       prisma.libraryFine.findMany({ where: { studentId: userId }, take: 100 }),
-      prisma.adminFine.findMany({ where: { studentId: userId }, take: 100 }),
+      prisma.adminFine.findMany({ where: { studentId: userId }, take: 100, include: { issuedBy: true } }),
       prisma.payLaterDue.findMany({ where: { studentId: userId }, take: 100 }),
     ]);
     res.json({
-      semester: sem.map(r => ({ id: r.id, source: 'semester', label: r.label || '', amount: r.amount || 0, status: (r.status || 'Pending').toLowerCase(), dueDate: r.dueDate || '' })),
-      library: lib.map(r => ({ id: r.id, source: 'library', label: r.label || '', amount: r.amount || 0, status: (r.status || 'Pending').toLowerCase(), dueDate: r.dueDate || '' })),
-      admin: adm.map(r => ({ id: r.id, source: 'admin', label: r.reason || '', amount: r.amount || 0, status: (r.status || 'Pending').toLowerCase(), dueDate: r.incidentDate || '' })),
-      payLater: pl.map(r => ({ id: r.id, source: 'payLater', label: r.description || r.reference || '', amount: r.amount || 0, status: (r.status || 'Pending').toLowerCase(), dueDate: r.dueDate || '' })),
+      semester: sem.map(r => ({ id: r.id, source: 'semester', label: r.label || '', amount: r.amount || 0, status: (r.status || 'Pending').toLowerCase(), dueDate: r.dueDate || '', reference: r.reference || '' })),
+      library: lib.map(r => ({ id: r.id, source: 'library', label: r.label || '', amount: r.amount || 0, status: (r.status || 'Pending').toLowerCase(), dueDate: r.dueDate || '', reference: r.reference || '' })),
+      // Complete audit-friendly info for the student's pending-payments view: reason (label),
+      // reference, issue date, due date, and who at Admin Office issued it.
+      admin: adm.map(r => ({
+        id: r.id, source: 'admin', label: r.reason || '', amount: r.amount || 0, status: (r.status || 'Pending').toLowerCase(), dueDate: r.incidentDate || '',
+        reference: r.reference || '', issuedAt: r.createdAt.toISOString(), issuedByName: r.issuedBy?.fullName || '',
+      })),
+      payLater: pl.map(r => ({ id: r.id, source: 'payLater', label: r.description || r.reference || '', amount: r.amount || 0, status: (r.status || 'Pending').toLowerCase(), dueDate: r.dueDate || '', reference: r.reference || '' })),
     });
   } catch (err: any) {
     res.status(500).json({ message: err.message });
@@ -1727,12 +1733,37 @@ async function confirmSslPayment(reference: string, source: 'ipn' | 'browser-val
 
     // Library-side: Library has no per-payment owner (shared singleton, see Library model), so
     // every Library fine payment — QR-originated or staff-imposed — fans out to all Library Staff
-    // in real time instead of one owner, mirroring the shop-owner notify above.
+    // in real time instead of one owner, mirroring the shop-owner notify above. Admin Office is
+    // also notified — unlike Shop (where only the merchant hears about their own sales), library
+    // fine collection is institution-wide, so Admin needs the same visibility Library staff get.
     if (tx.purpose === 'library_fine') {
       void notifyRole('Library', {
         category: 'payment', type: 'library_fine.payment_received',
         title: 'Library Fine Paid', body: `A library fine payment of ৳${amount.toLocaleString()} was received. Reference: ${reference}.`,
         link: '/library',
+      }).catch(() => {});
+      void notifyRole('Admin Office', {
+        category: 'payment', type: 'library_fine.payment_received',
+        title: 'Library Fine Paid', body: `A library fine payment of ৳${amount.toLocaleString()} was received. Reference: ${reference}.`,
+        link: '/admin/fines',
+      }).catch(() => {});
+    }
+
+    // Accounts Office is the sole financial authority that collects/reconciles administrative
+    // fines — it must hear about a payment the moment it lands, without polling, so the new
+    // Administrative Fines section stays live. Admin Office (who issued the fine) is notified too,
+    // but strictly for monitoring — this is a notification, never a receivable entry on Admin's
+    // own dashboard.
+    if (tx.purpose === 'admin_fine') {
+      void notifyRole('Accounts Office', {
+        category: 'payment', type: 'admin_fine.payment_received',
+        title: 'Administrative Fine Paid', body: `An administrative fine payment of ৳${amount.toLocaleString()} was received. Reference: ${reference}.`,
+        link: '/accounts/admin-fines',
+      }).catch(() => {});
+      void notifyRole('Admin Office', {
+        category: 'payment', type: 'admin_fine.payment_received',
+        title: 'Fine Paid (Collected by Accounts Office)', body: `A fine you issued was paid — ৳${amount.toLocaleString()}. Reference: ${reference}.`,
+        link: '/admin/fines',
       }).catch(() => {});
     }
 
@@ -2198,10 +2229,20 @@ router.post('/admin/overview', authMiddleware, requireAdmin, async (req: AuthReq
       prisma.auditLog.findMany({ take: 10, orderBy: { createdAt: 'desc' }, include: { actor: true } }),
     ]);
     const txSum = await prisma.transaction.aggregate({ _sum: { amount: true }, where: { status: 'Success', direction: 'Credit' } });
-    const pendingFines = await prisma.adminFine.count({ where: { status: 'Pending' } });
+    // Admin Office issues fines but is never their payment receiver — these are plain status
+    // counts for monitoring, deliberately with no amount total framed as money owed to Admin.
+    // Accounts Office owns the actual receivable view at /accounts/admin-fines.
+    const [finesIssuedCount, finesPendingCount, finesPaidCount, finesCancelledCount] = await Promise.all([
+      prisma.adminFine.count(),
+      prisma.adminFine.count({ where: { status: 'Pending' } }),
+      prisma.adminFine.count({ where: { status: 'Paid' } }),
+      prisma.adminFine.count({ where: { status: 'Cancelled' } }),
+    ]);
+    const pendingFines = finesPendingCount; // kept for backward compatibility with any existing caller
 
     res.json({
       totalStudents, totalShops, activeShops, suspendedShops, totalTransactions, totalRevenue: txSum._sum.amount || 0, pendingFines,
+      finesIssuedCount, finesPendingCount, finesPaidCount, finesCancelledCount,
       recentActivity: recentLogs.map(l => ({ id: l.id, action: l.action, actor: l.actorId || '', actorName: l.actor?.fullName || '', entityType: l.entityType || '', details: l.details || '', createdAt: l.createdAt.toISOString() })),
     });
   } catch (err: any) {
@@ -2630,7 +2671,10 @@ router.post('/admin/fines/assign', authMiddleware, requireAdmin, async (req: Aut
   try {
     const { studentId, reason, amount, incidentDate } = req.body;
     const ref = `AF-${Date.now().toString(36).toUpperCase()}`;
-    const fine = await prisma.adminFine.create({ data: { reason, studentId, amount, incidentDate: incidentDate || new Date().toISOString().split('T')[0], status: 'Pending', reference: ref } });
+    // Admin Office only ever creates and assigns the fine to the student — it is never recorded
+    // or treated as an Admin-side receivable. Accounts Office is the sole financial authority
+    // that collects/reconciles payment (see /accounts/admin-fines* below).
+    const fine = await prisma.adminFine.create({ data: { reason, studentId, amount, incidentDate: incidentDate || new Date().toISOString().split('T')[0], status: 'Pending', reference: ref, issuedById: req.user!.id } });
     await prisma.auditLog.create({ data: { action: 'Admin Fine Assigned', actorId: req.user!.id, entityType: 'AdminFine', entityId: fine.id, details: `Fine of ৳${amount}: ${reason}`, ipAddress: req.ip } });
     void notifyUser({
       recipientId: studentId, category: 'payment', type: 'admin_fine.assigned',
@@ -2639,6 +2683,98 @@ router.post('/admin/fines/assign', authMiddleware, requireAdmin, async (req: Aut
       emailSubject: `Fine Assigned — ৳${amount} — Smart Campus`,
     });
     res.json({ success: true, fineId: fine.id, message: 'Fine assigned successfully' });
+  } catch (err: any) {
+    res.status(500).json({ message: err.message });
+  }
+});
+
+// Admin Office may cancel a fine it issued only while it's still unpaid — once Accounts Office has
+// collected payment, cancellation is no longer Admin's call (would corrupt Accounts' financial
+// record). Cancelled fines are automatically excluded from payment: /payment/init's item validation
+// already requires status === 'Pending'.
+router.post('/admin/fines/cancel', authMiddleware, requireAdmin, async (req: AuthRequest, res) => {
+  try {
+    const { fineId, reason } = req.body;
+    const fine = await prisma.adminFine.findUnique({ where: { id: fineId } });
+    if (!fine) return res.status(404).json({ message: 'Fine not found.' });
+    if (fine.status !== 'Pending') return res.status(400).json({ message: `Only a Pending fine can be cancelled (current status: ${fine.status}).` });
+
+    await prisma.adminFine.update({ where: { id: fineId }, data: { status: 'Cancelled', cancelledAt: new Date(), cancelledById: req.user!.id } });
+    await prisma.auditLog.create({ data: { action: 'Admin Fine Cancelled', actorId: req.user!.id, entityType: 'AdminFine', entityId: fineId, details: reason || 'Fine cancelled by Admin Office', ipAddress: req.ip } });
+    void notifyUser({
+      recipientId: fine.studentId, category: 'payment', type: 'admin_fine.cancelled',
+      title: 'Fine Cancelled', body: `Your fine of ৳${fine.amount.toLocaleString()} (${fine.reason || 'Administrative Fine'}) has been cancelled and is no longer payable.`,
+      link: '/student/dues',
+    });
+    res.json({ success: true, message: 'Fine cancelled' });
+  } catch (err: any) {
+    res.status(500).json({ message: err.message });
+  }
+});
+
+// Admin Office may edit a fine's reason/amount/incident date only while still Pending — once paid,
+// the amount is locked in Accounts Office's financial record and can no longer be altered from here.
+router.post('/admin/fines/update', authMiddleware, requireAdmin, async (req: AuthRequest, res) => {
+  try {
+    const { fineId, reason, amount, incidentDate } = req.body;
+    const fine = await prisma.adminFine.findUnique({ where: { id: fineId } });
+    if (!fine) return res.status(404).json({ message: 'Fine not found.' });
+    if (fine.status !== 'Pending') return res.status(400).json({ message: `Only a Pending fine can be edited (current status: ${fine.status}).` });
+
+    const data: any = {};
+    if (reason !== undefined) data.reason = reason;
+    if (amount !== undefined) {
+      const amt = Number(amount);
+      if (!amt || amt <= 0) return res.status(400).json({ message: 'Amount must be greater than zero.' });
+      data.amount = amt;
+    }
+    if (incidentDate !== undefined) data.incidentDate = incidentDate;
+    if (Object.keys(data).length === 0) return res.status(400).json({ message: 'Nothing to update.' });
+
+    await prisma.adminFine.update({ where: { id: fineId }, data });
+    await prisma.auditLog.create({
+      data: {
+        action: 'Admin Fine Updated', actorId: req.user!.id, entityType: 'AdminFine', entityId: fineId,
+        details: `Updated: ${Object.keys(data).map(k => `${k} ${fine[k as keyof typeof fine]} → ${data[k]}`).join(', ')}`,
+        ipAddress: req.ip,
+      },
+    });
+    if (data.amount !== undefined && data.amount !== fine.amount) {
+      void notifyUser({
+        recipientId: fine.studentId, category: 'payment', type: 'admin_fine.updated',
+        title: 'Fine Updated', body: `Your fine "${data.reason || fine.reason || 'Administrative Fine'}" was updated to ৳${data.amount.toLocaleString()}.`,
+        link: '/student/dues',
+      });
+    }
+    res.json({ success: true, message: 'Fine updated' });
+  } catch (err: any) {
+    res.status(500).json({ message: err.message });
+  }
+});
+
+// Admin's own "Issued Fines" list — status monitoring + Cancel/Edit (Pending only). This is not a
+// receivable view (no payment/reconciliation data here); the financial view for the same rows is
+// Accounts Office's /accounts/admin-fines.
+router.post('/admin/fines/list', authMiddleware, requireAdmin, async (req: AuthRequest, res) => {
+  try {
+    const { status, search } = req.body as { status?: string; search?: string };
+    const where: any = {};
+    if (status && status !== 'All') where.status = status;
+    if (search) {
+      where.OR = [
+        { reason: { contains: search, mode: 'insensitive' } },
+        { student: { fullName: { contains: search, mode: 'insensitive' } } },
+        { student: { studentId: { contains: search, mode: 'insensitive' } } },
+      ];
+    }
+    const fines = await prisma.adminFine.findMany({ where, take: 100, orderBy: { createdAt: 'desc' }, include: { student: true } });
+    res.json({
+      fines: fines.map(f => ({
+        id: f.id, reason: f.reason || '', amount: f.amount, reference: f.reference || '',
+        status: f.status, incidentDate: f.incidentDate || '', createdAt: f.createdAt.toISOString(),
+        studentName: f.student?.fullName || '', studentId: f.student?.studentId || '',
+      })),
+    });
   } catch (err: any) {
     res.status(500).json({ message: err.message });
   }
@@ -3107,6 +3243,168 @@ router.post('/accounts/analytics/report', authMiddleware, requireAccounts, async
       rows, uploadsSubdir: 'analytics-reports', filenamePrefix: 'collection-analytics',
     });
     res.json({ url });
+  } catch (err: any) {
+    res.status(500).json({ message: err.message });
+  }
+});
+
+// ─── ACCOUNTS — ADMINISTRATIVE FINES ───
+// Accounts Office is the only financial authority responsible for collecting and verifying
+// administrative fines Admin Office issues. Admin never appears here as a receivable — this is
+// the sole receivable/collection view for AdminFine records.
+
+router.post('/accounts/admin-fines', authMiddleware, requireAccounts, async (req: AuthRequest, res) => {
+  try {
+    const { status, search, dateFrom, dateTo, page = 1, pageSize = 20 } = req.body as {
+      status?: string; search?: string; dateFrom?: string; dateTo?: string; page?: number; pageSize?: number;
+    };
+    const where: any = {};
+    if (status && status !== 'All') where.status = status;
+    if (dateFrom || dateTo) {
+      where.createdAt = {};
+      if (dateFrom) where.createdAt.gte = new Date(dateFrom);
+      if (dateTo) where.createdAt.lte = new Date(dateTo);
+    }
+    if (search) {
+      where.OR = [
+        { reason: { contains: search, mode: 'insensitive' } },
+        { reference: { contains: search, mode: 'insensitive' } },
+        { student: { fullName: { contains: search, mode: 'insensitive' } } },
+        { student: { studentId: { contains: search, mode: 'insensitive' } } },
+        { student: { email: { contains: search, mode: 'insensitive' } } },
+      ];
+    }
+
+    const take = Math.min(Math.max(Number(pageSize) || 20, 1), 100);
+    const skip = (Math.max(Number(page) || 1, 1) - 1) * take;
+
+    const [fines, total, statusCountsRaw] = await Promise.all([
+      prisma.adminFine.findMany({
+        where, take, skip, orderBy: { createdAt: 'desc' },
+        include: { student: true, issuedBy: true },
+      }),
+      prisma.adminFine.count({ where }),
+      prisma.adminFine.groupBy({ by: ['status'], _count: { status: true } }),
+    ]);
+
+    const statusCounts: Record<string, number> = {};
+    for (const row of statusCountsRaw) statusCounts[row.status] = row._count.status;
+
+    res.json({
+      fines: fines.map(f => ({
+        id: f.id, reason: f.reason || '', amount: f.amount, reference: f.reference || '',
+        status: f.status, incidentDate: f.incidentDate || '', createdAt: f.createdAt.toISOString(), updatedAt: f.updatedAt.toISOString(),
+        student: { id: f.studentId, fullName: f.student?.fullName || '', studentId: f.student?.studentId || '', email: f.student?.email || '' },
+        issuedBy: f.issuedBy ? { id: f.issuedBy.id, fullName: f.issuedBy.fullName || '', email: f.issuedBy.email } : null,
+        cancelledAt: f.cancelledAt ? f.cancelledAt.toISOString() : null,
+        reconciledAt: f.reconciledAt ? f.reconciledAt.toISOString() : null,
+      })),
+      total, page: Number(page) || 1, pageSize: take, statusCounts,
+    });
+  } catch (err: any) {
+    res.status(500).json({ message: err.message });
+  }
+});
+
+router.post('/accounts/admin-fines/detail', authMiddleware, requireAccounts, async (req: AuthRequest, res) => {
+  try {
+    const { fineId } = req.body as { fineId: string };
+    const fine = await prisma.adminFine.findUnique({ where: { id: fineId }, include: { student: true, issuedBy: true } });
+    if (!fine) return res.status(404).json({ message: 'Fine not found.' });
+
+    const [transaction, ledgerEntries, auditLogs] = await Promise.all([
+      fine.reference ? prisma.transaction.findFirst({ where: { reference: fine.reference } }) : Promise.resolve(null),
+      fine.reference ? prisma.ledgerEntry.findMany({ where: { reference: fine.reference }, orderBy: { createdAt: 'asc' } }) : Promise.resolve([]),
+      prisma.auditLog.findMany({ where: { entityType: 'AdminFine', entityId: fineId }, orderBy: { createdAt: 'asc' }, include: { actor: true } }),
+    ]);
+
+    res.json({
+      fine: {
+        id: fine.id, reason: fine.reason || '', amount: fine.amount, reference: fine.reference || '',
+        status: fine.status, incidentDate: fine.incidentDate || '', createdAt: fine.createdAt.toISOString(), updatedAt: fine.updatedAt.toISOString(),
+        student: { id: fine.studentId, fullName: fine.student?.fullName || '', studentId: fine.student?.studentId || '', email: fine.student?.email || '' },
+        issuedBy: fine.issuedBy ? { id: fine.issuedBy.id, fullName: fine.issuedBy.fullName || '', email: fine.issuedBy.email } : null,
+        cancelledAt: fine.cancelledAt ? fine.cancelledAt.toISOString() : null,
+        reconciledAt: fine.reconciledAt ? fine.reconciledAt.toISOString() : null,
+      },
+      transaction: transaction ? {
+        id: transaction.id, reference: transaction.reference, status: transaction.status,
+        amount: transaction.amount, paymentMethod: transaction.paymentMethod || '', updatedAt: transaction.updatedAt.toISOString(),
+      } : null,
+      ledgerEntries: ledgerEntries.map(l => ({ id: l.id, entryNumber: l.entryNumber, type: l.type, debitAmount: l.debitAmount, creditAmount: l.creditAmount, balanceAfter: l.balanceAfter, createdAt: l.createdAt.toISOString() })),
+      auditTrail: auditLogs.map(a => ({ id: a.id, action: a.action, actorName: a.actor?.fullName || 'System', details: a.details || '', createdAt: a.createdAt.toISOString() })),
+    });
+  } catch (err: any) {
+    res.status(500).json({ message: err.message });
+  }
+});
+
+// Manual reconciliation mark — mirrors the existing manual Shop Settlement bookkeeping pattern
+// (no bank-statement integration exists anywhere in this app to match against automatically).
+router.post('/accounts/admin-fines/reconcile', authMiddleware, requireAccounts, async (req: AuthRequest, res) => {
+  try {
+    const { fineId } = req.body as { fineId: string };
+    const fine = await prisma.adminFine.findUnique({ where: { id: fineId } });
+    if (!fine) return res.status(404).json({ message: 'Fine not found.' });
+    if (fine.status !== 'Paid') return res.status(400).json({ message: 'Only a Paid fine can be reconciled.' });
+    if (fine.reconciledAt) return res.status(400).json({ message: 'This fine is already reconciled.' });
+
+    await prisma.adminFine.update({ where: { id: fineId }, data: { reconciledAt: new Date(), reconciledById: req.user!.id } });
+    await prisma.auditLog.create({ data: { action: 'Admin Fine Reconciled', actorId: req.user!.id, entityType: 'AdminFine', entityId: fineId, details: `Reconciled ৳${fine.amount.toLocaleString()} (ref ${fine.reference || 'n/a'})`, ipAddress: req.ip } });
+    res.json({ success: true, message: 'Fine marked reconciled' });
+  } catch (err: any) {
+    res.status(500).json({ message: err.message });
+  }
+});
+
+// ─── ACCOUNTS OFFICE QR ───
+// Singleton QR (mirrors Library's shared-office pattern) — scanning it does NOT jump to one flat
+// payment like Shop/Library QR does; it opens the scanning student's own payment-category chooser
+// (all their unpaid dues across every source), since Accounts Office collects many categories.
+
+router.post('/accounts/qr/details', authMiddleware, requireAccounts, async (req: AuthRequest, res) => {
+  try {
+    const office = await ensureAccountsOfficeSingleton(prisma, QR_SIGNING_SECRET);
+    res.json({ office });
+  } catch (err: any) {
+    res.status(500).json({ message: err.message });
+  }
+});
+
+router.post('/accounts/qr/regenerate', authMiddleware, requireAccounts, async (req: AuthRequest, res) => {
+  try {
+    const office = await ensureAccountsOfficeSingleton(prisma, QR_SIGNING_SECRET);
+    const newToken = `QR-${crypto.randomBytes(8).toString('hex')}`;
+    const newSignature = signQrToken(office.id, newToken);
+    await prisma.accountsOffice.update({ where: { id: office.id }, data: { qrToken: newToken, qrSignature: newSignature } });
+    await prisma.auditLog.create({ data: { action: 'qr.regenerate', actorId: req.user!.id, entityType: 'AccountsOffice', entityId: office.id, ipAddress: req.ip } });
+    res.json({ success: true, qrToken: newToken, message: 'QR regenerated' });
+  } catch (err: any) {
+    res.status(500).json({ message: err.message });
+  }
+});
+
+router.post('/accounts/qr/validate', authMiddleware, async (req: AuthRequest, res) => {
+  try {
+    const { qrData } = req.body;
+    if (typeof qrData !== 'string' || !qrData) return res.json({ valid: false });
+
+    const { token, accountsId } = parseAccountsQrPayload(qrData);
+    if (!token) return res.json({ valid: false });
+
+    const office = accountsId
+      ? await prisma.accountsOffice.findFirst({ where: { id: accountsId, qrToken: token } })
+      : await prisma.accountsOffice.findFirst({ where: { qrToken: token } });
+    if (!office) return res.json({ valid: false });
+
+    if (!verifyQrSignature(office.id, office.qrToken || '', office.qrSignature, QR_SIGNING_SECRET)) {
+      await prisma.auditLog.create({
+        data: { action: 'qr.signature_mismatch', actorId: req.user!.id, entityType: 'AccountsOffice', entityId: office.id, details: 'Scanned QR failed signature verification — possible forgery or stale QR image.', ipAddress: req.ip },
+      });
+      return res.json({ valid: false, message: 'This QR code could not be verified. Please ask Accounts Office staff to show the current QR code.' });
+    }
+
+    res.json({ valid: true, office: { id: office.id, name: office.name } });
   } catch (err: any) {
     res.status(500).json({ message: err.message });
   }

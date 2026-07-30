@@ -1,4 +1,5 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Button } from '@/components/ui/button';
@@ -13,6 +14,7 @@ import PaymentConfirmModal from '@/components/PaymentConfirmModal';
 import { toast } from 'sonner';
 import { GraduationCap, BookOpen, ShieldAlert, Loader2, CheckCircle2, Clock, CreditCard } from 'lucide-react';
 import { getDues, disputeFine, initSSLPayment, PIN_REQUIRED_THRESHOLD, OTP_REQUIRED_THRESHOLD, type GetDuesOutputType, type SslPayItem } from '@/lib/api';
+import { useNotificationSocket } from '@/lib/socket';
 import { useUser } from '@/lib/user-context';
 import { formatCurrency } from '@/lib/mock-data';
 import { FadeIn } from '@/components/PageTransition';
@@ -41,6 +43,17 @@ export default function DuesPage() {
   const [disputeFineId, setDisputeFineId] = useState<string | null>(null);
   const [disputeReason, setDisputeReason] = useState('');
 
+  // Deep-link from the payment-category modal (QR scan or dashboard "Pay" entry): `?focus=<source>:<id>`
+  // switches to the right tab and auto-triggers the exact same single-item Pay flow used everywhere
+  // else on this page — no separate payment UI, per the requirement to preserve the existing
+  // confirmation/PIN/OTP/receipt flow exactly.
+  const [searchParams, setSearchParams] = useSearchParams();
+  const focusParam = searchParams.get('focus');
+  const focusSource = focusParam?.split(':')[0];
+  const focusId = focusParam?.split(':').slice(1).join(':');
+  const [activeTab, setActiveTab] = useState(focusSource && ['semester', 'library', 'admin', 'payLater'].includes(focusSource) ? focusSource : 'semester');
+  const focusTriggered = useRef(false);
+
   // Tiered payment authorization: confirm -> (PIN if amount is medium+) -> (OTP if amount is large) -> gateway.
   const [pending, setPending] = useState<PendingPayment | null>(null);
   const [confirmOpen, setConfirmOpen] = useState(false);
@@ -55,11 +68,27 @@ export default function DuesPage() {
 
   useEffect(() => { loadDues(); }, [user]);
 
+  // A new fine (or a fine getting cancelled/updated) must show up here immediately, not just on
+  // next page visit — refetch whenever a payment-category notification arrives live.
+  useNotificationSocket((n) => { if (n.category === 'payment') loadDues(); });
+
   const toggleItem = (id: string) => {
     setSelected(prev => { const next = new Set(prev); if (next.has(id)) next.delete(id); else next.add(id); return next; });
   };
 
   const allItems = dues ? [...dues.semester, ...dues.library, ...dues.admin, ...dues.payLater] : [];
+
+  useEffect(() => {
+    if (!dues || !focusParam || focusTriggered.current) return;
+    const item = allItems.find(i => i.source === focusSource && i.id === focusId);
+    if (item && item.status === 'pending') {
+      focusTriggered.current = true;
+      handlePaySingle(item);
+    }
+    // Clear the query param either way so re-navigating back to /student/dues doesn't re-trigger.
+    setSearchParams(prev => { const next = new URLSearchParams(prev); next.delete('focus'); return next; }, { replace: true });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [dues]);
   const payableItems = allItems.filter(d => selected.has(d.id) && d.status === 'pending');
   const totalSelected = payableItems.reduce((sum, d) => sum + d.amount, 0);
 
@@ -172,6 +201,13 @@ export default function DuesPage() {
                 </div>
                 {item.status === 'under review' && <p className="text-[10px] text-muted-foreground mt-1">Dispute submitted — awaiting review</p>}
                 {canPay && isInsufficient && <p className="text-[10px] text-destructive/80 mt-1">Wallet balance: {formatCurrency(walletBalance)} (Short by {formatCurrency(item.amount - walletBalance)})</p>}
+                {source === 'admin' && (item.reference || item.issuedByName || item.dueDate) && (
+                  <p className="text-[10px] text-muted-foreground/80 mt-1">
+                    {item.reference && <>Ref: {item.reference} · </>}
+                    {item.dueDate && <>Issued: {item.dueDate} · </>}
+                    {item.issuedByName && <>By: {item.issuedByName}</>}
+                  </p>
+                )}
               </div>
               <span className={`text-sm font-bold tabular-nums shrink-0 ${canPay ? 'text-foreground' : 'text-muted-foreground'}`}>{formatCurrency(item.amount)}</span>
               {canPay && (
@@ -225,7 +261,7 @@ export default function DuesPage() {
         </div>
       </FadeIn>
 
-      <Tabs defaultValue="semester">
+      <Tabs value={activeTab} onValueChange={setActiveTab}>
         <TabsList className="w-full sm:w-auto mb-5 bg-accent/50 p-1 rounded-xl">
           <TabsTrigger value="semester" className="gap-1.5 rounded-lg data-[state=active]:bg-card data-[state=active]:shadow-sm"><GraduationCap className="w-3.5 h-3.5" /> Semester</TabsTrigger>
           <TabsTrigger value="library" className="gap-1.5 rounded-lg data-[state=active]:bg-card data-[state=active]:shadow-sm"><BookOpen className="w-3.5 h-3.5" /> Library</TabsTrigger>

@@ -1,13 +1,12 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
-import { Store, ShieldAlert, AlertTriangle, Users, TrendingUp, Activity, Database, Loader2 } from 'lucide-react';
+import { Store, ShieldAlert, Activity, Database, Loader2, CheckCircle2, XCircle } from 'lucide-react';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Button } from '@/components/ui/button';
 import { getAdminOverview, seedData, type GetAdminOverviewOutputType } from '@/lib/api';
 import { toast } from 'sonner';
 import { FadeIn } from '@/components/PageTransition';
-import StatusBadge from '@/components/StatusBadge';
 
 type OverviewData = GetAdminOverviewOutputType;
 
@@ -85,36 +84,35 @@ export default function AdminHomePage() {
       <FadeIn delay={0.05}>
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
           <StatCard icon={Store} label="Total Shops" value={data?.totalShops || 0} subtitle={`${data?.activeShops || 0} active · ${data?.suspendedShops || 0} suspended`} color="--chart-2" onClick={() => navigate('/admin/shops')} />
-          <StatCard icon={ShieldAlert} label="Active Fines" value={data?.activeFines || 0} subtitle={`৳${(data?.totalFineAmount || 0).toLocaleString()} total`} color="--chart-5" onClick={() => navigate('/admin/fines')} />
-          <StatCard icon={AlertTriangle} label="Pending Waivers" value={0} color="--chart-4" onClick={() => navigate('/admin/fines')} />
+          <StatCard icon={ShieldAlert} label="Fines Awaiting Payment" value={data?.finesPendingCount || 0} subtitle="Monitoring only — Accounts Office collects payment" color="--chart-5" onClick={() => navigate('/admin/fines')} />
           <StatCard icon={Activity} label="System Status" value="Operational" color="--chart-3" />
         </div>
       </FadeIn>
 
-      {/* Recent Fines */}
+      {/* Fines Issued — status monitoring only. Admin Office issues fines but is never the
+          payment receiver; this deliberately shows counts, never an amount framed as owed to
+          Admin. The financial/receivable view lives in Accounts Office's Administrative Fines
+          section instead. */}
       <FadeIn delay={0.1}>
         <div className="rounded-2xl border border-border/60 bg-card overflow-hidden">
-          <div className="p-5 border-b border-border/40">
-            <h2 className="text-sm font-semibold text-foreground">Recent Fines</h2>
+          <div className="p-5 border-b border-border/40 flex items-center justify-between">
+            <h2 className="text-sm font-semibold text-foreground">Fines Issued — Status Monitor</h2>
+            <Button variant="outline" size="sm" onClick={() => navigate('/admin/fines')}>Manage Fines</Button>
           </div>
-          {data?.recentFines && data.recentFines.length > 0 ? (
-            <div className="divide-y divide-border/30">
-              {data.recentFines.map((fine) => (
-                <div key={fine.id} className="flex items-center justify-between px-5 py-3.5 hover:bg-accent/30 transition-colors">
-                  <div>
-                    <p className="text-sm font-medium text-foreground">{fine.reason}</p>
-                    <p className="text-xs text-muted-foreground mt-0.5">{fine.incidentDate || 'N/A'}</p>
-                  </div>
-                  <div className="flex items-center gap-3">
-                    <span className="text-sm font-semibold text-foreground tabular">৳{fine.amount.toLocaleString()}</span>
-                    <StatusBadge status={fine.status} />
-                  </div>
-                </div>
-              ))}
+          <div className="grid grid-cols-3 divide-x divide-border/30">
+            <div className="p-5 text-center">
+              <p className="text-2xl font-bold text-foreground tabular">{data?.finesPendingCount || 0}</p>
+              <p className="text-xs text-muted-foreground mt-1 flex items-center justify-center gap-1"><ShieldAlert className="w-3.5 h-3.5" style={{ color: 'hsl(var(--chart-5))' }} /> Pending</p>
             </div>
-          ) : (
-            <div className="p-8 text-center text-sm text-muted-foreground">No fines recorded yet.</div>
-          )}
+            <div className="p-5 text-center">
+              <p className="text-2xl font-bold text-foreground tabular">{data?.finesPaidCount || 0}</p>
+              <p className="text-xs text-muted-foreground mt-1 flex items-center justify-center gap-1"><CheckCircle2 className="w-3.5 h-3.5" style={{ color: 'hsl(var(--chart-3))' }} /> Paid to Accounts Office</p>
+            </div>
+            <div className="p-5 text-center">
+              <p className="text-2xl font-bold text-foreground tabular">{data?.finesCancelledCount || 0}</p>
+              <p className="text-xs text-muted-foreground mt-1 flex items-center justify-center gap-1"><XCircle className="w-3.5 h-3.5" style={{ color: 'hsl(var(--muted-foreground))' }} /> Cancelled</p>
+            </div>
+          </div>
         </div>
       </FadeIn>
     </div>

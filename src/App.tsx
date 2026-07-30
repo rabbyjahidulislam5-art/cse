@@ -71,6 +71,8 @@ const DisputesDashboardPage = lazy(() => import('./pages/accounts/DisputesDashbo
 const DisputeCaseDetailPage = lazy(() => import('./pages/accounts/DisputeCaseDetailPage'));
 const DisputeReportsPage = lazy(() => import('./pages/accounts/DisputeReportsPage'));
 const AccountsNotificationsPage = lazy(() => import('./pages/accounts/AccountsNotificationsPage'));
+const AdministrativeFinesPage = lazy(() => import('./pages/accounts/AdministrativeFinesPage'));
+const AccountsQrPage = lazy(() => import('./pages/accounts/AccountsQrPage'));
 
 // Shop pages
 const ShopHomePage = lazy(() => import('./pages/shop/ShopHomePage'));
@@ -161,6 +163,8 @@ export default function App() {
           <Route path="disputes/detail" element={<DisputeCaseDetailPage />} />
           <Route path="disputes/reports" element={<DisputeReportsPage />} />
           <Route path="notifications" element={<AccountsNotificationsPage />} />
+          <Route path="admin-fines" element={<AdministrativeFinesPage />} />
+          <Route path="qr" element={<AccountsQrPage />} />
         </Route>
 
         {/* Shop first-login onboarding — standalone, outside ShopLayout (no nav chrome, mandatory) */}

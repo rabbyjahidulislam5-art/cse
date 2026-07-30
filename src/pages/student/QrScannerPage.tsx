@@ -9,10 +9,11 @@ import SuccessScreen from '@/components/SuccessScreen';
 import PinDialog from '@/components/PinDialog';
 import OtpDialog from '@/components/OtpDialog';
 import PaymentConfirmModal from '@/components/PaymentConfirmModal';
+import PaymentCategoryModal from '@/components/PaymentCategoryModal';
 import { toast } from 'sonner';
 import {
   validateQrMerchant, payShop, initSSLPayment, PIN_REQUIRED_THRESHOLD, OTP_REQUIRED_THRESHOLD,
-  validateLibraryQr, createLibraryQrPayment,
+  validateLibraryQr, createLibraryQrPayment, validateAccountsQr,
   type ValidateQrMerchantOutputType, type ValidateLibraryQrOutputType,
 } from '@/lib/api';
 import { useUser } from '@/lib/user-context';
@@ -21,12 +22,14 @@ import { FadeIn } from '@/components/PageTransition';
 
 type ShopInfo = NonNullable<ValidateQrMerchantOutputType['shop']>;
 type LibraryInfo = NonNullable<ValidateLibraryQrOutputType['library']>;
-type Entity = 'shop' | 'library';
-type Step = 'scan' | 'validating' | 'merchant' | 'amount' | 'method' | 'processing' | 'success' | 'error';
+type Entity = 'shop' | 'library' | 'accounts';
+type Step = 'scan' | 'validating' | 'merchant' | 'amount' | 'method' | 'processing' | 'success' | 'error' | 'category';
 
-// Single scan entry point for both Shop and Library QR codes — a student doesn't know in advance
-// which kind of QR they're pointing at. The Shop code path below (validate → shop_payment →
-// payShop/initSSLPayment) is unchanged from before; the Library branch is additive.
+// Single scan entry point for Shop, Library, and Accounts Office QR codes — a student doesn't
+// know in advance which kind of QR they're pointing at. The Shop code path below (validate →
+// shop_payment → payShop/initSSLPayment) is unchanged from before; the Library branch is
+// additive. Accounts Office QR doesn't lead to one flat payment like Shop/Library — it opens the
+// payment-category chooser (all the student's unpaid dues) instead of the merchant/amount steps.
 export default function QrScannerPage() {
   const navigate = useNavigate();
   const { user, refreshDashboard } = useUser();
@@ -47,6 +50,12 @@ export default function QrScannerPage() {
   const handleScan = async (value: string) => {
     setStep('validating');
     try {
+      if (value.includes(':ACCOUNTS:')) {
+        const res = await validateAccountsQr({ qrData: value });
+        if (res.valid) { setEntity('accounts'); setStep('category'); }
+        else { setError(res.message || 'Invalid QR code'); setStep('error'); }
+        return;
+      }
       if (value.includes(':LIBRARY:')) {
         const res = await validateLibraryQr({ qrData: value });
         if (res.valid && res.library) { setEntity('library'); setLibrary(res.library); setStep('merchant'); }
@@ -149,12 +158,12 @@ export default function QrScannerPage() {
         </button>
         <div className="flex-1">
           <h1 className="text-lg font-bold text-foreground">QR Payment</h1>
-          <p className="text-xs text-muted-foreground">Scan a Shop or Library QR code to pay</p>
+          <p className="text-xs text-muted-foreground">Scan a Shop, Library, or Accounts Office QR code to pay</p>
         </div>
       </div>
 
       {/* Progress */}
-      {!['scan','error','success'].includes(step) && (
+      {!['scan','error','success','category'].includes(step) && (
         <div className="h-1 bg-accent rounded-full mb-6 overflow-hidden">
           <motion.div className="h-full gradient-primary rounded-full" animate={{ width: `${progress}%` }} transition={{ duration: 0.3 }} />
         </div>
@@ -313,6 +322,7 @@ export default function QrScannerPage() {
       )}
       <PinDialog open={pinOpen} onOpenChange={setPinOpen} mode="verify" verifyLength={user?.pinLength || 4} onSuccess={onPinVerified} />
       <OtpDialog open={otpOpen} onOpenChange={setOtpOpen} purpose="Large Payment" onSuccess={onOtpVerified} />
+      <PaymentCategoryModal open={step === 'category'} onOpenChange={(o) => !o && reset()} />
     </div>
   );
 }
