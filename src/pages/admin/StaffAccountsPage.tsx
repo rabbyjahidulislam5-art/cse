@@ -182,7 +182,8 @@ export default function StaffAccountsPage() {
             </div>
             <div>
               <Label className="text-xs text-muted-foreground">Email *</Label>
-              <Input type="email" value={formEmail} onChange={e => setFormEmail(e.target.value)} placeholder="email@smartcampus.edu" className="mt-1.5 bg-accent/50" disabled={!!editStaff} />
+              <Input type="email" value={formEmail} onChange={e => setFormEmail(e.target.value)} placeholder="name@gmail.com" className="mt-1.5 bg-accent/50" disabled={!!editStaff} />
+              <p className="text-[10px] text-muted-foreground mt-1">Use a real inbox — login credentials are emailed here automatically.</p>
             </div>
             <div>
               <Label className="text-xs text-muted-foreground">Role *</Label>

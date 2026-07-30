@@ -203,6 +203,26 @@ model SemesterFee {
   updatedAt DateTime @updatedAt
 }
 
+// Singleton-style entity for the Library's permanent QR/identity — unlike Shop, Library Staff
+// accounts share ONE Library record (matches the existing shared fine-queue dashboard model,
+// no per-staff ownership/isolation). ensureLibrarySingleton() in libraryService.ts creates the
+// one row on first access.
+model Library {
+  id             String   @id @default(cuid())
+  name           String   @default("Central Library")
+  status         String   @default("Active")
+  qrToken        String?
+  qrSignature    String?
+  location       String?
+  logoUrl        String?
+  libraryCode    String?  @unique
+  contactNumber  String?
+  description    String?
+  operatingHours String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+}
+
 model LibraryFine {
   id        String   @id @default(cuid())
   label     String?

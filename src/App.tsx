@@ -55,6 +55,10 @@ const ClearanceStatusPage = lazy(() => import('./pages/library/ClearanceStatusPa
 const LibraryDisputesPage = lazy(() => import('./pages/library/LibraryDisputesPage'));
 const LibraryDisputeDetailPage = lazy(() => import('./pages/library/LibraryDisputeDetailPage'));
 const LibraryNotificationsPage = lazy(() => import('./pages/library/LibraryNotificationsPage'));
+const LibraryQrPage = lazy(() => import('./pages/library/LibraryQrPage'));
+const LibraryProfilePage = lazy(() => import('./pages/library/LibraryProfilePage'));
+const LibraryChangeTempPasswordPage = lazy(() => import('./pages/library/LibraryChangeTempPasswordPage'));
+const LibraryVerifyEmailPage = lazy(() => import('./pages/library/LibraryVerifyEmailPage'));
 
 // Accounts pages
 const AccountsHomePage = lazy(() => import('./pages/accounts/AccountsHomePage'));
@@ -127,6 +131,10 @@ export default function App() {
           <Route path="notifications" element={<AdminNotificationsPage />} />
         </Route>
 
+        {/* Library first-login onboarding — standalone, outside LibraryLayout (no nav chrome, mandatory) */}
+        <Route path="/library/change-password" element={<LibraryChangeTempPasswordPage />} />
+        <Route path="/library/verify-email" element={<LibraryVerifyEmailPage />} />
+
         {/* Library Dashboard */}
         <Route path="/library" element={<LibraryLayout />}>
           <Route index element={<LibraryHomePage />} />
@@ -137,6 +145,8 @@ export default function App() {
           <Route path="disputes" element={<LibraryDisputesPage />} />
           <Route path="disputes/detail" element={<LibraryDisputeDetailPage />} />
           <Route path="notifications" element={<LibraryNotificationsPage />} />
+          <Route path="qr" element={<LibraryQrPage />} />
+          <Route path="profile" element={<LibraryProfilePage />} />
         </Route>
 
         {/* Accounts Office Dashboard */}

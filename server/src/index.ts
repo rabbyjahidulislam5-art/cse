@@ -12,12 +12,13 @@ import rateLimit, { ipKeyGenerator } from 'express-rate-limit';
 import prisma from './lib/prisma';
 import { authMiddleware, generateToken, requireRole, AuthRequest } from './lib/auth';
 import { sendEmail } from './lib/email';
-import { notifyUser } from './lib/notify';
+import { notifyUser, notifyRole } from './lib/notify';
 import { generateTabularReport, ReportFormat } from './lib/report';
 import {
   signQrToken as merchantSignQrToken, verifyQrSignature, generateTempPassword,
   isStrongPassword, parseQrPayload,
 } from './lib/merchantService';
+import { parseLibraryQrPayload, ensureLibrarySingleton } from './lib/libraryService';
 import http from 'http';
 import studentDisputeRouter from './routes/disputes/student';
 import accountsDisputeRouter from './routes/disputes/accounts';
@@ -634,9 +635,11 @@ router.post('/auth/change-password', authMiddleware, passwordChangeLimiter, asyn
   }
 });
 
-// Merchant email verification — reuses the exact OtpCode generate/verify pattern from
-// /auth/register-otp and /auth/forgot-password/reset above, `purpose: 'ShopEmailVerify'`.
-router.post('/auth/shop/send-verification-otp', authMiddleware, requireRole('Shop Staff'), passwordChangeLimiter, async (req: AuthRequest, res) => {
+// First-login email verification — reuses the exact OtpCode generate/verify pattern from
+// /auth/register-otp and /auth/forgot-password/reset above, `purpose: 'ShopEmailVerify'`. Route
+// path/purpose string kept as-is for backward compatibility with the Shop frontend; widened to
+// also cover Library Staff's own onboarding gate rather than duplicating this logic per role.
+router.post('/auth/shop/send-verification-otp', authMiddleware, requireRole('Shop Staff', 'Library'), passwordChangeLimiter, async (req: AuthRequest, res) => {
   try {
     const user = await prisma.user.findUnique({ where: { id: req.user!.id } });
     if (!user || !user.email) return res.status(404).json({ message: 'User not found.' });
@@ -649,8 +652,8 @@ router.post('/auth/shop/send-verification-otp', authMiddleware, requireRole('Sho
     });
 
     try {
-      await sendEmail(user.email, 'Verify Your Merchant Email — Smart Campus', [
-        { type: 'text', content: `<strong>Hi ${user.fullName || 'Merchant'},</strong>\n\nYour merchant email verification code is:\n\n<strong style="font-size: 28px; letter-spacing: 8px; color: #f59e0b;">${code}</strong>\n\nThis code is valid for 5 minutes.` },
+      await sendEmail(user.email, 'Verify Your Email — Smart Campus', [
+        { type: 'text', content: `<strong>Hi ${user.fullName || 'there'},</strong>\n\nYour email verification code is:\n\n<strong style="font-size: 28px; letter-spacing: 8px; color: #f59e0b;">${code}</strong>\n\nThis code is valid for 5 minutes.` },
         { type: 'divider' },
         { type: 'text', content: '🎓 East West University — Smart Campus Digital Wallet' },
       ]);
@@ -665,7 +668,7 @@ router.post('/auth/shop/send-verification-otp', authMiddleware, requireRole('Sho
   }
 });
 
-router.post('/auth/shop/verify-email', authMiddleware, requireRole('Shop Staff'), async (req: AuthRequest, res) => {
+router.post('/auth/shop/verify-email', authMiddleware, requireRole('Shop Staff', 'Library'), async (req: AuthRequest, res) => {
   try {
     const { otpId, code } = req.body;
     if (!otpId || !code) return res.status(400).json({ message: 'OTP is required.' });
@@ -1722,6 +1725,17 @@ async function confirmSslPayment(reference: string, source: 'ipn' | 'browser-val
       })().catch(() => {});
     }
 
+    // Library-side: Library has no per-payment owner (shared singleton, see Library model), so
+    // every Library fine payment — QR-originated or staff-imposed — fans out to all Library Staff
+    // in real time instead of one owner, mirroring the shop-owner notify above.
+    if (tx.purpose === 'library_fine') {
+      void notifyRole('Library', {
+        category: 'payment', type: 'library_fine.payment_received',
+        title: 'Library Fine Paid', body: `A library fine payment of ৳${amount.toLocaleString()} was received. Reference: ${reference}.`,
+        link: '/library',
+      }).catch(() => {});
+    }
+
     return { status: 'valid' as const, message: 'Payment successful' };
   }
 
@@ -2519,10 +2533,51 @@ router.post('/admin/staff/manage', authMiddleware, requireAdmin, async (req: Aut
     const { action, staffId, userId: legacyUserId, ...data } = req.body;
     const userId = staffId || legacyUserId;
     if (action === 'create') {
-      const hashed = await bcrypt.hash(data.password || 'changeme123', 10);
-      const staff = await prisma.user.create({ data: { email: data.email, password: hashed, fullName: data.fullName, role: data.role, department: data.department, phone: data.phone, status: 'Active' } });
-      await prisma.auditLog.create({ data: { action: 'Staff Account Created', actorId: req.user!.id, entityType: 'User', entityId: staff.id, details: `Created ${data.role} account for ${data.email}`, ipAddress: req.ip } });
-      return res.json({ success: true, message: 'Staff account created' });
+      const { fullName, email, role, department, phone } = data;
+      if (!fullName || !email || !role) return res.status(400).json({ message: 'Full name, email, and role are required.' });
+
+      const lowerEmail = String(email).toLowerCase().trim();
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(lowerEmail)) {
+        return res.status(400).json({ message: 'Enter a valid, real email address the staff member can actually receive mail at.' });
+      }
+      const existingUser = await prisma.user.findUnique({ where: { email: lowerEmail } });
+      if (existingUser) return res.status(409).json({ message: `An account with email ${lowerEmail} already exists.` });
+
+      // Never stored/logged in plaintext — hashed immediately below, emailed once, then discarded.
+      // Mirrors the Shop merchant onboarding pattern (see /admin/shops/manage 'create').
+      const tempPassword = generateTempPassword();
+      const hashedPassword = await bcrypt.hash(tempPassword, 10);
+
+      const staff = await prisma.user.create({
+        data: {
+          email: lowerEmail, password: hashedPassword, fullName, role,
+          department: department || null, phone: phone || null, status: 'Active',
+          mustChangePassword: true, emailVerified: false,
+        },
+      });
+
+      const loginUrl = `${process.env.FRONTEND_URL || ''}/`;
+      let emailDelivered = true;
+      try {
+        await sendEmail(lowerEmail, `Your ${role} Account — Smart Campus`, [
+          { type: 'text', content: `<strong>Welcome, ${fullName}!</strong>\n\nA ${role} account has been created for you on Smart Campus.\n\n<strong>Login Email:</strong> ${lowerEmail}\n<strong>Temporary Password:</strong> ${tempPassword}\n\nYou will be required to set a new password and verify your email on first login.` },
+          { type: 'divider' },
+          { type: 'text', content: `Sign in at: ${loginUrl}` },
+          { type: 'text', content: '🎓 East West University — Smart Campus Digital Wallet' },
+        ]);
+      } catch (err: any) {
+        emailDelivered = false;
+        console.error(`[admin/staff/manage] Failed to email staff credentials to ${lowerEmail}:`, err.message);
+      }
+
+      await prisma.auditLog.create({ data: { action: 'Staff Account Created', actorId: req.user!.id, entityType: 'User', entityId: staff.id, details: `Created ${role} account for ${lowerEmail}${emailDelivered ? '' : ' (credential email failed to send)'}`, ipAddress: req.ip } });
+
+      return res.json({
+        success: true, message: 'Staff account created', staffId: staff.id, emailDelivered,
+        // Only surfaced when the email failed to send, so Admin can relay it manually — never
+        // logged, never persisted in plaintext anywhere.
+        tempPassword: emailDelivered ? undefined : tempPassword,
+      });
     }
     if (action === 'update') {
       await prisma.user.update({ where: { id: userId }, data });
@@ -2787,6 +2842,117 @@ router.post('/library/clearance/report', authMiddleware, requireLibrary, async (
       rows, uploadsSubdir: 'library-reports', filenamePrefix: 'clearance-status',
     });
     res.json({ url });
+  } catch (err: any) {
+    res.status(500).json({ message: err.message });
+  }
+});
+
+// ─── LIBRARY QR + PAYMENT ───
+// The Library QR is a singleton (see libraryService.ts's ensureLibrarySingleton) — one shared
+// record + one permanent QR every Library Staff account can see/manage, unlike Shop's 1:1
+// merchant ownership. This matches how the rest of the Library dashboard already works today
+// (one shared fine queue, no per-staff data isolation).
+
+router.post('/library/details', authMiddleware, requireLibrary, async (req: AuthRequest, res) => {
+  try {
+    const library = await ensureLibrarySingleton(prisma, QR_SIGNING_SECRET);
+    const staffUser = await prisma.user.findUnique({ where: { id: req.user!.id } });
+    res.json({
+      library,
+      staff: staffUser ? {
+        fullName: staffUser.fullName || '', email: staffUser.email, phone: staffUser.phone || '',
+        bio: staffUser.bio || '', profilePicture: staffUser.profilePicture || '',
+        pinSet: staffUser.pinSet || false, pinLength: staffUser.pinLength || 4,
+      } : null,
+    });
+  } catch (err: any) {
+    res.status(500).json({ message: err.message });
+  }
+});
+
+router.post('/library/regenerate-qr', authMiddleware, requireLibrary, async (req: AuthRequest, res) => {
+  try {
+    const library = await ensureLibrarySingleton(prisma, QR_SIGNING_SECRET);
+    const newToken = `QR-${crypto.randomBytes(8).toString('hex')}`;
+    const newSignature = signQrToken(library.id, newToken);
+    await prisma.library.update({ where: { id: library.id }, data: { qrToken: newToken, qrSignature: newSignature } });
+    await prisma.auditLog.create({ data: { action: 'qr.regenerate', actorId: req.user!.id, entityType: 'Library', entityId: library.id, ipAddress: req.ip } });
+    res.json({ success: true, qrToken: newToken, message: 'QR regenerated' });
+  } catch (err: any) {
+    res.status(500).json({ message: err.message });
+  }
+});
+
+// Library-entity fields only (description, hours, contact, location, logo) — name stays
+// admin-managed-by-convention, same posture as Shop's /shop/profile/update. Owner-level personal
+// fields (phone/bio/profilePicture) go through the existing generic /profile/update instead.
+router.post('/library/details/update', authMiddleware, requireLibrary, async (req: AuthRequest, res) => {
+  try {
+    const library = await ensureLibrarySingleton(prisma, QR_SIGNING_SECRET);
+    const { description, operatingHours, contactNumber, location, logoUrl } = req.body;
+    const data: any = {};
+    if (description !== undefined) data.description = description;
+    if (operatingHours !== undefined) data.operatingHours = operatingHours;
+    if (contactNumber !== undefined) data.contactNumber = contactNumber;
+    if (location !== undefined) data.location = location;
+    if (logoUrl !== undefined) data.logoUrl = logoUrl;
+
+    await prisma.library.update({ where: { id: library.id }, data });
+    await prisma.auditLog.create({ data: { action: 'library.details.update', actorId: req.user!.id, entityType: 'Library', entityId: library.id, details: JSON.stringify(Object.keys(data)), ipAddress: req.ip } });
+
+    res.json({ success: true, message: 'Library details updated' });
+  } catch (err: any) {
+    res.status(500).json({ message: err.message });
+  }
+});
+
+router.post('/library/validate-qr', authMiddleware, async (req: AuthRequest, res) => {
+  try {
+    const { qrData } = req.body;
+    if (typeof qrData !== 'string' || !qrData) return res.json({ valid: false, library: null });
+
+    const { token, libraryId: libraryIdHint } = parseLibraryQrPayload(qrData);
+    if (!token) return res.json({ valid: false, library: null });
+
+    const library = libraryIdHint
+      ? await prisma.library.findFirst({ where: { id: libraryIdHint, qrToken: token, status: 'Active' } })
+      : await prisma.library.findFirst({ where: { qrToken: token, status: 'Active' } });
+    if (!library) return res.json({ valid: false, library: null });
+
+    if (!verifyQrSignature(library.id, library.qrToken || '', library.qrSignature, QR_SIGNING_SECRET)) {
+      await prisma.auditLog.create({
+        data: { action: 'qr.signature_mismatch', actorId: req.user!.id, entityType: 'Library', entityId: library.id, details: 'Scanned QR failed signature verification — possible forgery or stale QR image.', ipAddress: req.ip },
+      });
+      return res.json({ valid: false, library: null, message: 'This QR code could not be verified. Please ask library staff to show the current QR code.' });
+    }
+
+    res.json({
+      valid: true,
+      library: { id: library.id, name: library.name, location: library.location || '', logoUrl: library.logoUrl || '' },
+    });
+  } catch (err: any) {
+    res.status(500).json({ message: err.message });
+  }
+});
+
+// Mints one ad-hoc Pending LibraryFine for the amount the student entered after scanning the QR —
+// no new payment logic. The frontend immediately follows this with the existing generic
+// POST /payment/init (purpose: 'library_fine', source: 'library'), which already fully owns
+// validation, PIN/OTP thresholds, the atomic $transaction (Wallet/Ledger/Transaction/AuditLog),
+// and the student notification — all unmodified, exactly as it already does for staff-imposed fines.
+router.post('/library/qr/create-payment', authMiddleware, async (req: AuthRequest, res) => {
+  try {
+    const { amount } = req.body as { amount: number };
+    const amt = Number(amount);
+    if (!amt || amt <= 0) return res.status(400).json({ message: 'Enter a valid amount.' });
+
+    const ref = `LIB-${Date.now().toString(36).toUpperCase()}`;
+    const fine = await prisma.libraryFine.create({
+      data: { label: 'Library Counter Payment', studentId: req.user!.id, fineType: 'QR Payment', amount: amt, status: 'Pending', reference: ref },
+    });
+    await prisma.auditLog.create({ data: { action: 'library.qr_payment.created', actorId: req.user!.id, entityType: 'LibraryFine', entityId: fine.id, details: `QR payment initiated for ৳${amt}`, ipAddress: req.ip } });
+
+    res.json({ success: true, fineId: fine.id });
   } catch (err: any) {
     res.status(500).json({ message: err.message });
   }

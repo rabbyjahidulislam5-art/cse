@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
-import { ArrowLeft, ScanLine, Store, CreditCard, Clock, Loader2, Shield, ChevronRight } from 'lucide-react';
+import { ArrowLeft, ScanLine, Store, BookOpen, CreditCard, Clock, Loader2, Shield, ChevronRight } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import BarcodeScanner from '@/components/BarcodeScanner';
@@ -10,19 +10,30 @@ import PinDialog from '@/components/PinDialog';
 import OtpDialog from '@/components/OtpDialog';
 import PaymentConfirmModal from '@/components/PaymentConfirmModal';
 import { toast } from 'sonner';
-import { validateQrMerchant, payShop, initSSLPayment, PIN_REQUIRED_THRESHOLD, OTP_REQUIRED_THRESHOLD, type ValidateQrMerchantOutputType } from '@/lib/api';
+import {
+  validateQrMerchant, payShop, initSSLPayment, PIN_REQUIRED_THRESHOLD, OTP_REQUIRED_THRESHOLD,
+  validateLibraryQr, createLibraryQrPayment,
+  type ValidateQrMerchantOutputType, type ValidateLibraryQrOutputType,
+} from '@/lib/api';
 import { useUser } from '@/lib/user-context';
 import { formatCurrency } from '@/lib/mock-data';
 import { FadeIn } from '@/components/PageTransition';
 
 type ShopInfo = NonNullable<ValidateQrMerchantOutputType['shop']>;
+type LibraryInfo = NonNullable<ValidateLibraryQrOutputType['library']>;
+type Entity = 'shop' | 'library';
 type Step = 'scan' | 'validating' | 'merchant' | 'amount' | 'method' | 'processing' | 'success' | 'error';
 
+// Single scan entry point for both Shop and Library QR codes — a student doesn't know in advance
+// which kind of QR they're pointing at. The Shop code path below (validate → shop_payment →
+// payShop/initSSLPayment) is unchanged from before; the Library branch is additive.
 export default function QrScannerPage() {
   const navigate = useNavigate();
   const { user, refreshDashboard } = useUser();
   const [step, setStep] = useState<Step>('scan');
+  const [entity, setEntity] = useState<Entity>('shop');
   const [shop, setShop] = useState<ShopInfo | null>(null);
+  const [library, setLibrary] = useState<LibraryInfo | null>(null);
   const [amount, setAmount] = useState('');
   const [payMode, setPayMode] = useState<'ssl' | 'later'>('ssl');
   const [error, setError] = useState('');
@@ -31,12 +42,19 @@ export default function QrScannerPage() {
   const [otpOpen, setOtpOpen] = useState(false);
 
   const amt = parseFloat(amount) || 0;
+  const receiverName = entity === 'library' ? library?.name : shop?.name;
 
   const handleScan = async (value: string) => {
     setStep('validating');
     try {
+      if (value.includes(':LIBRARY:')) {
+        const res = await validateLibraryQr({ qrData: value });
+        if (res.valid && res.library) { setEntity('library'); setLibrary(res.library); setStep('merchant'); }
+        else { setError(res.message || 'Invalid QR code'); setStep('error'); }
+        return;
+      }
       const res = await validateQrMerchant({ qrData: value });
-      if (res.valid && res.shop) { setShop(res.shop); setStep('merchant'); }
+      if (res.valid && res.shop) { setEntity('shop'); setShop(res.shop); setStep('merchant'); }
       else { setError(res.message || 'Invalid QR code'); setStep('error'); }
     } catch (e: any) { setError(e.message || 'Failed to validate'); setStep('error'); }
   };
@@ -59,6 +77,23 @@ export default function QrScannerPage() {
   };
 
   const handleSSLPay = async (otpId?: string) => {
+    if (entity === 'library') {
+      if (!library) return;
+      setStep('processing');
+      try {
+        const { fineId } = await createLibraryQrPayment({ amount: amt });
+        const res = await initSSLPayment({ items: [{ id: fineId, source: 'library', amount: amt, label: 'Library Payment' }], purpose: 'library_fine', itemLabel: 'Library Payment', otpId });
+        localStorage.setItem('ssl_payment', JSON.stringify({ ref: res.transactionRef }));
+        window.location.href = res.gatewayUrl;
+      } catch (e: any) {
+        if (e.requiresPin) setPinOpen(true);
+        else if (e.requiresOtp) setOtpOpen(true);
+        else toast.error(e.message || 'Payment gateway failed');
+        setStep('method');
+      }
+      return;
+    }
+
     if (!shop) return;
     setStep('processing');
     try {
@@ -92,10 +127,18 @@ export default function QrScannerPage() {
 
   const onOtpVerified = (otpId: string) => proceedToPay(otpId);
 
-  const reset = () => { setStep('scan'); setShop(null); setAmount(''); setPayMode('ssl'); setError(''); };
+  const reset = () => { setStep('scan'); setEntity('shop'); setShop(null); setLibrary(null); setAmount(''); setPayMode('ssl'); setError(''); };
 
   const stepIndex = ['scan','validating','merchant','amount','method','processing','success','error'].indexOf(step);
   const progress = step === 'success' ? 100 : step === 'error' ? 0 : Math.min((stepIndex / 5) * 100, 100);
+
+  // Library fines aren't merchant credit — no Pay Later option for a Library QR payment.
+  const methods = entity === 'library'
+    ? [{ key: 'ssl' as const, label: 'Online Payment', icon: CreditCard, desc: 'Cards, bKash, Nagad, Rocket' }]
+    : [
+        { key: 'ssl' as const, label: 'Online Payment', icon: CreditCard, desc: 'Cards, bKash, Nagad, Rocket' },
+        { key: 'later' as const, label: 'Pay Later', icon: Clock, desc: '7-day payment deadline' },
+      ];
 
   return (
     <div className="container mx-auto px-4 sm:px-6 py-6 max-w-lg">
@@ -106,7 +149,7 @@ export default function QrScannerPage() {
         </button>
         <div className="flex-1">
           <h1 className="text-lg font-bold text-foreground">QR Payment</h1>
-          <p className="text-xs text-muted-foreground">Scan a merchant QR code to pay</p>
+          <p className="text-xs text-muted-foreground">Scan a Shop or Library QR code to pay</p>
         </div>
       </div>
 
@@ -124,7 +167,7 @@ export default function QrScannerPage() {
             <div className="rounded-2xl overflow-hidden border border-border/60">
               <BarcodeScanner onScan={handleScan} formats={['qr_code']} confirmations={2} />
             </div>
-            <p className="text-xs text-muted-foreground text-center mt-4">Point your camera at a merchant QR code</p>
+            <p className="text-xs text-muted-foreground text-center mt-4">Point your camera at a Shop or Library QR code</p>
           </motion.div>
         )}
 
@@ -132,22 +175,24 @@ export default function QrScannerPage() {
         {step === 'validating' && (
           <motion.div key="val" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="text-center py-20">
             <Loader2 className="w-10 h-10 animate-spin text-primary mx-auto mb-4" />
-            <p className="text-sm text-muted-foreground font-medium">Validating merchant...</p>
+            <p className="text-sm text-muted-foreground font-medium">Validating...</p>
           </motion.div>
         )}
 
-        {/* MERCHANT DETAILS */}
-        {step === 'merchant' && shop && (
+        {/* MERCHANT / LIBRARY DETAILS */}
+        {step === 'merchant' && (shop || library) && (
           <FadeIn key="merchant">
             <div className="rounded-2xl border border-border/60 bg-card p-6 text-center mb-4">
               <div className="w-16 h-16 rounded-2xl bg-primary/10 flex items-center justify-center mx-auto mb-4">
-                <Store className="w-8 h-8 text-primary" />
+                {entity === 'library' ? <BookOpen className="w-8 h-8 text-primary" /> : <Store className="w-8 h-8 text-primary" />}
               </div>
-              <h2 className="text-xl font-bold text-foreground">{shop.name}</h2>
-              <p className="text-sm text-muted-foreground mt-1">{shop.category} · {shop.location}</p>
+              <h2 className="text-xl font-bold text-foreground">{receiverName}</h2>
+              <p className="text-sm text-muted-foreground mt-1">
+                {entity === 'library' ? library?.location : `${shop?.category} · ${shop?.location}`}
+              </p>
               <div className="flex items-center justify-center gap-1.5 mt-3">
                 <Shield className="w-3.5 h-3.5 text-[hsl(var(--chart-3))]" />
-                <span className="text-xs text-[hsl(var(--chart-3))] font-medium">Verified Merchant</span>
+                <span className="text-xs text-[hsl(var(--chart-3))] font-medium">{entity === 'library' ? 'Verified Library' : 'Verified Merchant'}</span>
               </div>
             </div>
             <Button onClick={handleProceedToAmount} className="w-full h-12 font-semibold">
@@ -162,7 +207,7 @@ export default function QrScannerPage() {
             <div className="space-y-5">
               <div className="text-center">
                 <p className="text-sm text-muted-foreground mb-1">Paying to</p>
-                <p className="font-bold text-foreground">{shop?.name}</p>
+                <p className="font-bold text-foreground">{receiverName}</p>
               </div>
               <div>
                 <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Amount (৳)</label>
@@ -182,12 +227,9 @@ export default function QrScannerPage() {
             <div className="space-y-4">
               <div className="text-center py-2">
                 <span className="text-3xl font-bold text-foreground tabular">{formatCurrency(amt)}</span>
-                <p className="text-sm text-muted-foreground mt-1">to {shop?.name}</p>
+                <p className="text-sm text-muted-foreground mt-1">to {receiverName}</p>
               </div>
-              {([
-                { key: 'ssl' as const, label: 'Online Payment', icon: CreditCard, desc: 'Cards, bKash, Nagad, Rocket' },
-                { key: 'later' as const, label: 'Pay Later', icon: Clock, desc: '7-day payment deadline' },
-              ]).map((m) => (
+              {methods.map((m) => (
                 <button key={m.key} onClick={() => setPayMode(m.key)}
                   className={`w-full p-4 rounded-xl border-2 text-left transition-all flex items-center gap-4 ${
                     payMode === m.key ? 'border-primary bg-primary/5' : 'border-border/60 hover:border-muted-foreground/30'
@@ -228,9 +270,9 @@ export default function QrScannerPage() {
         {step === 'success' && (
           <SuccessScreen
             title="Payment Successful!"
-            subtitle={`${formatCurrency(amt)} ${payMode === 'later' ? 'due created for' : 'paid to'} ${shop?.name}`}
+            subtitle={`${formatCurrency(amt)} ${payMode === 'later' ? 'due created for' : 'paid to'} ${receiverName}`}
             details={[
-              { label: 'Merchant', value: shop?.name || '' },
+              { label: entity === 'library' ? 'Library' : 'Merchant', value: receiverName || '' },
               { label: 'Amount', value: formatCurrency(amt) },
               { label: 'Method', value: payMode === 'ssl' ? 'Online Payment' : 'Pay Later' },
             ]}
@@ -256,12 +298,12 @@ export default function QrScannerPage() {
         )}
       </AnimatePresence>
 
-      {shop && (
+      {(shop || library) && (
         <PaymentConfirmModal
           open={confirmOpen}
           onOpenChange={setConfirmOpen}
-          receiverName={shop.name}
-          receiverRole="Shop"
+          receiverName={receiverName || ''}
+          receiverRole={entity === 'library' ? 'Library' : 'Shop'}
           payerName={user?.fullName}
           amount={amt}
           method={payMode === 'ssl' ? 'Online Payment (SSLCommerz)' : 'Pay Later (7-day due)'}

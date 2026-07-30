@@ -516,3 +516,38 @@ export const uploadFile = async (file: File | { data: File; filename?: string })
   if (!res.ok) throw new Error(data.message || 'Upload failed');
   return { url: data.url, fileUrl: data.url };
 };
+
+// Library QR + payment endpoints. The Library QR is a singleton (one shared record/QR for every
+// Library Staff account) — unlike Shop, there's no per-staff ownership to scope by.
+export type GetLibraryDetailsOutputType = {
+  library: {
+    id: string; name: string; status: string; qrToken: string; qrSignature?: string;
+    location?: string; logoUrl?: string; libraryCode?: string;
+    contactNumber?: string; description?: string; operatingHours?: string;
+  };
+  staff: {
+    fullName: string; email: string; phone: string; bio: string; profilePicture: string;
+    pinSet: boolean; pinLength: number;
+  } | null;
+};
+
+export type ValidateLibraryQrOutputType = {
+  valid: boolean;
+  library: { id: string; name: string; location: string; logoUrl?: string } | null;
+  message: string;
+};
+
+export const getLibraryDetails = (input: Record<string, unknown> = {}) =>
+  apiCall<GetLibraryDetailsOutputType>('/library/details', input);
+
+export const regenerateLibraryQr = (input: Record<string, unknown> = {}) =>
+  apiCall<{ success: boolean; qrToken: string; message: string }>('/library/regenerate-qr', input);
+
+export const updateLibraryDetails = (input: { description?: string; operatingHours?: string; contactNumber?: string; location?: string; logoUrl?: string }) =>
+  apiCall<{ success: boolean; message: string }>('/library/details/update', input);
+
+export const validateLibraryQr = (input: { qrData: string }) =>
+  apiCall<ValidateLibraryQrOutputType>('/library/validate-qr', input);
+
+export const createLibraryQrPayment = (input: { amount: number }) =>
+  apiCall<{ success: boolean; fineId: string }>('/library/qr/create-payment', input);
