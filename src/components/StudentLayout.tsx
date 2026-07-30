@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Outlet, NavLink, useNavigate, useLocation } from 'react-router-dom';
-import { GraduationCap, Home, Store, FileWarning, History, UserCircle, ScanLine, LogOut, Settings, ScrollText, CreditCard } from 'lucide-react';
+import { GraduationCap, Home, Store, FileWarning, ScanLine, LogOut, Settings, ScrollText, CreditCard, History, UserCircle } from 'lucide-react';
 import { useAuth } from '@/lib/auth-context';
 import { UserProvider, useUser } from '@/lib/user-context';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -9,15 +9,13 @@ import { motion } from 'framer-motion';
 import { getDisputeBadgeCounts } from '@/lib/disputeApi';
 import { useDisputeSocket } from '@/lib/socket';
 import NotificationBell from '@/components/NotificationBell';
+import { MoreMenuDesktop, MoreMenuMobile, type MoreMenuItem } from '@/components/MoreMenu';
 
-const navItems = [
+const primaryNavItems = [
   { to: '/student', icon: Home, label: 'Home', end: true },
-  { to: '/student/scan', icon: ScanLine, label: 'Scan' },
   { to: '/student/shops', icon: Store, label: 'Shops' },
+  { to: '/student/scan', icon: ScanLine, label: 'Scan' },
   { to: '/student/dues', icon: FileWarning, label: 'Dues' },
-  { to: '/student/payments', icon: CreditCard, label: 'Payments' },
-  { to: '/student/ledger', icon: History, label: 'Ledger' },
-  { to: '/student/disputes', icon: ScrollText, label: 'Disputes' },
 ];
 
 function LayoutInner() {
@@ -39,6 +37,18 @@ function LayoutInner() {
 
   useDisputeSocket(() => setPendingCases(c => c + 1));
 
+  const overflowItems: MoreMenuItem[] = [
+    { to: '/student/payments', icon: CreditCard, label: 'Payments' },
+    { to: '/student/ledger', icon: History, label: 'Ledger' },
+    {
+      to: '/student/disputes', icon: ScrollText, label: 'Disputes',
+      badge: pendingCases > 0 ? (
+        <span className="min-w-[16px] h-4 px-1 rounded-full bg-destructive text-[9px] font-bold text-white flex items-center justify-center">{pendingCases > 99 ? '99+' : pendingCases}</span>
+      ) : undefined,
+    },
+    { to: '/student/profile', icon: UserCircle, label: 'Profile' },
+  ];
+
   return (
     <div className="min-h-screen bg-background flex flex-col">
       {/* Top Nav */}
@@ -56,7 +66,7 @@ function LayoutInner() {
 
           {/* Desktop nav */}
           <div className="hidden md:flex items-center gap-0.5 bg-accent/50 rounded-xl p-1">
-            {navItems.map((item) => (
+            {primaryNavItems.map((item) => (
               <NavLink key={item.to} to={item.to} end={item.end}
                 className={({ isActive }) => `relative flex items-center gap-2 px-3.5 py-2 rounded-lg text-sm font-medium transition-all duration-200 ${isActive ? 'text-primary-foreground' : 'text-muted-foreground hover:text-foreground'}`}>
                 {({ isActive }) => (
@@ -71,14 +81,12 @@ function LayoutInner() {
                     <span className="relative z-10 flex items-center gap-2">
                       <item.icon className="w-4 h-4" />
                       {item.label}
-                      {item.label === 'Disputes' && pendingCases > 0 && (
-                        <span className="min-w-[16px] h-4 px-1 rounded-full bg-destructive text-[9px] font-bold text-white flex items-center justify-center">{pendingCases > 99 ? '99+' : pendingCases}</span>
-                      )}
                     </span>
                   </>
                 )}
               </NavLink>
             ))}
+            <MoreMenuDesktop items={overflowItems} layoutPrefix="student" />
           </div>
 
           {/* Right controls */}
@@ -126,45 +134,18 @@ function LayoutInner() {
       {/* Mobile bottom nav */}
       <nav className="md:hidden fixed bottom-0 left-0 right-0 z-50 glass-strong safe-area-bottom">
         <div className="flex items-center justify-around h-[68px] px-1">
-          {navItems.map((item) => (
+          {primaryNavItems.map((item) => (
             <NavLink key={item.to} to={item.to} end={item.end}
               className={({ isActive }) => `relative flex flex-col items-center gap-1 px-3 py-2 rounded-xl transition-all duration-200 ${isActive ? 'text-primary' : 'text-muted-foreground'}`}>
               {({ isActive }) => (
                 <>
-                  {isActive && (
-                    <motion.div
-                      layoutId="mobile-nav"
-                      className="absolute -top-1 left-1/2 -translate-x-1/2 w-8 h-1 rounded-full gradient-primary"
-                      transition={{ type: 'spring', stiffness: 400, damping: 30 }}
-                    />
-                  )}
-                  <div className="relative">
-                    <item.icon className={`w-5 h-5 transition-all ${isActive ? 'scale-110' : ''}`} />
-                    {item.label === 'Disputes' && pendingCases > 0 && (
-                      <span className="absolute -top-1 -right-1.5 min-w-[14px] h-3.5 px-0.5 rounded-full bg-destructive text-[8px] font-bold text-white flex items-center justify-center">{pendingCases > 9 ? '9+' : pendingCases}</span>
-                    )}
-                  </div>
+                  <item.icon className={`w-5 h-5 transition-all ${isActive ? 'scale-110' : ''}`} />
                   <span className="text-[10px] font-semibold">{item.label}</span>
                 </>
               )}
             </NavLink>
           ))}
-          <NavLink to="/student/profile"
-            className={({ isActive }) => `relative flex flex-col items-center gap-1 px-3 py-2 rounded-xl transition-all duration-200 ${isActive ? 'text-primary' : 'text-muted-foreground'}`}>
-            {({ isActive }) => (
-              <>
-                {isActive && (
-                  <motion.div
-                    layoutId="mobile-nav"
-                    className="absolute -top-1 left-1/2 -translate-x-1/2 w-8 h-1 rounded-full gradient-primary"
-                    transition={{ type: 'spring', stiffness: 400, damping: 30 }}
-                  />
-                )}
-                <UserCircle className={`w-5 h-5 transition-all ${isActive ? 'scale-110' : ''}`} />
-                <span className="text-[10px] font-semibold">Profile</span>
-              </>
-            )}
-          </NavLink>
+          <MoreMenuMobile items={overflowItems} layoutPrefix="student-mobile" />
         </div>
       </nav>
     </div>

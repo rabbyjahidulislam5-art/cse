@@ -10,6 +10,8 @@ import { AuthProvider } from '@/lib/auth-context';
 const GOOGLE_CLIENT_ID = (import.meta.env.VITE_GOOGLE_CLIENT_ID as string | undefined) || '';
 
 import LandingPage from './pages/LandingPage';
+const TermsPage = lazy(() => import('./pages/TermsPage'));
+const PrivacyPage = lazy(() => import('./pages/PrivacyPage'));
 
 // Each dashboard's layout + pages are lazy-loaded so a user only ever downloads the
 // bundle for the one role they're logged in as, instead of all 5 dashboards at once.
@@ -181,6 +183,9 @@ export default function App() {
           <Route path="disputes/detail" element={<ShopDisputeDetailPage />} />
           <Route path="profile" element={<ShopProfilePage />} />
         </Route>
+
+        <Route path="/terms" element={<TermsPage />} />
+        <Route path="/privacy" element={<PrivacyPage />} />
 
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>

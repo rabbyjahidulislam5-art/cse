@@ -1,5 +1,5 @@
 import { Outlet, NavLink, useNavigate } from 'react-router-dom';
-import { LayoutDashboard, QrCode, BellRing, History, LogOut, Store, ScrollText, UserCircle } from 'lucide-react';
+import { Home, QrCode, BellRing, History, LogOut, Store, ScrollText, UserCircle } from 'lucide-react';
 import { useAuth } from '@/lib/auth-context';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger, DropdownMenuSeparator } from '@/components/ui/dropdown-menu';
 import { motion } from 'framer-motion';
@@ -7,13 +7,13 @@ import { useEffect, useState, useRef } from 'react';
 import { getDisputeBadgeCounts } from '@/lib/disputeApi';
 import { useDisputeSocket, useNotificationSocket } from '@/lib/socket';
 import { getUnreadNotificationCount } from '@/lib/api';
+import { MoreMenuDesktop, MoreMenuMobile, type MoreMenuItem } from '@/components/MoreMenu';
 
-const navItems = [
-  { to: '/shop', icon: LayoutDashboard, label: 'Home', end: true },
+const primaryNavItems = [
+  { to: '/shop', icon: Home, label: 'Home', end: true },
+  { to: '/shop/ledger', icon: History, label: 'Sales' },
   { to: '/shop/qr', icon: QrCode, label: 'QR Code' },
   { to: '/shop/notifications', icon: BellRing, label: 'Alerts' },
-  { to: '/shop/ledger', icon: History, label: 'Sales' },
-  { to: '/shop/disputes', icon: ScrollText, label: 'Disputes' },
 ];
 
 // A short synthesized beep via the Web Audio API — no external audio asset needed, so there's
@@ -83,6 +83,15 @@ export default function ShopLayout() {
   }, [user]);
   useNotificationSocket(() => setUnreadNotifs(c => c + 1));
 
+  const overflowItems: MoreMenuItem[] = [
+    {
+      to: '/shop/disputes', icon: ScrollText, label: 'Disputes',
+      badge: pendingCases > 0 ? (
+        <span className="min-w-[16px] h-4 px-1 rounded-full bg-destructive text-[9px] font-bold text-white flex items-center justify-center">{pendingCases > 99 ? '99+' : pendingCases}</span>
+      ) : undefined,
+    },
+  ];
+
   if (isLoading || !user || (user as any).role !== 'Shop Staff') return null;
   if (user.mustChangePassword || !user.emailVerified) return null;
 
@@ -101,7 +110,7 @@ export default function ShopLayout() {
           </button>
 
           <div className="hidden md:flex items-center gap-0.5 bg-accent/50 rounded-xl p-1">
-            {navItems.map((item) => (
+            {primaryNavItems.map((item) => (
               <NavLink key={item.to} to={item.to} end={item.end}
                 className={({ isActive }) => `relative flex items-center gap-2 px-3.5 py-2 rounded-lg text-sm font-medium transition-all duration-200 ${isActive ? 'text-primary-foreground' : 'text-muted-foreground hover:text-foreground'}`}>
                 {({ isActive }) => (
@@ -109,9 +118,6 @@ export default function ShopLayout() {
                     {isActive && <motion.div layoutId="shop-nav" className="absolute inset-0 gradient-primary rounded-lg shadow-lg shadow-primary/20" transition={{ type: 'spring', stiffness: 400, damping: 30 }} />}
                     <span className="relative z-10 flex items-center gap-2">
                       <item.icon className="w-4 h-4" /> {item.label}
-                      {item.label === 'Disputes' && pendingCases > 0 && (
-                        <span className="min-w-[16px] h-4 px-1 rounded-full bg-destructive text-[9px] font-bold text-white flex items-center justify-center">{pendingCases > 99 ? '99+' : pendingCases}</span>
-                      )}
                       {item.label === 'Alerts' && unreadNotifs > 0 && (
                         <span className="min-w-[16px] h-4 px-1 rounded-full bg-destructive text-[9px] font-bold text-white flex items-center justify-center">{unreadNotifs > 99 ? '99+' : unreadNotifs}</span>
                       )}
@@ -120,6 +126,7 @@ export default function ShopLayout() {
                 )}
               </NavLink>
             ))}
+            <MoreMenuDesktop items={overflowItems} layoutPrefix="shop" />
           </div>
 
           <DropdownMenu>
@@ -151,17 +158,13 @@ export default function ShopLayout() {
 
       <nav className="md:hidden fixed bottom-0 left-0 right-0 z-50 glass-strong safe-area-bottom">
         <div className="flex items-center justify-around h-[68px] px-1">
-          {navItems.map((item) => (
+          {primaryNavItems.map((item) => (
             <NavLink key={item.to} to={item.to} end={item.end}
               className={({ isActive }) => `relative flex flex-col items-center gap-1 px-3 py-2 rounded-xl transition-all duration-200 ${isActive ? 'text-primary' : 'text-muted-foreground'}`}>
               {({ isActive }) => (
                 <>
-                  {isActive && <motion.div layoutId="shop-mobile" className="absolute -top-1 left-1/2 -translate-x-1/2 w-8 h-1 rounded-full gradient-primary" transition={{ type: 'spring', stiffness: 400, damping: 30 }} />}
                   <div className="relative">
                     <item.icon className={`w-5 h-5 transition-all ${isActive ? 'scale-110' : ''}`} />
-                    {item.label === 'Disputes' && pendingCases > 0 && (
-                      <span className="absolute -top-1 -right-1.5 min-w-[14px] h-3.5 px-0.5 rounded-full bg-destructive text-[8px] font-bold text-white flex items-center justify-center">{pendingCases > 9 ? '9+' : pendingCases}</span>
-                    )}
                     {item.label === 'Alerts' && unreadNotifs > 0 && (
                       <span className="absolute -top-1 -right-1.5 min-w-[14px] h-3.5 px-0.5 rounded-full bg-destructive text-[8px] font-bold text-white flex items-center justify-center">{unreadNotifs > 9 ? '9+' : unreadNotifs}</span>
                     )}
@@ -171,6 +174,7 @@ export default function ShopLayout() {
               )}
             </NavLink>
           ))}
+          <MoreMenuMobile items={overflowItems} layoutPrefix="shop-mobile" />
         </div>
       </nav>
     </div>

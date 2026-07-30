@@ -1,9 +1,8 @@
-import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
-import { Bell, Wallet, CreditCard, ShieldAlert, UserCog, Scale, Search, CheckCheck } from 'lucide-react';
+import { Bell, Wallet, CreditCard, ShieldAlert, UserCog, Scale, CheckCheck } from 'lucide-react';
 import { Skeleton } from '@/components/ui/skeleton';
-import { Input } from '@/components/ui/input';
 import { getNotifications, markNotificationRead, type NotificationItem } from '@/lib/api';
 import { useNotificationSocket } from '@/lib/socket';
 import { FadeIn } from '@/components/PageTransition';
@@ -15,16 +14,12 @@ const CATEGORY_CONFIG: Record<string, { label: string; icon: typeof Bell; color:
   account: { label: 'Account', icon: UserCog, color: 'text-secondary', bg: 'bg-secondary/10' },
   dispute: { label: 'Disputes', icon: Scale, color: 'text-[hsl(var(--chart-2))]', bg: 'bg-[hsl(var(--chart-2))]/10' },
 };
-const CATEGORIES = ['wallet', 'payment', 'security', 'account', 'dispute'];
 
 /** Role-agnostic notification feed — reused as-is by every dashboard's Notifications page. */
 export default function NotificationsFeed() {
   const navigate = useNavigate();
   const [notifications, setNotifications] = useState<NotificationItem[]>([]);
   const [loading, setLoading] = useState(true);
-  const [category, setCategory] = useState<string | null>(null);
-  const [search, setSearch] = useState('');
-  const [unreadOnly, setUnreadOnly] = useState(false);
 
   const load = useCallback(() => {
     setLoading(true);
@@ -43,20 +38,9 @@ export default function NotificationsFeed() {
     ]);
   });
 
-  const filtered = useMemo(() => {
-    let list = notifications;
-    if (category) list = list.filter(n => n.category === category);
-    if (unreadOnly) list = list.filter(n => !n.read);
-    if (search.trim()) {
-      const q = search.trim().toLowerCase();
-      list = list.filter(n => n.title.toLowerCase().includes(q) || n.body.toLowerCase().includes(q));
-    }
-    return list;
-  }, [notifications, category, unreadOnly, search]);
-
-  const unread = filtered.filter(n => !n.read);
-  const read = filtered.filter(n => n.read);
-  const totalUnread = notifications.filter(n => !n.read).length;
+  const unread = notifications.filter(n => !n.read);
+  const read = notifications.filter(n => n.read);
+  const totalUnread = unread.length;
 
   const handleClick = async (n: NotificationItem) => {
     if (!n.read) {
@@ -88,28 +72,9 @@ export default function NotificationsFeed() {
         )}
       </div>
 
-      <div className="relative mb-3">
-        <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-        <Input
-          aria-label="Search notifications"
-          value={search}
-          onChange={e => setSearch(e.target.value)}
-          placeholder="Search notifications..."
-          className="pl-9"
-        />
-      </div>
-
-      <div className="flex gap-2 overflow-x-auto pb-1 mb-5 -mx-1 px-1 scrollbar-none">
-        <FilterPill active={category === null} onClick={() => setCategory(null)} label="All" />
-        {CATEGORIES.map(c => (
-          <FilterPill key={c} active={category === c} onClick={() => setCategory(c)} label={CATEGORY_CONFIG[c].label} />
-        ))}
-        <FilterPill active={unreadOnly} onClick={() => setUnreadOnly(v => !v)} label="Unread only" />
-      </div>
-
       {loading ? (
         <div className="space-y-3">{[1, 2, 3, 4, 5].map(i => <Skeleton key={i} className="h-18 rounded-xl" />)}</div>
-      ) : filtered.length === 0 ? (
+      ) : notifications.length === 0 ? (
         <div className="text-center py-20 rounded-2xl border border-dashed border-border bg-card/50">
           <Bell className="w-12 h-12 mx-auto mb-4 text-muted-foreground/20" />
           <p className="text-sm font-medium text-muted-foreground">No notifications yet</p>
@@ -136,19 +101,6 @@ export default function NotificationsFeed() {
         </div>
       )}
     </FadeIn>
-  );
-}
-
-function FilterPill({ active, onClick, label }: { active: boolean; onClick: () => void; label: string }) {
-  return (
-    <button
-      onClick={onClick}
-      className={`shrink-0 px-3 py-1.5 rounded-full text-xs font-medium border transition-colors whitespace-nowrap ${
-        active ? 'bg-primary text-primary-foreground border-primary' : 'bg-card text-muted-foreground border-border hover:bg-accent'
-      }`}
-    >
-      {label}
-    </button>
   );
 }
 

@@ -130,7 +130,7 @@ function useGoogleAuthConfig() {
 // (capped at 400px, matching the max-w-lg auth card's content column) is what makes it match the
 // Sign In button's width and stay responsive on mobile, instead of a hardcoded "320" clipping or
 // leaving gutters on different screen sizes.
-function useMeasuredWidth(max: number) {
+function useMeasuredWidth(max: number = 300) {
   const ref = useRef<HTMLDivElement>(null);
   const [width, setWidth] = useState(max);
 
@@ -149,7 +149,7 @@ function useMeasuredWidth(max: number) {
 
 function GoogleAuthButtonSkeleton() {
   return (
-    <div className="h-10 w-full max-w-[400px] mx-auto rounded-full bg-accent/40 border border-border/50 animate-pulse flex items-center justify-center gap-2">
+    <div className="h-10 w-full max-w-[300px] mx-auto rounded-full bg-accent/40 border border-border/50 animate-pulse flex items-center justify-center gap-2">
       <GoogleIcon className="w-4 h-4 opacity-40" />
       <div className="h-3 w-28 rounded bg-border/60" />
     </div>
@@ -163,7 +163,7 @@ function GoogleAuthErrorButton({ reason }: { reason: string }) {
       <button
         type="button"
         onClick={() => setDialogOpen(true)}
-        className="h-10 w-full max-w-[400px] mx-auto rounded-full bg-[#131314] border border-[#8e918f] text-white text-sm font-medium flex items-center justify-center gap-2.5 hover:bg-[#1b1b1b] transition-colors"
+        className="h-10 w-full max-w-[300px] mx-auto rounded-full bg-[#131314] border border-[#8e918f] text-white text-sm font-medium flex items-center justify-center gap-2.5 hover:bg-[#1b1b1b] transition-colors"
       >
         <GoogleIcon className="w-[18px] h-[18px]" />
         Continue with Google
@@ -192,7 +192,7 @@ function GoogleAuthErrorButton({ reason }: { reason: string }) {
 
 function GoogleAuthButton({ onSuccess, loading }: { onSuccess: (r: CredentialResponse) => void; loading?: boolean }) {
   const { status, reason } = useGoogleAuthConfig();
-  const { ref, width } = useMeasuredWidth(400);
+  const { ref, width } = useMeasuredWidth(300);
 
   if (status === 'checking') return <GoogleAuthButtonSkeleton />;
   if (status === 'error') return <GoogleAuthErrorButton reason={reason} />;
@@ -654,7 +654,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
                       required
                       value={password}
                       onChange={e => setPassword(e.target.value)}
-                      placeholder="Enter your Password or 4-digit Wallet PIN"
+                      placeholder="Enter your Password or 6-digit Wallet PIN"
                       className="w-full h-11 rounded-xl bg-accent/40 border border-border/60 pl-10 pr-10 text-sm text-foreground placeholder:text-muted-foreground focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20 transition-all"
                     />
                     <button
@@ -834,7 +834,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
                     onChange={e => setAcceptTerms(e.target.checked)}
                     className="rounded border-border bg-accent text-primary focus:ring-primary/20"
                   />
-                  I agree to the Terms of Service & Campus Privacy Policy
+                  <span>I agree to the <a href="/terms" target="_blank" rel="noopener noreferrer" className="text-primary font-semibold hover:underline">Terms of Service</a> & <a href="/privacy" target="_blank" rel="noopener noreferrer" className="text-primary font-semibold hover:underline">Campus Privacy Policy</a></span>
                 </label>
 
                 <button
@@ -843,7 +843,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
                   className="w-full h-11 rounded-xl gradient-primary text-primary-foreground font-bold text-sm shadow-xl shadow-primary/20 hover:shadow-primary/30 active:scale-[0.98] transition-all disabled:opacity-50 flex items-center justify-center gap-2"
                 >
                   {formLoading ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Mail className="w-4 h-4" />}
-                  {formLoading ? 'Sending OTP...' : 'Continue — Send Email OTP'}
+                  {formLoading ? 'Sending OTP...' : 'Continue'}
                 </button>
 
                 <GoogleAuthDivider />

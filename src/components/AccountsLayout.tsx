@@ -1,5 +1,5 @@
 import { Outlet, NavLink, useNavigate } from 'react-router-dom';
-import { LayoutDashboard, Users, BookOpen, FileText, ScrollText, LogOut, Landmark, Receipt, BarChart3, ShieldAlert, QrCode } from 'lucide-react';
+import { Home, Users, BookOpen, FileText, ScrollText, LogOut, Landmark, Receipt, BarChart3, ShieldAlert, QrCode } from 'lucide-react';
 import { useAuth } from '@/lib/auth-context';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger, DropdownMenuSeparator } from '@/components/ui/dropdown-menu';
 import { motion } from 'framer-motion';
@@ -7,14 +7,11 @@ import { useEffect, useState } from 'react';
 import { getDisputeBadgeCounts } from '@/lib/disputeApi';
 import { useDisputeSocket } from '@/lib/socket';
 import NotificationBell from '@/components/NotificationBell';
+import { MoreMenuDesktop, MoreMenuMobile, type MoreMenuItem } from '@/components/MoreMenu';
 
-const navItems = [
-  { to: '/accounts', icon: LayoutDashboard, label: 'Dashboard', end: true },
+const primaryNavItems = [
+  { to: '/accounts', icon: Home, label: 'Home', end: true },
   { to: '/accounts/fee-wizard', icon: Users, label: 'Fee Push' },
-  { to: '/accounts/adjustments', icon: Receipt, label: 'Adjust' },
-  { to: '/accounts/admin-fines', icon: ShieldAlert, label: 'Admin Fines' },
-  { to: '/accounts/analytics', icon: BarChart3, label: 'Analytics' },
-  { to: '/accounts/ledger', icon: BookOpen, label: 'Ledger' },
   { to: '/accounts/qr', icon: QrCode, label: 'QR' },
   { to: '/accounts/disputes', icon: ScrollText, label: 'Disputes' },
 ];
@@ -42,6 +39,13 @@ export default function AccountsLayout() {
 
   useDisputeSocket(() => fetchBadge());
 
+  const overflowItems: MoreMenuItem[] = [
+    { to: '/accounts/adjustments', icon: Receipt, label: 'Adjust' },
+    { to: '/accounts/analytics', icon: BarChart3, label: 'Analytics' },
+    { to: '/accounts/ledger', icon: BookOpen, label: 'Ledger' },
+    { to: '/accounts/admin-fines', icon: ShieldAlert, label: 'Admin Fines' },
+  ];
+
   if (isLoading || !user || (user as any).role !== 'Accounts Office') return null;
 
   return (
@@ -59,7 +63,7 @@ export default function AccountsLayout() {
           </button>
 
           <div className="hidden md:flex items-center gap-0.5 bg-accent/50 rounded-xl p-1">
-            {navItems.map((item) => (
+            {primaryNavItems.map((item) => (
               <NavLink key={item.to} to={item.to} end={item.end}
                 className={({ isActive }) => `relative flex items-center gap-2 px-3.5 py-2 rounded-lg text-sm font-medium transition-all duration-200 ${isActive ? 'text-primary-foreground' : 'text-muted-foreground hover:text-foreground'}`}>
                 {({ isActive }) => (
@@ -75,6 +79,7 @@ export default function AccountsLayout() {
                 )}
               </NavLink>
             ))}
+            <MoreMenuDesktop items={overflowItems} layoutPrefix="accounts" />
           </div>
 
           <div className="flex items-center gap-2">
@@ -105,12 +110,11 @@ export default function AccountsLayout() {
 
       <nav className="md:hidden fixed bottom-0 left-0 right-0 z-50 glass-strong safe-area-bottom">
         <div className="flex items-center justify-around h-[68px] px-1">
-          {navItems.map((item) => (
+          {primaryNavItems.map((item) => (
             <NavLink key={item.to} to={item.to} end={item.end}
               className={({ isActive }) => `relative flex flex-col items-center gap-1 px-3 py-2 rounded-xl transition-all duration-200 ${isActive ? 'text-primary' : 'text-muted-foreground'}`}>
               {({ isActive }) => (
                 <>
-                  {isActive && <motion.div layoutId="acc-mobile" className="absolute -top-1 left-1/2 -translate-x-1/2 w-8 h-1 rounded-full gradient-primary" transition={{ type: 'spring', stiffness: 400, damping: 30 }} />}
                   <div className="relative">
                     <item.icon className={`w-5 h-5 transition-all ${isActive ? 'scale-110' : ''}`} />
                     {item.label === 'Disputes' && pendingCases > 0 && (
@@ -122,6 +126,7 @@ export default function AccountsLayout() {
               )}
             </NavLink>
           ))}
+          <MoreMenuMobile items={overflowItems} layoutPrefix="acc-mobile" />
         </div>
       </nav>
     </div>

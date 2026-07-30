@@ -2,7 +2,7 @@ import { useState, useRef, useEffect, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
-import { Loader2, Lock, ShieldCheck, Fingerprint } from 'lucide-react';
+import { Loader2, Lock, ShieldCheck, Fingerprint, Delete } from 'lucide-react';
 import { toast } from 'sonner';
 import { setPin as setPinEndpoint, verifyPin as verifyPinEndpoint } from '@/lib/api';
 
@@ -23,19 +23,21 @@ const NEW_PIN_LENGTH = 6;
 
 function PinDots({ value, length, error = false }: { value: string; length: number; error?: boolean }) {
   return (
-    <div className="flex gap-4 justify-center my-8">
+    <div className="flex gap-3.5 justify-center my-6">
       {Array.from({ length }).map((_, i) => (
         <motion.div
           key={i}
           animate={{
-            scale: value.length === i ? [1, 1.15, 1] : 1,
-            backgroundColor: error ? 'hsl(0, 78%, 58%)' : value.length > i ? 'hsl(42, 82%, 52%)' : 'hsl(225, 18%, 12%)',
+            scale: value.length === i ? [1, 1.2, 1] : 1,
           }}
-          transition={{ duration: 0.15 }}
-          className="w-4 h-4 rounded-full border-2 transition-colors"
-          style={{
-            borderColor: error ? 'hsl(0, 78%, 58%)' : value.length > i ? 'hsl(42, 82%, 52%)' : 'hsl(225, 15%, 20%)',
-          }}
+          transition={{ duration: 0.2 }}
+          className={`w-3.5 h-3.5 rounded-full transition-all duration-200 ${
+            error
+              ? 'bg-destructive border-2 border-destructive shadow-sm shadow-destructive/30'
+              : value.length > i
+                ? 'bg-primary border-2 border-primary shadow-sm shadow-primary/30'
+                : 'bg-transparent border-2 border-border/80'
+          }`}
         />
       ))}
     </div>
@@ -45,20 +47,20 @@ function PinDots({ value, length, error = false }: { value: string; length: numb
 function Numpad({ onDigit, onDelete, disabled }: { onDigit: (d: string) => void; onDelete: () => void; disabled?: boolean }) {
   const keys = ['1','2','3','4','5','6','7','8','9','','0','del'];
   return (
-    <div className="grid grid-cols-3 gap-2 max-w-[260px] mx-auto">
+    <div className="grid grid-cols-3 gap-3 max-w-[280px] mx-auto">
       {keys.map((key, i) => {
         if (key === '') return <div key={i} />;
         if (key === 'del') {
           return (
             <button key={i} onClick={onDelete} disabled={disabled}
-              className="h-14 rounded-xl text-muted-foreground hover:bg-accent/80 transition-all active:scale-95 text-sm font-medium">
-              ←
+              className="h-16 w-16 mx-auto rounded-2xl flex items-center justify-center text-muted-foreground hover:bg-accent/80 hover:text-foreground transition-all active:scale-90 disabled:opacity-40">
+              <Delete className="w-5 h-5" />
             </button>
           );
         }
         return (
           <button key={i} onClick={() => onDigit(key)} disabled={disabled}
-            className="h-14 rounded-xl text-lg font-semibold text-foreground hover:bg-accent/80 transition-all active:scale-95 active:bg-primary/10">
+            className="h-16 w-16 mx-auto rounded-2xl text-xl font-semibold text-foreground bg-accent/30 hover:bg-accent/70 border border-border/40 transition-all active:scale-90 active:bg-primary/15 disabled:opacity-40">
             {key}
           </button>
         );
@@ -160,34 +162,40 @@ export default function PinDialog({ open, onOpenChange, mode, onSuccess, mandato
   return (
     <Dialog open={open} onOpenChange={mandatory ? undefined : onOpenChange}>
       <DialogContent
-        className="sm:max-w-sm glass-strong rounded-2xl p-6"
+        className="sm:max-w-sm rounded-3xl p-0 overflow-hidden border-border/60"
         hideClose={mandatory}
         onEscapeKeyDown={mandatory ? (e) => e.preventDefault() : undefined}
         onPointerDownOutside={mandatory ? (e) => e.preventDefault() : undefined}
       >
-        <DialogHeader className="text-center">
-          <div className="mx-auto w-16 h-16 rounded-2xl bg-primary/10 flex items-center justify-center mb-3">
-            {mode === 'verify' ? <Fingerprint className="w-8 h-8 text-primary" /> : <ShieldCheck className="w-8 h-8 text-primary" />}
-          </div>
-          <DialogTitle className="text-lg font-bold">{title || titles[step]}</DialogTitle>
-          <DialogDescription className="text-sm">{description || descs[step]}</DialogDescription>
-        </DialogHeader>
+        {/* Top section with gradient background */}
+        <div className="bg-gradient-to-b from-primary/8 to-transparent px-6 pt-7 pb-2">
+          <DialogHeader className="text-center">
+            <div className="mx-auto w-14 h-14 rounded-2xl bg-primary/10 border border-primary/20 flex items-center justify-center mb-3">
+              {mode === 'verify' ? <Fingerprint className="w-7 h-7 text-primary" /> : <ShieldCheck className="w-7 h-7 text-primary" />}
+            </div>
+            <DialogTitle className="text-lg font-bold">{title || titles[step]}</DialogTitle>
+            <DialogDescription className="text-sm">{description || descs[step]}</DialogDescription>
+          </DialogHeader>
 
-        <PinDots value={activePin} length={activeLength} error={error} />
+          <PinDots value={activePin} length={activeLength} error={error} />
+        </div>
 
-        {loading ? (
-          <div className="flex justify-center py-8">
-            <Loader2 className="w-8 h-8 animate-spin text-primary" />
-          </div>
-        ) : (
-          <Numpad onDigit={handleDigit} onDelete={handleDelete} disabled={loading} />
-        )}
+        {/* Keypad section */}
+        <div className="px-6 pb-6 pt-2">
+          {loading ? (
+            <div className="flex justify-center py-10">
+              <Loader2 className="w-8 h-8 animate-spin text-primary" />
+            </div>
+          ) : (
+            <Numpad onDigit={handleDigit} onDelete={handleDelete} disabled={loading} />
+          )}
 
-        {!mandatory && (
-          <button onClick={() => onOpenChange(false)} className="mt-4 text-sm text-muted-foreground hover:text-foreground text-center w-full transition-colors">
-            Cancel
-          </button>
-        )}
+          {!mandatory && (
+            <button onClick={() => onOpenChange(false)} className="mt-5 text-sm text-muted-foreground hover:text-foreground text-center w-full transition-colors">
+              Cancel
+            </button>
+          )}
+        </div>
       </DialogContent>
     </Dialog>
   );
