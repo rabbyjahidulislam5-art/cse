@@ -69,7 +69,7 @@ export default function TransactionDetailCard({ transactionId, onRaiseDispute, d
     return <p className="text-sm text-muted-foreground text-center py-6">Could not load transaction details.</p>;
   }
 
-  const { transaction: tx, sender, receiver, gateway, dispute } = detail;
+  const { transaction: tx, sender, receiver, gateway, dispute, destination } = detail;
   const isCredit = tx.direction === 'Credit';
 
   return (
@@ -102,7 +102,7 @@ export default function TransactionDetailCard({ transactionId, onRaiseDispute, d
           <Row
             icon={receiver?.kind === 'shop' ? Store : Users}
             label="Receiver"
-            value={receiver ? receiver.name : (tx.type.includes('Fee') || tx.type.includes('Fine') ? 'Smart Campus (University)' : tx.type === 'Withdrawal' ? 'External Mobile Wallet' : 'N/A')}
+            value={receiver?.name ?? destination?.label}
           />
           {receiver?.role && <Row label="Receiver Role" value={receiver.role} />}
           {receiver?.department && <Row label="Receiver Department" value={receiver.department} />}

@@ -11,7 +11,7 @@ import { useDebouncedCallback } from 'use-debounce';
 import { toast } from 'sonner';
 import {
   getAdminDisputeStats, getAdminDisputeList, getStaffPerformance, getFraudSignals, generateAdminDisputeReport,
-  DISPUTE_STATUSES, type AccountsDisputeSummary, type AdminDisputeStats, type StaffPerformance, type FraudSignals,
+  type AccountsDisputeSummary, type AdminDisputeStats, type StaffPerformance, type FraudSignals,
 } from '@/lib/disputeApi';
 import { formatCurrency } from '@/lib/mock-data';
 import { triggerDownload } from '@/lib/download';
@@ -21,24 +21,25 @@ export default function DisputeOversightPage() {
   const [stats, setStats] = useState<AdminDisputeStats | null>(null);
   const [staff, setStaff] = useState<StaffPerformance[]>([]);
   const [fraud, setFraud] = useState<FraudSignals | null>(null);
-  const [status, setStatus] = useState('all');
+  const [scope, setScope] = useState<'active' | 'completed'>('active');
+  const [ownership, setOwnership] = useState<'all' | 'mine'>('all');
   const [search, setSearch] = useState('');
   const [disputes, setDisputes] = useState<AccountsDisputeSummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [exporting, setExporting] = useState<string | null>(null);
 
-  const loadList = (s: string, q: string) => {
+  const loadList = (sc: 'active' | 'completed', own: 'all' | 'mine', q: string) => {
     setLoading(true);
-    getAdminDisputeList({ status: s === 'all' ? undefined : s, search: q || undefined }).then(res => setDisputes(res.disputes)).finally(() => setLoading(false));
+    getAdminDisputeList({ scope: sc, mineOnly: own === 'mine', search: q || undefined }).then(res => setDisputes(res.disputes)).finally(() => setLoading(false));
   };
-  const debouncedLoad = useDebouncedCallback((q: string) => loadList(status, q), 400);
+  const debouncedLoad = useDebouncedCallback((q: string) => loadList(scope, ownership, q), 400);
 
   useEffect(() => {
     getAdminDisputeStats().then(setStats);
     getStaffPerformance().then(r => setStaff(r.performance));
     getFraudSignals().then(setFraud);
   }, []);
-  useEffect(() => { loadList(status, search); }, [status]);
+  useEffect(() => { loadList(scope, ownership, search); }, [scope, ownership]);
 
   const handleExport = async (format: 'csv' | 'excel' | 'pdf') => {
     setExporting(format);
@@ -151,11 +152,18 @@ export default function DisputeOversightPage() {
             onChange={(e) => { setSearch(e.target.value); debouncedLoad(e.target.value); }}
             className="pl-9 bg-accent/50 border-border/60" />
         </div>
-        <Select value={status} onValueChange={setStatus}>
-          <SelectTrigger className="w-full sm:w-48 bg-accent/50 border-border/60"><SelectValue /></SelectTrigger>
+        <Select value={scope} onValueChange={v => setScope(v as 'active' | 'completed')}>
+          <SelectTrigger className="w-full sm:w-44 bg-accent/50 border-border/60"><SelectValue /></SelectTrigger>
           <SelectContent>
-            <SelectItem value="all">All Statuses</SelectItem>
-            {DISPUTE_STATUSES.map(s => <SelectItem key={s} value={s}>{s}</SelectItem>)}
+            <SelectItem value="active">Active Cases</SelectItem>
+            <SelectItem value="completed">Completed Cases</SelectItem>
+          </SelectContent>
+        </Select>
+        <Select value={ownership} onValueChange={v => setOwnership(v as 'all' | 'mine')}>
+          <SelectTrigger className="w-full sm:w-40 bg-accent/50 border-border/60"><SelectValue /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">All Cases</SelectItem>
+            <SelectItem value="mine">My Cases</SelectItem>
           </SelectContent>
         </Select>
       </div>

@@ -8,50 +8,50 @@ datasource db {
 }
 
 model User {
-  id               String    @id @default(cuid())
-  fullName         String?
-  email            String    @unique
-  password         String?
-  role             String    @default("Student")
-  studentId        String?   @unique
-  department       String?
-  batch            String?
-  phone            String?
-  status           String    @default("Active")
-  pinHash          String?
-  pinSalt          String?
-  pinSet           Boolean   @default(false)
-  pinLength        Int       @default(4)
-  pinAttempts      Int       @default(0)
-  pinLockedUntil   DateTime?
-  pinVerifiedAt    DateTime?
-  lastLogin        DateTime?
-  profilePicture   String?
-  emergencyContact String?
-  address          String?
-  bloodGroup       String?
-  gender           String?
-  dateOfBirth      String?
-  bio              String?
-  authProvider     String    @default("password")
-  googleId         String?   @unique
-  flagged          Boolean   @default(false)
-  flagReason       String?
-  mustChangePassword Boolean @default(false)
-  emailVerified      Boolean @default(false)
-  createdAt        DateTime  @default(now())
-  updatedAt        DateTime  @updatedAt
+  id                 String    @id @default(cuid())
+  fullName           String?
+  email              String    @unique
+  password           String?
+  role               String    @default("Student")
+  studentId          String?   @unique
+  department         String?
+  batch              String?
+  phone              String?
+  status             String    @default("Active")
+  pinHash            String?
+  pinSalt            String?
+  pinSet             Boolean   @default(false)
+  pinLength          Int       @default(4)
+  pinAttempts        Int       @default(0)
+  pinLockedUntil     DateTime?
+  pinVerifiedAt      DateTime?
+  lastLogin          DateTime?
+  profilePicture     String?
+  emergencyContact   String?
+  address            String?
+  bloodGroup         String?
+  gender             String?
+  dateOfBirth        String?
+  bio                String?
+  authProvider       String    @default("password")
+  googleId           String?   @unique
+  flagged            Boolean   @default(false)
+  flagReason         String?
+  mustChangePassword Boolean   @default(false)
+  emailVerified      Boolean   @default(false)
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
 
-  wallets      Wallet[]
-  transactions Transaction[]
-  semesterFees SemesterFee[]
-  libraryFines LibraryFine[]
-  adminFines   AdminFine[]
-  adminFinesIssued AdminFine[] @relation("AdminFineIssuedBy")
-  payLaterDues PayLaterDue[]
-  otpCodes     OtpCode[]
-  auditLogs    AuditLog[]
-  shop         Shop?
+  wallets          Wallet[]
+  transactions     Transaction[]
+  semesterFees     SemesterFee[]
+  libraryFines     LibraryFine[]
+  adminFines       AdminFine[]
+  adminFinesIssued AdminFine[]   @relation("AdminFineIssuedBy")
+  payLaterDues     PayLaterDue[]
+  otpCodes         OtpCode[]
+  auditLogs        AuditLog[]
+  shop             Shop?
 
   // Financial Dispute & Case Management System
   receivedTransactions       Transaction[]          @relation("TransactionReceiver")
@@ -69,14 +69,14 @@ model User {
   notifications              Notification[]
 
   // Fee Management Workflow
-  feeBatchesMaker            SemesterFeeBatch[]     @relation("FeeBatchMaker")
-  feeBatchesChecker          SemesterFeeBatch[]     @relation("FeeBatchChecker")
-  feeBatchesApprover         SemesterFeeBatch[]     @relation("FeeBatchApprover")
-  feeImports                 SemesterFeeImport[]
-  feeInvoices                FeeInvoice[]
-  paymentRequests            PaymentRequest[]
-  gatewaySessions            PaymentGatewaySession[]
-  ledgerEntries              LedgerEntry[]
+  feeBatchesMaker    SemesterFeeBatch[]      @relation("FeeBatchMaker")
+  feeBatchesChecker  SemesterFeeBatch[]      @relation("FeeBatchChecker")
+  feeBatchesApprover SemesterFeeBatch[]      @relation("FeeBatchApprover")
+  feeImports         SemesterFeeImport[]
+  feeInvoices        FeeInvoice[]
+  paymentRequests    PaymentRequest[]
+  gatewaySessions    PaymentGatewaySession[]
+  ledgerEntries      LedgerEntry[]
 }
 
 model Wallet {
@@ -171,9 +171,10 @@ model Shop {
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
 
-  transactions Transaction[]
-  payLaterDues PayLaterDue[]
-  settlements  Settlement[]
+  transactions      Transaction[]
+  payLaterDues      PayLaterDue[]
+  settlements       Settlement[]
+  forwardedDisputes Dispute[]     @relation("DisputeForwardedShop")
 }
 
 // Records a manual internal reconciliation — Admin Office confirming a shop's collected
@@ -358,6 +359,20 @@ model Dispute {
   createdAt     DateTime    @default(now())
   updatedAt     DateTime    @updatedAt
 
+  // ─── Routing/ownership (added for the forward-to-specific-shop and return-routing fix) ───
+  // Which shop a "Forward to Shop" targeted, when there's more than one active shop — the status
+  // string (WaitingForShop) alone can't disambiguate which shop's staff should see the case.
+  forwardedShop   Shop?   @relation("DisputeForwardedShop", fields: [forwardedShopId], references: [id])
+  forwardedShopId String?
+  // Who forwarded the case most recently (role + user snapshot), so that when Shop/Library
+  // finishes reviewing, the case returns to whoever actually sent it (Accounts or Admin) instead
+  // of a hardcoded destination.
+  forwardedByRole String?
+  forwardedById   String?
+  // Which Admin has claimed/actioned this case — backs the Admin dashboard's "My Cases" filter.
+  // Separate from assignedToId, which is Accounts-only (see DisputeAssignment/staff-performance).
+  adminOwnerId    String?
+
   messages      DisputeMessage[]
   attachments   DisputeAttachment[]
   assignments   DisputeAssignment[]
@@ -525,36 +540,36 @@ model SequenceCounter {
 // ─── FEE MANAGEMENT WORKFLOW MODELS ───
 
 model SemesterFeeBatch {
-  id            String             @id @default(cuid())
-  batchNumber   String             @unique
+  id            String @id @default(cuid())
+  batchNumber   String @unique
   department    String
   program       String
   semester      String
   academicYear  String
   label         String
-  status        String             @default("Draft") // Draft, Validated, PendingApproval, Approved, Rejected, Pushed
-  totalRows     Int                @default(0)
-  validRows     Int                @default(0)
-  invalidRows   Int                @default(0)
-  duplicateRows Int                @default(0)
-  totalAmount   Float              @default(0)
-  
-  makerId       String
-  maker         User               @relation("FeeBatchMaker", fields: [makerId], references: [id])
-  checkerId     String?
-  checker       User?              @relation("FeeBatchChecker", fields: [checkerId], references: [id])
-  approverId    String?
-  approver      User?              @relation("FeeBatchApprover", fields: [approverId], references: [id])
+  status        String @default("Draft") // Draft, Validated, PendingApproval, Approved, Rejected, Pushed
+  totalRows     Int    @default(0)
+  validRows     Int    @default(0)
+  invalidRows   Int    @default(0)
+  duplicateRows Int    @default(0)
+  totalAmount   Float  @default(0)
+
+  makerId    String
+  maker      User    @relation("FeeBatchMaker", fields: [makerId], references: [id])
+  checkerId  String?
+  checker    User?   @relation("FeeBatchChecker", fields: [checkerId], references: [id])
+  approverId String?
+  approver   User?   @relation("FeeBatchApprover", fields: [approverId], references: [id])
 
   rejectionReason String?
   approvedAt      DateTime?
   pushedAt        DateTime?
-  createdAt       DateTime           @default(now())
-  updatedAt       DateTime           @updatedAt
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
 
-  imports       SemesterFeeImport[]
-  items         SemesterFeeItem[]
-  pushJobs      FeePushJob[]
+  imports  SemesterFeeImport[]
+  items    SemesterFeeItem[]
+  pushJobs FeePushJob[]
 }
 
 model SemesterFeeImport {
@@ -591,7 +606,7 @@ model SemesterFeeItem {
   createdAt            DateTime         @default(now())
   updatedAt            DateTime         @updatedAt
 
-  invoices             FeeInvoice[]
+  invoices FeeInvoice[]
 }
 
 model FeePushJob {
@@ -660,28 +675,27 @@ model PaymentGatewaySession {
 }
 
 model PaymentStatusHistory {
-  id               String          @id @default(cuid())
+  id               String         @id @default(cuid())
   paymentRequestId String
-  paymentRequest   PaymentRequest  @relation(fields: [paymentRequestId], references: [id], onDelete: Cascade)
+  paymentRequest   PaymentRequest @relation(fields: [paymentRequestId], references: [id], onDelete: Cascade)
   fromStatus       String
   toStatus         String
   notes            String?
-  createdAt        DateTime        @default(now())
+  createdAt        DateTime       @default(now())
 }
 
 model LedgerEntry {
-  id            String      @id @default(cuid())
-  entryNumber   String      @unique
-  studentId     String?
-  student       User?       @relation(fields: [studentId], references: [id])
-  invoiceId     String?
-  invoice       FeeInvoice? @relation(fields: [invoiceId], references: [id])
-  type          String      // DEBIT_DUE, CREDIT_PAYMENT, WAIVER_ADJUSTMENT, REFUND
-  debitAmount   Float       @default(0)
-  creditAmount  Float       @default(0)
-  balanceAfter  Float       @default(0)
-  reference     String?
-  description   String?
-  createdAt     DateTime    @default(now())
+  id           String      @id @default(cuid())
+  entryNumber  String      @unique
+  studentId    String?
+  student      User?       @relation(fields: [studentId], references: [id])
+  invoiceId    String?
+  invoice      FeeInvoice? @relation(fields: [invoiceId], references: [id])
+  type         String // DEBIT_DUE, CREDIT_PAYMENT, WAIVER_ADJUSTMENT, REFUND
+  debitAmount  Float       @default(0)
+  creditAmount Float       @default(0)
+  balanceAfter Float       @default(0)
+  reference    String?
+  description  String?
+  createdAt    DateTime    @default(now())
 }
-

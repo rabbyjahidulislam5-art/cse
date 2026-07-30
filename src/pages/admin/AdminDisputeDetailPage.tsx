@@ -1,23 +1,25 @@
 import { useEffect, useState } from 'react';
 import { useSearchParams, useNavigate } from 'react-router-dom';
 import {
-  ArrowLeft, Loader2, UserPlus, Gavel, Banknote, Snowflake, Lock, Flag, Store, History,
+  ArrowLeft, Loader2, Forward as ForwardIcon, Banknote, XCircle, Snowflake, Lock, Flag, Store, History,
   User, Hash, Clock, MapPin, Smartphone, CreditCard, ExternalLink,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
+import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { toast } from 'sonner';
 import StatusBadge from '@/components/StatusBadge';
 import { FadeIn } from '@/components/PageTransition';
 import { formatCurrency } from '@/lib/mock-data';
 import {
-  getAdminDisputeDetail, assignOfficerAdmin, overrideDispute, approveRefundAdmin, rejectRefundAdmin,
-  freezeWallet, lockAccount, flagUser, flagMerchant, DISPUTE_STATUSES, type AccountsDisputeDetail, type DisputeStatus,
+  getAdminDisputeDetail, getAdminShops, forwardDisputeAdmin, refundDisputeAdmin, rejectDisputeAdmin,
+  approveRefundAdmin, rejectRefundAdmin, freezeWallet, lockAccount, flagUser, flagMerchant,
+  type AccountsDisputeDetail, type RefundMethod,
 } from '@/lib/disputeApi';
-import { getAccountsOfficers } from '@/lib/disputeApi';
 
-type Action = null | 'assign' | 'override';
+type Action = null | 'forward' | 'refund' | 'reject';
+const TERMINAL = ['Resolved', 'Rejected', 'Refunded', 'Closed'];
 
 function Field({ icon: Icon, label, value }: { icon?: typeof User; label: string; value: React.ReactNode }) {
   return (
@@ -37,9 +39,13 @@ export default function AdminDisputeDetailPage() {
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [action, setAction] = useState<Action>(null);
-  const [officers, setOfficers] = useState<Array<{ id: string; fullName: string | null }>>([]);
+  const [shops, setShops] = useState<Array<{ id: string; name: string; category: string }>>([]);
   const [selectValue, setSelectValue] = useState('');
+  const [shopValue, setShopValue] = useState('');
   const [text, setText] = useState('');
+  const [refundMethod, setRefundMethod] = useState<RefundMethod>('WalletCredit');
+  const [refundAmountType, setRefundAmountType] = useState<'Full' | 'Partial'>('Full');
+  const [refundAmount, setRefundAmount] = useState('');
 
   const load = () => {
     if (!disputeId) return;
@@ -47,11 +53,13 @@ export default function AdminDisputeDetailPage() {
     getAdminDisputeDetail({ disputeId }).then(setDetail).catch((e: any) => toast.error(e.message)).finally(() => setLoading(false));
   };
   useEffect(load, [disputeId]);
-  useEffect(() => { getAccountsOfficers().then(r => setOfficers(r.officers)); }, []);
+  useEffect(() => { getAdminShops().then(r => setShops(r.shops)); }, []);
+
+  const resetAction = () => { setAction(null); setSelectValue(''); setShopValue(''); setText(''); setRefundAmount(''); };
 
   const run = async (fn: () => Promise<any>, msg: string) => {
     setBusy(true);
-    try { await fn(); toast.success(msg); setAction(null); setSelectValue(''); setText(''); load(); }
+    try { await fn(); toast.success(msg); resetAction(); load(); }
     catch (e: any) { toast.error(e.message || 'Action failed.'); }
     finally { setBusy(false); }
   };
@@ -61,6 +69,8 @@ export default function AdminDisputeDetailPage() {
 
   const { dispute, student, transaction, refunds } = detail;
   const pendingRefund = refunds.find(r => r.status === 'Pending');
+  const hasActiveRefund = refunds.some(r => r.status === 'Pending' || r.status === 'Processed');
+  const isTerminal = TERMINAL.includes(dispute.status);
 
   return (
     <div className="container mx-auto px-4 sm:px-6 py-6 max-w-4xl">
@@ -75,8 +85,9 @@ export default function AdminDisputeDetailPage() {
 
       <FadeIn>
         <div className="flex flex-wrap gap-1.5 mb-4">
-          <Button size="sm" variant="outline" className="text-xs gap-1.5" onClick={() => setAction('assign')}><UserPlus className="w-3.5 h-3.5" /> Assign Officer</Button>
-          <Button size="sm" variant="outline" className="text-xs gap-1.5" onClick={() => setAction('override')}><Gavel className="w-3.5 h-3.5" /> Override Decision</Button>
+          <Button size="sm" variant="outline" className="text-xs gap-1.5" onClick={() => setAction('forward')} disabled={isTerminal}><ForwardIcon className="w-3.5 h-3.5" /> Forward</Button>
+          <Button size="sm" variant="outline" className="text-xs gap-1.5 border-[hsl(var(--chart-3))]/40 text-[hsl(var(--chart-3))]" onClick={() => setAction('refund')} disabled={isTerminal || hasActiveRefund}><Banknote className="w-3.5 h-3.5" /> Refund</Button>
+          <Button size="sm" variant="outline" className="text-xs gap-1.5 border-destructive/40 text-destructive" onClick={() => setAction('reject')} disabled={isTerminal}><XCircle className="w-3.5 h-3.5" /> Reject</Button>
           <Button size="sm" variant="outline" className="text-xs gap-1.5" onClick={() => navigate('/admin/shops')}><Store className="w-3.5 h-3.5" /> Manage Shop <ExternalLink className="w-3 h-3" /></Button>
           <Button size="sm" variant="outline" className="text-xs gap-1.5" disabled={busy} onClick={() => run(() => freezeWallet({ userId: student.id, freeze: true, disputeId }), 'Wallet frozen')}><Snowflake className="w-3.5 h-3.5" /> Freeze Wallet</Button>
           <Button size="sm" variant="outline" className="text-xs gap-1.5" disabled={busy} onClick={() => run(() => lockAccount({ userId: student.id, lock: student.status !== 'Locked', disputeId }), student.status === 'Locked' ? 'Account unlocked' : 'Account locked')}>
@@ -96,30 +107,67 @@ export default function AdminDisputeDetailPage() {
 
         {action && (
           <div className="rounded-xl border border-primary/30 bg-primary/5 p-4 mb-4 space-y-3">
-            {action === 'assign' && (
+            {action === 'forward' && (
               <>
-                <p className="text-xs font-semibold text-foreground">Assign Accounts Officer</p>
-                <Select value={selectValue} onValueChange={setSelectValue}>
-                  <SelectTrigger className="bg-card"><SelectValue placeholder="Select an officer" /></SelectTrigger>
-                  <SelectContent>{officers.map(o => <SelectItem key={o.id} value={o.id}>{o.fullName}</SelectItem>)}</SelectContent>
+                <p className="text-xs font-semibold text-foreground">Forward Case</p>
+                <Select value={selectValue} onValueChange={v => { setSelectValue(v); setShopValue(''); }}>
+                  <SelectTrigger className="bg-card"><SelectValue placeholder="Forward to..." /></SelectTrigger>
+                  <SelectContent><SelectItem value="Shop">Shop</SelectItem><SelectItem value="Library">Library</SelectItem></SelectContent>
                 </Select>
+                {selectValue === 'Shop' && shops.length > 1 && (
+                  <Select value={shopValue} onValueChange={setShopValue}>
+                    <SelectTrigger className="bg-card"><SelectValue placeholder="Select which shop..." /></SelectTrigger>
+                    <SelectContent>{shops.map(s => <SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>)}</SelectContent>
+                  </Select>
+                )}
+                <Textarea value={text} onChange={e => setText(e.target.value)} className="bg-card min-h-[60px]" placeholder="Note (optional)" />
                 <div className="flex gap-2 justify-end">
-                  <Button variant="ghost" size="sm" onClick={() => setAction(null)}>Cancel</Button>
-                  <Button size="sm" disabled={busy || !selectValue} onClick={() => run(() => assignOfficerAdmin({ disputeId, assignedToId: selectValue }), 'Officer assigned')}>{busy && <Loader2 className="w-3.5 h-3.5 animate-spin mr-1" />}Assign</Button>
+                  <Button variant="ghost" size="sm" onClick={resetAction}>Cancel</Button>
+                  <Button size="sm" disabled={busy || !selectValue || (selectValue === 'Shop' && shops.length > 1 && !shopValue)} className="gap-1.5"
+                    onClick={() => run(() => forwardDisputeAdmin({ disputeId, to: selectValue as 'Shop' | 'Library', shopId: shopValue || undefined, note: text }), 'Case forwarded')}>
+                    {busy && <Loader2 className="w-3.5 h-3.5 animate-spin" />} Forward
+                  </Button>
                 </div>
               </>
             )}
-            {action === 'override' && (
+            {action === 'refund' && transaction && (
               <>
-                <p className="text-xs font-semibold text-foreground">Override Case Status</p>
-                <Select value={selectValue} onValueChange={setSelectValue}>
-                  <SelectTrigger className="bg-card"><SelectValue placeholder="New status" /></SelectTrigger>
-                  <SelectContent>{DISPUTE_STATUSES.map(s => <SelectItem key={s} value={s}>{s}</SelectItem>)}</SelectContent>
-                </Select>
-                <Textarea value={text} onChange={e => setText(e.target.value)} className="bg-card min-h-[70px]" placeholder="Reason for override (required, audited)" />
+                <p className="text-xs font-semibold text-foreground">Process Refund</p>
+                <div className="grid grid-cols-2 gap-2">
+                  <Select value={refundMethod} onValueChange={v => setRefundMethod(v as RefundMethod)}>
+                    <SelectTrigger className="bg-card"><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="WalletCredit">Refund to Wallet</SelectItem>
+                      <SelectItem value="OriginalPayment">Refund to Original Payment</SelectItem>
+                      <SelectItem value="ManualAdjustment">Manual Adjustment</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  <Select value={refundAmountType} onValueChange={v => setRefundAmountType(v as 'Full' | 'Partial')}>
+                    <SelectTrigger className="bg-card"><SelectValue /></SelectTrigger>
+                    <SelectContent><SelectItem value="Full">Full Refund</SelectItem><SelectItem value="Partial">Partial Refund</SelectItem></SelectContent>
+                  </Select>
+                </div>
+                {refundAmountType === 'Partial' && (
+                  <Input type="number" value={refundAmount} onChange={e => setRefundAmount(e.target.value)} placeholder={`Max ৳${transaction.transaction.amount}`} className="bg-card" />
+                )}
+                <Textarea value={text} onChange={e => setText(e.target.value)} className="bg-card min-h-[70px]" placeholder="Note explaining this decision (required, audited)" />
+                <p className="text-[11px] text-muted-foreground">Full amount: {formatCurrency(transaction.transaction.amount)}. As final authority, this refund processes immediately — no further approval step.</p>
                 <div className="flex gap-2 justify-end">
-                  <Button variant="ghost" size="sm" onClick={() => setAction(null)}>Cancel</Button>
-                  <Button size="sm" disabled={busy || !selectValue || !text.trim()} onClick={() => run(() => overrideDispute({ disputeId, status: selectValue as DisputeStatus, reason: text }), 'Status overridden')}>{busy && <Loader2 className="w-3.5 h-3.5 animate-spin mr-1" />}Override</Button>
+                  <Button variant="ghost" size="sm" onClick={resetAction}>Cancel</Button>
+                  <Button size="sm" disabled={busy || !text.trim() || (refundAmountType === 'Partial' && !refundAmount)} className="gap-1.5"
+                    onClick={() => run(() => refundDisputeAdmin({ disputeId, method: refundMethod, amountType: refundAmountType, amount: refundAmountType === 'Partial' ? Number(refundAmount) : undefined, notes: text }), 'Refund processed')}>
+                    {busy && <Loader2 className="w-3.5 h-3.5 animate-spin" />} Process Refund
+                  </Button>
+                </div>
+              </>
+            )}
+            {action === 'reject' && (
+              <>
+                <p className="text-xs font-semibold text-foreground">Reject Case</p>
+                <Textarea value={text} onChange={e => setText(e.target.value)} className="bg-card min-h-[80px]" placeholder="Internal note explaining the decision (required, audited — student sees a generic notice, not this text)" />
+                <div className="flex gap-2 justify-end">
+                  <Button variant="ghost" size="sm" onClick={resetAction}>Cancel</Button>
+                  <Button size="sm" variant="destructive" disabled={busy || !text.trim()} className="gap-1.5" onClick={() => run(() => rejectDisputeAdmin({ disputeId, reason: text }), 'Case rejected')}>{busy && <Loader2 className="w-3.5 h-3.5 animate-spin" />} Reject</Button>
                 </div>
               </>
             )}
@@ -150,6 +198,7 @@ export default function AdminDisputeDetailPage() {
               <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-2 flex items-center gap-1.5"><CreditCard className="w-3.5 h-3.5" /> Payment</p>
               <Field icon={Hash} label="Reference" value={<span className="font-mono text-xs">{transaction.transaction.reference}</span>} />
               <Field label="Amount" value={formatCurrency(transaction.transaction.amount)} />
+              <Field icon={User} label="Destination" value={transaction.receiver?.name || transaction.destination?.label} />
               <Field icon={Clock} label="Time" value={new Date(transaction.transaction.createdAt).toLocaleString('en-US', { timeZone: 'Asia/Dhaka' })} />
               <Field icon={MapPin} label="IP" value={transaction.transaction.ipAddress || 'Not recorded'} />
               <Field icon={Smartphone} label="Device" value={transaction.transaction.deviceInfo || 'Not recorded'} />

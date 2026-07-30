@@ -2,8 +2,8 @@ import { useEffect, useState } from 'react';
 import { useSearchParams, useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import {
-  ArrowLeft, Loader2, Send, UserPlus, StickyNote, FileText, Snowflake, Forward as ForwardIcon,
-  ArrowUpCircle, Banknote, GitMerge, Split, CheckCircle2, XCircle, History, Shield, AlertTriangle,
+  ArrowLeft, Loader2, Send, UserPlus, StickyNote, Snowflake, Forward as ForwardIcon,
+  Banknote, CheckCircle2, XCircle, History, Shield, AlertTriangle,
   Hash, MapPin, Smartphone, Clock, CreditCard, User, Flag, Download,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -15,14 +15,14 @@ import StatusBadge from '@/components/StatusBadge';
 import { FadeIn } from '@/components/PageTransition';
 import { formatCurrency } from '@/lib/mock-data';
 import {
-  getAccountsDisputeDetail, getAccountsOfficers, assignDispute, replyToAccountsDispute, requestDocuments,
-  freezeDispute, unfreezeDispute, forwardDispute, escalateDispute, resolveDispute, rejectDispute,
-  initiateRefund, rejectRefund, mergeDisputes, splitDispute, closeAccountsDispute, DISPUTE_CATEGORIES,
+  getAccountsDisputeDetail, getAccountsOfficers, getAccountsShops, assignDispute, replyToAccountsDispute,
+  forwardDispute, resolveDispute, rejectDispute,
+  initiateRefund, rejectRefund, closeAccountsDispute,
   getDisputePdf, type AccountsDisputeDetail, type RefundMethod,
 } from '@/lib/disputeApi';
 import { triggerDownload } from '@/lib/download';
 
-type Action = null | 'assign' | 'reply' | 'note' | 'docs' | 'forward' | 'escalate' | 'refund' | 'reject-refund' | 'merge' | 'split' | 'resolve' | 'reject';
+type Action = null | 'assign' | 'reply' | 'forward' | 'refund' | 'resolve' | 'reject';
 
 const TERMINAL = ['Resolved', 'Rejected', 'Refunded', 'Closed'];
 
@@ -46,14 +46,17 @@ export default function DisputeCaseDetailPage() {
   const [busy, setBusy] = useState(false);
   const [pdfLoading, setPdfLoading] = useState(false);
   const [officers, setOfficers] = useState<Array<{ id: string; fullName: string | null }>>([]);
+  const [shops, setShops] = useState<Array<{ id: string; name: string; category: string }>>([]);
 
   // Form fields shared across action panels
   const [text, setText] = useState('');
   const [selectValue, setSelectValue] = useState('');
+  const [shopValue, setShopValue] = useState('');
+  const [isInternal, setIsInternal] = useState(false);
+  const [highPriority, setHighPriority] = useState(false);
   const [refundMethod, setRefundMethod] = useState<RefundMethod>('WalletCredit');
   const [refundAmountType, setRefundAmountType] = useState<'Full' | 'Partial'>('Full');
   const [refundAmount, setRefundAmount] = useState('');
-  const [splitCategory, setSplitCategory] = useState<string>(DISPUTE_CATEGORIES[0]);
 
   const load = () => {
     if (!disputeId) return;
@@ -62,9 +65,9 @@ export default function DisputeCaseDetailPage() {
   };
 
   useEffect(load, [disputeId]);
-  useEffect(() => { getAccountsOfficers().then(r => setOfficers(r.officers)); }, []);
+  useEffect(() => { getAccountsOfficers().then(r => setOfficers(r.officers)); getAccountsShops().then(r => setShops(r.shops)); }, []);
 
-  const resetAction = () => { setAction(null); setText(''); setSelectValue(''); setRefundAmount(''); };
+  const resetAction = () => { setAction(null); setText(''); setSelectValue(''); setShopValue(''); setIsInternal(false); setHighPriority(false); setRefundAmount(''); };
 
   const handlePdf = async () => {
     setPdfLoading(true);
@@ -122,18 +125,8 @@ export default function DisputeCaseDetailPage() {
           </Button>
           <Button size="sm" variant="outline" className="text-xs gap-1.5" onClick={() => setAction('assign')}><UserPlus className="w-3.5 h-3.5" /> Assign</Button>
           <Button size="sm" variant="outline" className="text-xs gap-1.5" onClick={() => setAction('reply')} disabled={isTerminal}><Send className="w-3.5 h-3.5" /> Reply</Button>
-          <Button size="sm" variant="outline" className="text-xs gap-1.5" onClick={() => setAction('note')}><StickyNote className="w-3.5 h-3.5" /> Internal Note</Button>
-          <Button size="sm" variant="outline" className="text-xs gap-1.5" onClick={() => setAction('docs')} disabled={isTerminal}><FileText className="w-3.5 h-3.5" /> Request Docs</Button>
-          {dispute.frozen ? (
-            <Button size="sm" variant="outline" className="text-xs gap-1.5" disabled={busy} onClick={() => run(() => unfreezeDispute({ disputeId }), 'Case unfrozen')}><Snowflake className="w-3.5 h-3.5" /> Unfreeze</Button>
-          ) : (
-            <Button size="sm" variant="outline" className="text-xs gap-1.5" disabled={busy} onClick={() => run(() => freezeDispute({ disputeId }), 'Case frozen — SLA paused')}><Snowflake className="w-3.5 h-3.5" /> Freeze</Button>
-          )}
           <Button size="sm" variant="outline" className="text-xs gap-1.5" onClick={() => setAction('forward')} disabled={isTerminal}><ForwardIcon className="w-3.5 h-3.5" /> Forward</Button>
-          <Button size="sm" variant="outline" className="text-xs gap-1.5" onClick={() => setAction('escalate')} disabled={isTerminal}><ArrowUpCircle className="w-3.5 h-3.5" /> Escalate</Button>
           <Button size="sm" variant="outline" className="text-xs gap-1.5 border-[hsl(var(--chart-3))]/40 text-[hsl(var(--chart-3))]" onClick={() => setAction('refund')} disabled={isTerminal || hasActiveRefund}><Banknote className="w-3.5 h-3.5" /> Refund</Button>
-          <Button size="sm" variant="outline" className="text-xs gap-1.5" onClick={() => setAction('merge')} disabled={isTerminal}><GitMerge className="w-3.5 h-3.5" /> Merge</Button>
-          <Button size="sm" variant="outline" className="text-xs gap-1.5" onClick={() => setAction('split')}><Split className="w-3.5 h-3.5" /> Split</Button>
           <Button size="sm" variant="outline" className="text-xs gap-1.5 border-[hsl(var(--chart-3))]/40 text-[hsl(var(--chart-3))]" onClick={() => setAction('resolve')} disabled={isTerminal}><CheckCircle2 className="w-3.5 h-3.5" /> Resolve</Button>
           <Button size="sm" variant="outline" className="text-xs gap-1.5 border-destructive/40 text-destructive" onClick={() => setAction('reject')} disabled={isTerminal}><XCircle className="w-3.5 h-3.5" /> Reject</Button>
           {!isTerminal && dispute.status !== 'Open' && ['Resolved', 'Rejected', 'Refunded'].includes(dispute.status) && (
@@ -157,47 +150,46 @@ export default function DisputeCaseDetailPage() {
                 </div>
               </>
             )}
-            {(action === 'reply' || action === 'note') && (
+            {action === 'reply' && (
               <>
-                <p className="text-xs font-semibold text-foreground">{action === 'reply' ? 'Reply to Student' : 'Internal Note (staff-only)'}</p>
+                <p className="text-xs font-semibold text-foreground">{isInternal ? 'Internal Note (staff-only)' : 'Reply to Student'}</p>
                 <Textarea value={text} onChange={e => setText(e.target.value)} className="bg-card min-h-[90px]" placeholder="Type here..." />
-                <div className="flex gap-2 justify-end">
-                  <Button variant="ghost" size="sm" onClick={resetAction}>Cancel</Button>
-                  <Button size="sm" disabled={busy || !text.trim()} className="gap-1.5" onClick={() => run(() => replyToAccountsDispute({ disputeId, body: text, isInternal: action === 'note' }), action === 'note' ? 'Note added' : 'Reply sent')}>{busy && <Loader2 className="w-3.5 h-3.5 animate-spin" />} Send</Button>
-                </div>
-              </>
-            )}
-            {action === 'docs' && (
-              <>
-                <p className="text-xs font-semibold text-foreground">Request Documents</p>
-                <Textarea value={text} onChange={e => setText(e.target.value)} className="bg-card min-h-[80px]" placeholder="e.g. screenshot of the transaction, receipt photo..." />
-                <div className="flex gap-2 justify-end">
-                  <Button variant="ghost" size="sm" onClick={resetAction}>Cancel</Button>
-                  <Button size="sm" disabled={busy || !text.trim()} className="gap-1.5" onClick={() => run(() => requestDocuments({ disputeId, details: text }), 'Documents requested')}>{busy && <Loader2 className="w-3.5 h-3.5 animate-spin" />} Send Request</Button>
+                <div className="flex items-center justify-between gap-2">
+                  <Button variant={isInternal ? 'default' : 'outline'} size="sm" className="gap-1.5 text-xs" onClick={() => setIsInternal(v => !v)}>
+                    <StickyNote className="w-3.5 h-3.5" /> Internal Note
+                  </Button>
+                  <div className="flex gap-2">
+                    <Button variant="ghost" size="sm" onClick={resetAction}>Cancel</Button>
+                    <Button size="sm" disabled={busy || !text.trim()} className="gap-1.5" onClick={() => run(() => replyToAccountsDispute({ disputeId, body: text, isInternal }), isInternal ? 'Note added' : 'Reply sent')}>{busy && <Loader2 className="w-3.5 h-3.5 animate-spin" />} Send</Button>
+                  </div>
                 </div>
               </>
             )}
             {action === 'forward' && (
               <>
                 <p className="text-xs font-semibold text-foreground">Forward Case</p>
-                <Select value={selectValue} onValueChange={setSelectValue}>
+                <Select value={selectValue} onValueChange={v => { setSelectValue(v); setShopValue(''); }}>
                   <SelectTrigger className="bg-card"><SelectValue placeholder="Forward to..." /></SelectTrigger>
                   <SelectContent><SelectItem value="Shop">Shop</SelectItem><SelectItem value="Library">Library</SelectItem><SelectItem value="Admin">Admin</SelectItem></SelectContent>
                 </Select>
+                {selectValue === 'Shop' && shops.length > 1 && (
+                  <Select value={shopValue} onValueChange={setShopValue}>
+                    <SelectTrigger className="bg-card"><SelectValue placeholder="Select which shop..." /></SelectTrigger>
+                    <SelectContent>{shops.map(s => <SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>)}</SelectContent>
+                  </Select>
+                )}
                 <Textarea value={text} onChange={e => setText(e.target.value)} className="bg-card min-h-[60px]" placeholder="Note (optional)" />
+                {selectValue === 'Admin' && (
+                  <Button variant={highPriority ? 'default' : 'outline'} size="sm" className="gap-1.5 text-xs" onClick={() => setHighPriority(v => !v)}>
+                    <AlertTriangle className="w-3.5 h-3.5" /> Mark high priority
+                  </Button>
+                )}
                 <div className="flex gap-2 justify-end">
                   <Button variant="ghost" size="sm" onClick={resetAction}>Cancel</Button>
-                  <Button size="sm" disabled={busy || !selectValue} className="gap-1.5" onClick={() => run(() => forwardDispute({ disputeId, to: selectValue as any, note: text }), 'Case forwarded')}>{busy && <Loader2 className="w-3.5 h-3.5 animate-spin" />} Forward</Button>
-                </div>
-              </>
-            )}
-            {action === 'escalate' && (
-              <>
-                <p className="text-xs font-semibold text-foreground">Escalate to Admin</p>
-                <Textarea value={text} onChange={e => setText(e.target.value)} className="bg-card min-h-[70px]" placeholder="Reason for escalation" />
-                <div className="flex gap-2 justify-end">
-                  <Button variant="ghost" size="sm" onClick={resetAction}>Cancel</Button>
-                  <Button size="sm" disabled={busy} className="gap-1.5" onClick={() => run(() => escalateDispute({ disputeId, reason: text }), 'Case escalated')}>{busy && <Loader2 className="w-3.5 h-3.5 animate-spin" />} Escalate</Button>
+                  <Button size="sm" disabled={busy || !selectValue || (selectValue === 'Shop' && shops.length > 1 && !shopValue)} className="gap-1.5"
+                    onClick={() => run(() => forwardDispute({ disputeId, to: selectValue as any, shopId: shopValue || undefined, note: text, highPriority }), 'Case forwarded')}>
+                    {busy && <Loader2 className="w-3.5 h-3.5 animate-spin" />} Forward
+                  </Button>
                 </div>
               </>
             )}
@@ -228,30 +220,6 @@ export default function DisputeCaseDetailPage() {
                     onClick={() => run(() => initiateRefund({ disputeId, method: refundMethod, amountType: refundAmountType, amount: refundAmountType === 'Partial' ? Number(refundAmount) : undefined }), 'Refund initiated')}>
                     {busy && <Loader2 className="w-3.5 h-3.5 animate-spin" />} Initiate Refund
                   </Button>
-                </div>
-              </>
-            )}
-            {action === 'merge' && (
-              <>
-                <p className="text-xs font-semibold text-foreground">Merge into another case</p>
-                <Input value={text} onChange={e => setText(e.target.value)} placeholder="Target dispute ID" className="bg-card" />
-                <div className="flex gap-2 justify-end">
-                  <Button variant="ghost" size="sm" onClick={resetAction}>Cancel</Button>
-                  <Button size="sm" disabled={busy || !text.trim()} className="gap-1.5" onClick={() => run(() => mergeDisputes({ sourceDisputeId: disputeId, targetDisputeId: text.trim() }), 'Cases merged')}>{busy && <Loader2 className="w-3.5 h-3.5 animate-spin" />} Merge</Button>
-                </div>
-              </>
-            )}
-            {action === 'split' && (
-              <>
-                <p className="text-xs font-semibold text-foreground">Split into a new case</p>
-                <Select value={splitCategory} onValueChange={setSplitCategory}>
-                  <SelectTrigger className="bg-card"><SelectValue /></SelectTrigger>
-                  <SelectContent>{DISPUTE_CATEGORIES.map(c => <SelectItem key={c} value={c}>{c}</SelectItem>)}</SelectContent>
-                </Select>
-                <Textarea value={text} onChange={e => setText(e.target.value)} className="bg-card min-h-[70px]" placeholder="Description for the new case" />
-                <div className="flex gap-2 justify-end">
-                  <Button variant="ghost" size="sm" onClick={resetAction}>Cancel</Button>
-                  <Button size="sm" disabled={busy} className="gap-1.5" onClick={() => run(() => splitDispute({ disputeId, category: splitCategory, description: text }), 'New case created')}>{busy && <Loader2 className="w-3.5 h-3.5 animate-spin" />} Split</Button>
                 </div>
               </>
             )}
@@ -313,7 +281,8 @@ export default function DisputeCaseDetailPage() {
             <Field icon={Hash} label="Reference" value={<span className="font-mono text-xs">{transaction.transaction.reference}</span>} />
             {transaction.gateway?.validationId && <Field icon={Shield} label="Gateway Validation ID" value={<span className="font-mono text-xs">{transaction.gateway.validationId}</span>} />}
             <Field icon={User} label="Sender" value={transaction.sender?.name} />
-            <Field icon={User} label="Receiver" value={transaction.receiver?.name} />
+            <Field icon={User} label="Receiver" value={transaction.receiver?.name || transaction.destination?.label} />
+            <Field icon={CreditCard} label="Destination" value={transaction.destination?.label} />
             <Field label="Gateway" value={transaction.gateway?.provider} />
             <Field icon={Clock} label="Time" value={new Date(transaction.transaction.createdAt).toLocaleString('en-US', { timeZone: 'Asia/Dhaka' })} />
             <Field icon={MapPin} label="IP" value={transaction.transaction.ipAddress || 'Not recorded'} />

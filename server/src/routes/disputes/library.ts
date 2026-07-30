@@ -2,7 +2,7 @@ import express from 'express';
 import prisma from '../../lib/prisma';
 import { authMiddleware, requireRole, AuthRequest } from '../../lib/auth';
 import { notify, notifyRole } from '../../lib/disputes/notify';
-import { disputeUpload, saveDisputeAttachment, recordTimeline, changeDisputeStatus, assembleDisputeDetail, staffDisputeActionLimiter } from './shared';
+import { disputeUpload, saveDisputeAttachment, recordTimeline, changeDisputeStatus, assembleDisputeDetail, staffDisputeActionLimiter, returnOwnerStatus } from './shared';
 
 const router = express.Router();
 const requireLibrary = requireRole('Library');
@@ -108,12 +108,17 @@ router.post('/library/disputes/recommend', authMiddleware, requireLibrary, staff
 
     await prisma.disputeMessage.create({ data: { disputeId, authorId: req.user!.id, body, isInternal: true } });
     await recordTimeline(disputeId, 'library_recommendation', req.user!.id, body);
-    await changeDisputeStatus(disputeId, 'Investigating', req.user!.id, `Library recommendation: ${decision}`);
+    // Return to whoever actually forwarded the case (Accounts vs Admin), not a hardcoded queue.
+    const backTo = returnOwnerStatus(dispute.forwardedByRole);
+    await changeDisputeStatus(disputeId, backTo, req.user!.id, `Library recommendation: ${decision}`);
+    await prisma.auditLog.create({ data: { action: 'Library Recommendation', actorId: req.user!.id, entityType: 'Dispute', entityId: disputeId, details: body, ipAddress: req.ip } });
 
-    if (dispute.assignedToId) {
+    if (dispute.forwardedById) {
+      await notify({ disputeId, recipientId: dispute.forwardedById, type: 'library_recommendation', title: `Library recommendation on ${dispute.caseNumber}`, body });
+    } else if (dispute.assignedToId) {
       await notify({ disputeId, recipientId: dispute.assignedToId, type: 'library_recommendation', title: `Library recommendation on ${dispute.caseNumber}`, body });
     } else {
-      await notifyRole('Accounts Office', { disputeId, type: 'library_recommendation', title: `Library recommendation on ${dispute.caseNumber}`, body });
+      await notifyRole(dispute.forwardedByRole || 'Accounts Office', { disputeId, type: 'library_recommendation', title: `Library recommendation on ${dispute.caseNumber}`, body });
     }
 
     res.json({ success: true });

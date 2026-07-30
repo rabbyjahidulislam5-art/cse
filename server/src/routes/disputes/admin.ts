@@ -1,11 +1,11 @@
 import express from 'express';
 import prisma from '../../lib/prisma';
 import { authMiddleware, requireRole, AuthRequest } from '../../lib/auth';
-import { notify } from '../../lib/disputes/notify';
+import { notify, notifyRole } from '../../lib/disputes/notify';
 import {
-  DisputeStatus, DISPUTE_STATUSES, RefundMethod, REFUND_METHODS, TERMINAL_STATUSES,
+  DisputeStatus, DISPUTE_STATUSES, RefundMethod, REFUND_METHODS, TERMINAL_STATUSES, OPEN_STATUSES,
   recordTimeline, changeDisputeStatus, assembleDisputeDetail, finalizeRefund, generateDisputeReportFile,
-  staffDisputeActionLimiter,
+  staffDisputeActionLimiter, canTransition,
 } from './shared';
 
 const router = express.Router();
@@ -97,11 +97,21 @@ router.post('/admin/disputes/fraud-signals', authMiddleware, requireAdmin, async
 });
 
 // ─── Case list / detail (same shape Accounts sees) ───
+// scope: 'active' | 'completed' replaces exposing all 10 internal statuses to the Admin filter —
+// Admin is the final-authority layer, not another processing queue, so it only needs to know
+// whether a case still needs attention or is done. mineOnly scopes to cases this Admin has
+// personally claimed/actioned (adminOwnerId), i.e. "My Cases". The legacy `status` param is still
+// accepted for one release so any in-flight client isn't broken mid-deploy.
 router.post('/admin/disputes/list', authMiddleware, requireAdmin, async (req: AuthRequest, res) => {
   try {
-    const { status, search, limit = 25, offset = 0 } = req.body as { status?: string; search?: string; limit?: number; offset?: number };
+    const { status, scope, mineOnly, search, limit = 25, offset = 0 } = req.body as {
+      status?: string; scope?: 'active' | 'completed'; mineOnly?: boolean; search?: string; limit?: number; offset?: number;
+    };
     const where: any = { deletedAt: null };
-    if (status && status !== 'all') where.status = status;
+    if (scope === 'completed') where.status = { in: TERMINAL_STATUSES };
+    else if (scope === 'active') where.status = { in: OPEN_STATUSES };
+    else if (status && status !== 'all') where.status = status;
+    if (mineOnly) where.adminOwnerId = req.user!.id;
     if (search) {
       where.OR = [
         { caseNumber: { contains: search, mode: 'insensitive' } },
@@ -183,6 +193,149 @@ router.post('/admin/disputes/override', authMiddleware, requireAdmin, staffDispu
   }
 });
 
+// ─── List active shops (for Admin's own Forward-to-Shop picker) ───
+router.post('/admin/disputes/shops', authMiddleware, requireAdmin, async (_req: AuthRequest, res) => {
+  try {
+    const shops = await prisma.shop.findMany({ where: { status: 'Active' }, select: { id: true, name: true, category: true }, orderBy: { name: 'asc' } });
+    res.json({ shops });
+  } catch (err: any) {
+    res.status(500).json({ message: err.message });
+  }
+});
+
+// ─── Forward to Shop / Library — Admin's own routing action, mirroring Accounts' forward. Admin
+// can't forward to itself; forwardedByRole is set to 'Admin Office' so that when Shop/Library
+// completes review, the case returns to WaitingForAdmin (not Accounts' Investigating queue). ───
+router.post('/admin/disputes/forward', authMiddleware, requireAdmin, staffDisputeActionLimiter, async (req: AuthRequest, res) => {
+  try {
+    const { disputeId, to, shopId, note } = req.body as { disputeId: string; to: 'Shop' | 'Library'; shopId?: string; note?: string };
+    if (to !== 'Shop' && to !== 'Library') return res.status(400).json({ message: 'Admin can only forward to Shop or Library.' });
+
+    const dispute = await prisma.dispute.findUnique({ where: { id: disputeId } });
+    if (!dispute || dispute.deletedAt) return res.status(404).json({ message: 'Dispute not found.' });
+    if (!canTransition(dispute.status as DisputeStatus, 'Admin Office', 'forward')) {
+      return res.status(400).json({ message: 'This case cannot be forwarded from its current status.' });
+    }
+
+    let targetShopId: string | null = null;
+    let targetShopName: string | null = null;
+    let targetShopOwnerId: string | null = null;
+    if (to === 'Shop') {
+      const activeShopCount = await prisma.shop.count({ where: { status: 'Active' } });
+      let shop;
+      if (activeShopCount > 1) {
+        if (!shopId) return res.status(400).json({ message: 'Select which shop to forward this case to.' });
+        shop = await prisma.shop.findUnique({ where: { id: shopId } });
+      } else {
+        shop = shopId ? await prisma.shop.findUnique({ where: { id: shopId } }) : await prisma.shop.findFirst({ where: { status: 'Active' } });
+      }
+      if (!shop || shop.status !== 'Active') return res.status(400).json({ message: 'That shop is not active.' });
+      targetShopId = shop.id;
+      targetShopName = shop.name;
+      targetShopOwnerId = shop.ownerId;
+    }
+
+    const targetStatus: DisputeStatus = to === 'Shop' ? 'WaitingForShop' : 'WaitingForLibrary';
+    const targetRole = to === 'Shop' ? 'Shop Staff' : 'Library';
+    const destinationLabel = to === 'Shop' && targetShopName ? `Shop (${targetShopName})` : to;
+
+    await prisma.dispute.update({
+      where: { id: disputeId },
+      data: { forwardedShopId: targetShopId, forwardedByRole: 'Admin Office', forwardedById: req.user!.id, adminOwnerId: dispute.adminOwnerId ?? req.user!.id },
+    });
+    await changeDisputeStatus(disputeId, targetStatus, req.user!.id, `Forwarded to ${destinationLabel} by Admin${note ? `: ${note}` : ''}`);
+    await prisma.auditLog.create({ data: { action: 'Dispute Forwarded (Admin)', actorId: req.user!.id, entityType: 'Dispute', entityId: disputeId, details: `Forwarded to ${destinationLabel}`, ipAddress: req.ip } });
+
+    if (to === 'Shop' && targetShopOwnerId) {
+      await notify({ disputeId, recipientId: targetShopOwnerId, type: 'forwarded', title: `Case forwarded to ${targetShopName}`, body: note || `A dispute case was forwarded to ${targetShopName} for input.` });
+    } else {
+      await notifyRole(targetRole, { disputeId, type: 'forwarded', title: `Case forwarded to ${to}`, body: note || `A dispute case was forwarded to ${to} for input.` });
+    }
+
+    res.json({ success: true });
+  } catch (err: any) {
+    res.status(500).json({ message: err.message });
+  }
+});
+
+// ─── Direct Refund — Admin is the final authority, so a single Admin both initiates and
+// "approves" its own refund (the RefundApproval row still records that self-approval, kept the
+// same shape as the two-step Accounts→Admin path so audit trails aren't distinguishable in
+// structure). Unbounded — no forced second Admin sign-off, even above the normal ৳20,000
+// threshold that gates Accounts-initiated refunds, since Admin is already the approval authority
+// that threshold exists to reach. notes is mandatory precisely because this collapses dual
+// control into one actor. ───
+router.post('/admin/disputes/refund', authMiddleware, requireAdmin, staffDisputeActionLimiter, async (req: AuthRequest, res) => {
+  try {
+    const { disputeId, method, amountType, amount: partialAmount, notes } = req.body as {
+      disputeId: string; method: RefundMethod; amountType: 'Full' | 'Partial'; amount?: number; notes?: string;
+    };
+    if (!REFUND_METHODS.includes(method)) return res.status(400).json({ message: 'Invalid refund method.' });
+    if (!notes?.trim()) return res.status(400).json({ message: 'A note explaining the refund decision is required.' });
+
+    const dispute = await prisma.dispute.findUnique({ where: { id: disputeId }, include: { transaction: true } });
+    if (!dispute || dispute.deletedAt) return res.status(404).json({ message: 'Dispute not found.' });
+    if (!canTransition(dispute.status as DisputeStatus, 'Admin Office', 'refund')) {
+      return res.status(400).json({ message: 'This case cannot be refunded from its current status.' });
+    }
+
+    const existingActive = await prisma.refund.findFirst({ where: { disputeId, status: { in: ['Pending', 'Approved', 'Processed'] } } });
+    if (existingActive) return res.status(409).json({ message: 'A refund has already been initiated for this case.' });
+
+    const fullAmount = dispute.transaction.amount;
+    const amount = amountType === 'Full' ? fullAmount : Number(partialAmount);
+    if (!amount || amount <= 0 || amount > fullAmount) return res.status(400).json({ message: 'Invalid refund amount.' });
+
+    const refund = await prisma.refund.create({
+      data: { disputeId, transactionId: dispute.transactionId, method, amountType, amount, status: 'Pending', initiatedById: req.user!.id, notes: notes.trim() },
+    });
+    await prisma.refundApproval.create({ data: { refundId: refund.id, approverId: req.user!.id, decision: 'Approved', notes: notes.trim() } });
+    await prisma.dispute.update({ where: { id: disputeId }, data: { adminOwnerId: dispute.adminOwnerId ?? req.user!.id } });
+    await recordTimeline(disputeId, 'refund_initiated', req.user!.id, `${amountType} refund of ৳${amount.toLocaleString()} processed directly by Admin via ${method}: ${notes.trim()}`);
+    await prisma.auditLog.create({ data: { action: 'Dispute Refund Processed Directly (Admin)', actorId: req.user!.id, entityType: 'Dispute', entityId: disputeId, details: `${method} ${amountType} ৳${amount} — ${notes.trim()}`, ipAddress: req.ip } });
+
+    const result = await finalizeRefund({
+      refund: { id: refund.id, method, amount, disputeId }, transactionId: dispute.transactionId,
+      recipientUserId: dispute.transaction.userId, processedById: req.user!.id, notes: notes.trim(), ipAddress: req.ip, caseNumber: dispute.caseNumber,
+    });
+    if (!result.ok) return res.status(400).json({ message: result.message });
+
+    res.json({ success: true, refundId: refund.id });
+  } catch (err: any) {
+    res.status(500).json({ message: err.message });
+  }
+});
+
+// ─── Direct Reject — mandatory internal note explaining the decision; the student only sees a
+// generic notice (the reasoning stays staff-internal), consistent with this being Admin's final
+// word rather than a back-and-forth conversation. ───
+router.post('/admin/disputes/reject', authMiddleware, requireAdmin, staffDisputeActionLimiter, async (req: AuthRequest, res) => {
+  try {
+    const { disputeId, reason } = req.body as { disputeId: string; reason: string };
+    if (!reason?.trim()) return res.status(400).json({ message: 'A reason is required.' });
+
+    const dispute = await prisma.dispute.findUnique({ where: { id: disputeId } });
+    if (!dispute || dispute.deletedAt) return res.status(404).json({ message: 'Dispute not found.' });
+    if (!canTransition(dispute.status as DisputeStatus, 'Admin Office', 'reject')) {
+      return res.status(400).json({ message: 'This case cannot be rejected from its current status.' });
+    }
+
+    await prisma.disputeMessage.create({ data: { disputeId, authorId: req.user!.id, body: reason.trim(), isInternal: true } });
+    await prisma.dispute.update({ where: { id: disputeId }, data: { adminOwnerId: dispute.adminOwnerId ?? req.user!.id } });
+    await changeDisputeStatus(disputeId, 'Rejected', req.user!.id, `Admin reject: ${reason.trim()}`);
+    await prisma.auditLog.create({ data: { action: 'Dispute Rejected (Admin)', actorId: req.user!.id, entityType: 'Dispute', entityId: disputeId, details: reason.trim(), ipAddress: req.ip } });
+    await notify({
+      disputeId, recipientId: dispute.raisedById, type: 'rejected', title: `Case reviewed — ${dispute.caseNumber}`,
+      body: 'Your case has been reviewed and closed. Contact the Accounts Office for details.',
+      emailSubject: `Update on your dispute ${dispute.caseNumber} — Smart Campus`,
+    });
+
+    res.json({ success: true });
+  } catch (err: any) {
+    res.status(500).json({ message: err.message });
+  }
+});
+
 // ─── Approve / Reject a high-value (>= threshold) refund ───
 router.post('/admin/disputes/refund/approve', authMiddleware, requireAdmin, staffDisputeActionLimiter, async (req: AuthRequest, res) => {
   try {
@@ -192,6 +345,7 @@ router.post('/admin/disputes/refund/approve', authMiddleware, requireAdmin, staf
     if (refund.status !== 'Pending') return res.status(400).json({ message: 'Only a pending refund can be approved.' });
 
     await prisma.refundApproval.create({ data: { refundId, approverId: req.user!.id, decision: 'Approved', notes } });
+    await prisma.dispute.update({ where: { id: refund.disputeId }, data: { adminOwnerId: refund.dispute.adminOwnerId ?? req.user!.id } });
     await prisma.auditLog.create({ data: { action: 'Dispute Refund Approved (Admin)', actorId: req.user!.id, entityType: 'Dispute', entityId: refund.disputeId, details: `Approved ৳${refund.amount} refund`, ipAddress: req.ip } });
 
     const result = await finalizeRefund({
@@ -216,6 +370,7 @@ router.post('/admin/disputes/refund/reject', authMiddleware, requireAdmin, staff
 
     await prisma.refundApproval.create({ data: { refundId, approverId: req.user!.id, decision: 'Rejected', notes: reason } });
     await prisma.refund.update({ where: { id: refundId }, data: { status: 'Rejected', notes: reason } });
+    await prisma.dispute.update({ where: { id: refund.disputeId }, data: { adminOwnerId: refund.dispute.adminOwnerId ?? req.user!.id } });
     await recordTimeline(refund.disputeId, 'refund_rejected', req.user!.id, `High-value refund rejected by Admin${reason ? `: ${reason}` : ''}`);
     await prisma.auditLog.create({ data: { action: 'Dispute Refund Rejected (Admin)', actorId: req.user!.id, entityType: 'Dispute', entityId: refund.disputeId, details: reason, ipAddress: req.ip } });
     await notify({

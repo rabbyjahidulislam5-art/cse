@@ -94,6 +94,7 @@ export interface TransactionDetail {
     callbacks: Array<{ id: string; source: string; sslStatus: string | null; verified: boolean; createdAt: string }>;
   } | null;
   dispute: { id: string; caseNumber: string; status: DisputeStatus } | null;
+  destination: { type: string; label: string; shopId?: string } | null;
 }
 
 export interface DisputeAttachmentInfo {
@@ -234,7 +235,10 @@ export const freezeDispute = (input: { disputeId: string; reason?: string }) =>
 export const unfreezeDispute = (input: { disputeId: string }) =>
   apiCall<{ success: boolean }>('/accounts/disputes/unfreeze', input);
 
-export const forwardDispute = (input: { disputeId: string; to: 'Shop' | 'Library' | 'Admin'; note?: string }) =>
+export const getAccountsShops = () =>
+  apiCall<{ shops: Array<{ id: string; name: string; category: string }> }>('/accounts/disputes/shops', {});
+
+export const forwardDispute = (input: { disputeId: string; to: 'Shop' | 'Library' | 'Admin'; shopId?: string; note?: string; highPriority?: boolean }) =>
   apiCall<{ success: boolean }>('/accounts/disputes/forward', input);
 
 export const escalateDispute = (input: { disputeId: string; reason?: string }) =>
@@ -280,13 +284,17 @@ export interface FraudSignals {
 export const getAdminDisputeStats = () => apiCall<AdminDisputeStats>('/admin/disputes/stats', {});
 export const getStaffPerformance = () => apiCall<{ performance: StaffPerformance[] }>('/admin/disputes/staff-performance', {});
 export const getFraudSignals = () => apiCall<FraudSignals>('/admin/disputes/fraud-signals', {});
-export const getAdminDisputeList = (input: { status?: string; search?: string; limit?: number; offset?: number } = {}) =>
+export const getAdminDisputeList = (input: { scope?: 'active' | 'completed'; mineOnly?: boolean; search?: string; limit?: number; offset?: number } = {}) =>
   apiCall<{ disputes: AccountsDisputeSummary[]; total: number }>('/admin/disputes/list', input);
 export const getAdminDisputeDetail = (input: { disputeId: string }) => apiCall<AccountsDisputeDetail>('/admin/disputes/detail', input);
-export const assignOfficerAdmin = (input: { disputeId: string; assignedToId: string; note?: string }) =>
-  apiCall<{ success: boolean }>('/admin/disputes/assign-officer', input);
-export const overrideDispute = (input: { disputeId: string; status: DisputeStatus; reason: string }) =>
-  apiCall<{ success: boolean }>('/admin/disputes/override', input);
+export const getAdminShops = () =>
+  apiCall<{ shops: Array<{ id: string; name: string; category: string }> }>('/admin/disputes/shops', {});
+export const forwardDisputeAdmin = (input: { disputeId: string; to: 'Shop' | 'Library'; shopId?: string; note?: string }) =>
+  apiCall<{ success: boolean }>('/admin/disputes/forward', input);
+export const refundDisputeAdmin = (input: { disputeId: string; method: RefundMethod; amountType: 'Full' | 'Partial'; amount?: number; notes: string }) =>
+  apiCall<{ success: boolean; refundId: string }>('/admin/disputes/refund', input);
+export const rejectDisputeAdmin = (input: { disputeId: string; reason: string }) =>
+  apiCall<{ success: boolean }>('/admin/disputes/reject', input);
 export const approveRefundAdmin = (input: { refundId: string; notes?: string }) =>
   apiCall<{ success: boolean }>('/admin/disputes/refund/approve', input);
 export const rejectRefundAdmin = (input: { refundId: string; reason: string }) =>
@@ -323,3 +331,5 @@ export const getShopDisputeList = (input: { status?: string; limit?: number; off
 export const getShopDisputeDetail = (input: { disputeId: string }) => apiCall<AccountsDisputeDetail>('/shop/disputes/detail', input);
 export const replyToShopDispute = (fields: { disputeId: string; body: string; isInternal?: boolean }, files: File[] = []) =>
   multipartCall<{ success: boolean; messageId: string }>('/shop/disputes/reply', { disputeId: fields.disputeId, body: fields.body, isInternal: String(!!fields.isInternal) }, files);
+export const recommendShopDecision = (input: { disputeId: string; decision: 'Approve' | 'Reject' | 'Waive'; note?: string }) =>
+  apiCall<{ success: boolean }>('/shop/disputes/recommend', input);

@@ -1,13 +1,13 @@
 import { useEffect, useRef, useState } from 'react';
 import { useSearchParams, useNavigate } from 'react-router-dom';
-import { ArrowLeft, Loader2, Send, Paperclip, X, FileText, Image as ImageIcon, StickyNote, Download } from 'lucide-react';
+import { ArrowLeft, Loader2, Send, Paperclip, X, FileText, Image as ImageIcon, StickyNote, Download, CheckCircle2, XCircle, HeartHandshake } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { toast } from 'sonner';
 import StatusBadge from '@/components/StatusBadge';
 import { FadeIn } from '@/components/PageTransition';
 import { formatCurrency } from '@/lib/mock-data';
-import { getShopDisputeDetail, replyToShopDispute, getDisputePdf, type AccountsDisputeDetail } from '@/lib/disputeApi';
+import { getShopDisputeDetail, replyToShopDispute, recommendShopDecision, getDisputePdf, type AccountsDisputeDetail } from '@/lib/disputeApi';
 import { triggerDownload } from '@/lib/download';
 
 const MAX_FILES = 5;
@@ -54,6 +54,13 @@ export default function ShopDisputeDetailPage() {
     finally { setBusy(false); }
   };
 
+  const handleRecommend = async (decision: 'Approve' | 'Reject' | 'Waive') => {
+    setBusy(true);
+    try { await recommendShopDecision({ disputeId, decision }); toast.success(`Recommendation sent: ${decision}`); load(); }
+    catch (e: any) { toast.error(e.message); }
+    finally { setBusy(false); }
+  };
+
   if (loading) return <div className="flex items-center justify-center py-24"><Loader2 className="w-8 h-8 animate-spin text-secondary" /></div>;
   if (!detail) return <p className="text-center text-sm text-muted-foreground py-24">Case not found.</p>;
 
@@ -83,6 +90,18 @@ export default function ShopDisputeDetailPage() {
             {transaction && <span>{formatCurrency(transaction.transaction.amount)} · Ref: {transaction.transaction.reference}</span>}
           </div>
         </div>
+
+        {!isTerminal && dispute.status === 'WaitingForShop' && (
+          <div className="rounded-xl border border-[hsl(var(--chart-3))]/30 bg-[hsl(var(--chart-3))]/5 p-4 mb-4">
+            <p className="text-xs font-semibold text-[hsl(var(--chart-3))] uppercase tracking-wide mb-3">Shop Verification</p>
+            <p className="text-xs text-muted-foreground mb-3">Shop doesn't process refunds directly — your recommendation is recorded and the case is forwarded back to whoever sent it.</p>
+            <div className="flex flex-wrap gap-2">
+              <Button size="sm" disabled={busy} className="gap-1.5" onClick={() => handleRecommend('Approve')}><CheckCircle2 className="w-3.5 h-3.5" /> Approve</Button>
+              <Button size="sm" variant="outline" className="gap-1.5 border-destructive/40 text-destructive" disabled={busy} onClick={() => handleRecommend('Reject')}><XCircle className="w-3.5 h-3.5" /> Reject</Button>
+              <Button size="sm" variant="outline" className="gap-1.5" disabled={busy} onClick={() => handleRecommend('Waive')}><HeartHandshake className="w-3.5 h-3.5" /> Waive</Button>
+            </div>
+          </div>
+        )}
 
         <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-2">Conversation</p>
         <div className="space-y-2.5 mb-4">

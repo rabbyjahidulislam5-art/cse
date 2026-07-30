@@ -49,6 +49,44 @@ export const staffDisputeActionLimiter = rateLimit({
 export const OPEN_STATUSES: DisputeStatus[] = ['Open', 'Investigating', 'WaitingForStudent', 'WaitingForShop', 'WaitingForLibrary', 'WaitingForAdmin'];
 export const TERMINAL_STATUSES: DisputeStatus[] = ['Resolved', 'Rejected', 'Refunded', 'Closed'];
 
+// ─── Ownership/routing guard ───
+// Enforces the enterprise ownership rule: Shop/Library can only reply or recommend on a case
+// actively waiting on them; only Accounts/Admin can forward, refund, resolve, or reject; a
+// terminal case can only be closed, never reopened via these actions. Called at the top of every
+// forward/refund/resolve/reject/recommend handler so an invalid transition 400s instead of
+// silently writing — the actual status value it moves to is still decided by the caller and
+// applied via changeDisputeStatus().
+export type DisputeActorRole = 'Accounts Office' | 'Admin Office' | 'Library' | 'Shop Staff';
+export type DisputeAction = 'forward' | 'refund' | 'resolve' | 'reject' | 'recommend' | 'reply' | 'close';
+
+export function canTransition(fromStatus: DisputeStatus, actorRole: DisputeActorRole, action: DisputeAction): boolean {
+  if (TERMINAL_STATUSES.includes(fromStatus)) {
+    return action === 'close' && (actorRole === 'Accounts Office' || actorRole === 'Admin Office');
+  }
+  if (actorRole === 'Accounts Office') {
+    return ['forward', 'refund', 'resolve', 'reject', 'reply'].includes(action);
+  }
+  if (actorRole === 'Admin Office') {
+    if (action === 'forward') return fromStatus !== 'WaitingForShop' && fromStatus !== 'WaitingForLibrary';
+    return ['refund', 'reject', 'reply'].includes(action);
+  }
+  if (actorRole === 'Library') {
+    return fromStatus === 'WaitingForLibrary' && (action === 'reply' || action === 'recommend');
+  }
+  if (actorRole === 'Shop Staff') {
+    return fromStatus === 'WaitingForShop' && (action === 'reply' || action === 'recommend');
+  }
+  return false;
+}
+
+// Resolves which status a case should return to once Shop/Library completes its review —
+// wherever it was forwarded FROM (Accounts vs Admin), not a hardcoded destination. Null
+// forwardedByRole covers legacy rows created before this column existed, defaulting to today's
+// original behavior (back to Accounts' Investigating queue).
+export function returnOwnerStatus(forwardedByRole: string | null): DisputeStatus {
+  return forwardedByRole === 'Admin Office' ? 'WaitingForAdmin' : 'Investigating';
+}
+
 // Refunds at or above this amount need Admin sign-off before money moves — mirrors the PIN/OTP
 // tiered-authorization threshold already used for outbound payments platform-wide.
 export const REFUND_APPROVAL_THRESHOLD = 20000;
@@ -187,6 +225,8 @@ export async function assembleTransactionDetail(transactionId: string, opts: { i
 
   const successfulCallback = tx.callbacks.find(c => c.verified && (c.sslStatus === 'VALID' || c.sslStatus === 'VALIDATED'));
 
+  const destination = classifyDestination(tx, receiver);
+
   return {
     transaction: {
       id: tx.id, reference: tx.reference, type: tx.type, direction: tx.direction, amount: tx.amount,
@@ -209,7 +249,60 @@ export async function assembleTransactionDetail(transactionId: string, opts: { i
         : tx.callbacks.map(c => ({ id: c.id, source: c.source, sslStatus: c.sslStatus, verified: c.verified, createdAt: c.createdAt })),
     } : null,
     dispute: tx.disputes[0] ? { id: tx.disputes[0].id, caseNumber: tx.disputes[0].caseNumber, status: tx.disputes[0].status } : null,
+    destination,
   };
+}
+
+// ─── Destination classification ───
+// The "Receiver" field alone can't answer "who should own this dispute" — semester-fee, admin-fine,
+// and library-fine payments all credit a singleton office rather than a User/Shop row, so `receiver`
+// comes back null for them (the literal cause of the "Receiver: N/A" the Accounts/Admin UI used to
+// show). This is a purely computed, read-time classification from existing fields (purpose/type/
+// shopId) — no schema column, no backfill, matching this project's "never fabricate historical
+// data" convention. First matching rule wins.
+export type DestinationType =
+  | 'CampusWallet' | 'Library' | 'AdministrativeFine' | 'SemesterFee' | 'Shop'
+  | 'PeerTransfer' | 'Withdrawal' | 'Refund' | 'Other' | 'Unknown';
+
+export interface DestinationInfo {
+  type: DestinationType;
+  label: string;
+  shopId?: string;
+}
+
+function classifyDestination(
+  tx: { purpose: string | null; type: string; shopId: string | null; shop: { id: string; name: string } | null },
+  receiver: CounterpartInfo | null,
+): DestinationInfo {
+  if (tx.purpose === 'wallet_topup' || tx.type === 'Top Up') {
+    return { type: 'CampusWallet', label: 'Campus Wallet (Top-Up)' };
+  }
+  if (tx.purpose === 'library_fine') {
+    return { type: 'Library', label: 'Central Library — Fine Payment' };
+  }
+  if (tx.purpose === 'admin_fine') {
+    return { type: 'AdministrativeFine', label: 'Administrative Fine — Accounts Office' };
+  }
+  if (tx.purpose === 'semester_fee' || tx.type === 'Fee Payment') {
+    return { type: 'SemesterFee', label: 'Semester Fee — Accounts Office' };
+  }
+  if (tx.shopId && tx.shop) {
+    const label = tx.shop.name + (tx.purpose === 'pay_later' ? ' — Pay-Later Settlement' : '');
+    return { type: 'Shop', label, shopId: tx.shopId };
+  }
+  if (tx.type === 'Transfer Sent' || tx.type === 'Transfer Received') {
+    return { type: 'PeerTransfer', label: `${receiver?.name || 'Unknown student'} (Student Wallet)` };
+  }
+  if (tx.type === 'Withdrawal') {
+    return { type: 'Withdrawal', label: 'External Mobile Wallet' };
+  }
+  if (tx.type === 'Dispute Refund') {
+    return { type: 'Refund', label: 'Refund Credit — Campus Wallet' };
+  }
+  if (receiver) {
+    return { type: 'Other', label: receiver.name };
+  }
+  return { type: 'Unknown', label: 'Not recorded' };
 }
 
 // ─── Risk scoring — a simple, transparent heuristic (not a black box), computed live from a

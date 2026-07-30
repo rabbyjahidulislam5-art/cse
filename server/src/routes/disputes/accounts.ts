@@ -6,7 +6,7 @@ import { extendSlaByFreezeDuration } from '../../lib/disputes/slaClock';
 import {
   DisputeStatus, RefundMethod, REFUND_METHODS, OPEN_STATUSES, TERMINAL_STATUSES, REFUND_APPROVAL_THRESHOLD,
   disputeUpload, saveDisputeAttachment, recordTimeline, changeDisputeStatus, assembleDisputeDetail,
-  finalizeRefund, generateDisputeReportFile, staffDisputeActionLimiter,
+  finalizeRefund, generateDisputeReportFile, staffDisputeActionLimiter, canTransition,
 } from './shared';
 
 const router = express.Router();
@@ -204,15 +204,71 @@ router.post('/accounts/disputes/unfreeze', authMiddleware, requireAccounts, staf
   }
 });
 
-// ─── Forward to Shop / Library / Admin queue ───
+// ─── List active shops (for the Forward-to-Shop picker) — separate from the admin-gated
+// /admin/shops list (heavier, requires Admin role) and the public unauthenticated /shops list. ───
+router.post('/accounts/disputes/shops', authMiddleware, requireAccounts, async (_req: AuthRequest, res) => {
+  try {
+    const shops = await prisma.shop.findMany({ where: { status: 'Active' }, select: { id: true, name: true, category: true }, orderBy: { name: 'asc' } });
+    res.json({ shops });
+  } catch (err: any) {
+    res.status(500).json({ message: err.message });
+  }
+});
+
+// ─── Forward to Shop / Library / Admin queue. When forwarding to Shop and more than one shop is
+// active, a specific shopId is required — "Shop" alone can no longer broadcast to every shop's
+// staff. forwardedByRole/forwardedById are recorded so that when Shop/Library finishes their
+// review, the case returns to whoever actually sent it (see returnOwnerStatus in shared.ts). ───
 router.post('/accounts/disputes/forward', authMiddleware, requireAccounts, staffDisputeActionLimiter, async (req: AuthRequest, res) => {
   try {
-    const { disputeId, to, note } = req.body as { disputeId: string; to: 'Shop' | 'Library' | 'Admin'; note?: string };
+    const { disputeId, to, shopId, note, highPriority } = req.body as {
+      disputeId: string; to: 'Shop' | 'Library' | 'Admin'; shopId?: string; note?: string; highPriority?: boolean;
+    };
+    const dispute = await prisma.dispute.findUnique({ where: { id: disputeId } });
+    if (!dispute || dispute.deletedAt) return res.status(404).json({ message: 'Dispute not found.' });
+    if (!canTransition(dispute.status as DisputeStatus, 'Accounts Office', 'forward')) {
+      return res.status(400).json({ message: 'This case cannot be forwarded from its current status.' });
+    }
+
+    let targetShopId: string | null = null;
+    let targetShopName: string | null = null;
+    let targetShopOwnerId: string | null = null;
+    if (to === 'Shop') {
+      const activeShopCount = await prisma.shop.count({ where: { status: 'Active' } });
+      let shop;
+      if (activeShopCount > 1) {
+        if (!shopId) return res.status(400).json({ message: 'Select which shop to forward this case to.' });
+        shop = await prisma.shop.findUnique({ where: { id: shopId } });
+      } else {
+        shop = shopId ? await prisma.shop.findUnique({ where: { id: shopId } }) : await prisma.shop.findFirst({ where: { status: 'Active' } });
+      }
+      if (!shop || shop.status !== 'Active') return res.status(400).json({ message: 'That shop is not active.' });
+      targetShopId = shop.id;
+      targetShopName = shop.name;
+      targetShopOwnerId = shop.ownerId;
+    }
+
     const targetStatus: DisputeStatus = to === 'Shop' ? 'WaitingForShop' : to === 'Library' ? 'WaitingForLibrary' : 'WaitingForAdmin';
     const targetRole = to === 'Shop' ? 'Shop Staff' : to === 'Library' ? 'Library' : 'Admin Office';
+    const destinationLabel = to === 'Shop' && targetShopName ? `Shop (${targetShopName})` : to;
 
-    await changeDisputeStatus(disputeId, targetStatus, req.user!.id, `Forwarded to ${to}${note ? `: ${note}` : ''}`);
-    await notifyRole(targetRole, { disputeId, type: 'forwarded', title: `Case forwarded to ${to}`, body: note || `A dispute case was forwarded to ${to} for input.` });
+    await prisma.dispute.update({
+      where: { id: disputeId },
+      data: {
+        forwardedShopId: targetShopId,
+        forwardedByRole: 'Accounts Office',
+        forwardedById: req.user!.id,
+        ...(highPriority && to === 'Admin' ? { priority: 'High' } : {}),
+      },
+    });
+    await changeDisputeStatus(disputeId, targetStatus, req.user!.id, `Forwarded to ${destinationLabel}${note ? `: ${note}` : ''}`);
+    await prisma.auditLog.create({ data: { action: 'Dispute Forwarded', actorId: req.user!.id, entityType: 'Dispute', entityId: disputeId, details: `Forwarded to ${destinationLabel}`, ipAddress: req.ip } });
+
+    if (to === 'Shop' && targetShopOwnerId) {
+      await notify({ disputeId, recipientId: targetShopOwnerId, type: 'forwarded', title: `Case forwarded to ${targetShopName}`, body: note || `A dispute case was forwarded to ${targetShopName} for input.` });
+    } else {
+      await notifyRole(targetRole, { disputeId, type: 'forwarded', title: `Case forwarded to ${to}`, body: note || `A dispute case was forwarded to ${to} for input.` });
+    }
 
     res.json({ success: true });
   } catch (err: any) {
@@ -240,6 +296,9 @@ router.post('/accounts/disputes/resolve', authMiddleware, requireAccounts, staff
     if (!resolutionNote?.trim()) return res.status(400).json({ message: 'A resolution note is required.' });
     const dispute = await prisma.dispute.findUnique({ where: { id: disputeId } });
     if (!dispute) return res.status(404).json({ message: 'Dispute not found.' });
+    if (!canTransition(dispute.status as DisputeStatus, 'Accounts Office', 'resolve')) {
+      return res.status(400).json({ message: 'This case cannot be resolved from its current status.' });
+    }
 
     await prisma.disputeMessage.create({ data: { disputeId, authorId: req.user!.id, body: resolutionNote.trim(), isInternal: false } });
     await changeDisputeStatus(disputeId, 'Resolved', req.user!.id, resolutionNote.trim());
@@ -257,6 +316,9 @@ router.post('/accounts/disputes/reject', authMiddleware, requireAccounts, staffD
     if (!reason?.trim()) return res.status(400).json({ message: 'A rejection reason is required.' });
     const dispute = await prisma.dispute.findUnique({ where: { id: disputeId } });
     if (!dispute) return res.status(404).json({ message: 'Dispute not found.' });
+    if (!canTransition(dispute.status as DisputeStatus, 'Accounts Office', 'reject')) {
+      return res.status(400).json({ message: 'This case cannot be rejected from its current status.' });
+    }
 
     await prisma.disputeMessage.create({ data: { disputeId, authorId: req.user!.id, body: reason.trim(), isInternal: false } });
     await changeDisputeStatus(disputeId, 'Rejected', req.user!.id, reason.trim());
