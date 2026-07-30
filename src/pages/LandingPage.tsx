@@ -2,7 +2,7 @@ import { useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '@/lib/auth-context';
 import { motion } from 'framer-motion';
-import { GraduationCap, Wallet, Shield, CreditCard, QrCode, ArrowRightLeft, ChevronRight, Sparkles, Lock } from 'lucide-react';
+import { GraduationCap, Wallet, CreditCard, QrCode, ArrowRightLeft, ChevronRight, Sparkles } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 
 const features = [
@@ -10,8 +10,6 @@ const features = [
   { icon: QrCode, title: 'QR Payments', desc: 'Scan and pay at any campus merchant in seconds', color: 'from-secondary/20 to-secondary/5' },
   { icon: ArrowRightLeft, title: 'Instant Transfer', desc: 'Send money to fellow students instantly with PIN security', color: 'from-[hsl(var(--chart-3))]/20 to-[hsl(var(--chart-3))]/5' },
   { icon: CreditCard, title: 'Pay Dues & Fees', desc: 'Semester fees, library fines, and admin charges in one place', color: 'from-[hsl(var(--chart-4))]/20 to-[hsl(var(--chart-4))]/5' },
-  { icon: Shield, title: 'Bank-Grade Security', desc: 'PIN, OTP, fraud detection, and encrypted transactions', color: 'from-primary/20 to-primary/5' },
-  { icon: Lock, title: 'Payment Gateway', desc: 'Top up via cards, bKash, Nagad, Rocket & more', color: 'from-secondary/20 to-secondary/5' },
 ];
 
 export default function LandingPage() {
@@ -133,7 +131,7 @@ export default function LandingPage() {
             <p className="text-muted-foreground max-w-lg mx-auto">A complete financial ecosystem designed for university life.</p>
           </motion.div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-5">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 sm:gap-5 max-w-3xl mx-auto">
             {features.map((f, i) => (
               <motion.div
                 key={f.title}
@@ -160,10 +158,6 @@ export default function LandingPage() {
           <div className="flex items-center gap-2">
             <GraduationCap className="w-4 h-4 text-primary" />
             <span className="text-sm text-muted-foreground">Smart Campus © {new Date().getFullYear()}</span>
-          </div>
-          <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
-            <Lock className="w-3 h-3" />
-            Bank-Grade Encryption · Secure Payments
           </div>
         </div>
       </footer>
