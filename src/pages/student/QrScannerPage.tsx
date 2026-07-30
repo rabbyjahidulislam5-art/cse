@@ -315,7 +315,7 @@ export default function QrScannerPage() {
           receiverRole={entity === 'library' ? 'Library' : 'Shop'}
           payerName={user?.fullName}
           amount={amt}
-          method={payMode === 'ssl' ? 'Online Payment (SSLCommerz)' : 'Pay Later (7-day due)'}
+          method={payMode === 'ssl' ? 'Secure Online Payment' : 'Pay Later (7-day due)'}
           confirmLabel={payMode === 'ssl' ? 'Proceed to Payment' : 'Create Due'}
           onConfirm={onConfirmed}
         />

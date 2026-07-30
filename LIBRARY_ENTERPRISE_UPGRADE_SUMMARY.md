@@ -117,3 +117,43 @@ including a concurrent-call test.
   specifically — low risk, since it's the exact same pre-existing, unmodified threshold-check code
   already proven against Shop/semester-fee payments; the new Library payment just adds another
   `source: 'library'` item into that same code path.
+
+---
+
+## 6. Post-deploy follow-up (same day)
+
+After pushing, the user reported "Invalid QR Code" when scanning the Library QR on their phone
+against the production deployment, with the scan page still showing the old pre-fix copy
+("Scan a merchant QR code to pay").
+
+**Investigation:** Checked the actual production URLs directly (`https://cse-mocha.vercel.app`
+frontend, `https://cse-iv7l.onrender.com` backend, found via the frontend's own network requests —
+the user's screenshot address bar had shown an unrelated domain, `nocha.vercel.app`, which turned
+out to be a different, unrelated site entirely). Verified via Playwright and direct API calls that
+**both were already correctly deployed**: the scan page rendered the new copy, and validating the
+real production Library QR as a real student login returned a correct `valid: true` response.
+
+**Real (secondary) bug found and fixed:** `vercel.json` had a cache-header rule targeting the
+literal path `/index.html`, but Vercel matches header rules against the *requested* path before
+rewrites run — every actual SPA route (`/`, `/student/scan`, `/library`, etc.) gets rewritten to
+serve `index.html`'s content without the browser ever requesting that literal path, so the
+"always revalidate" rule silently never applied to real navigation. Fixed by adding a matching
+header rule for every non-asset route (same negative-lookahead pattern the existing rewrite
+already uses), so future deploys become visible immediately without requiring a hard refresh.
+Committed as `6186a5b`. The most likely actual cause of what the user saw was simply testing
+before the deploy had finished, or the phone's own browser cache — this fix closes a real gap
+either way and doesn't retroactively require any other change.
+
+## 7. Admin visibility for Library fine payments
+
+Follow-up request: Admin Office should also be notified when a library fine (QR-originated or
+staff-imposed) is paid, not just Library Staff. Added one more `notifyRole('Admin Office', ...)`
+call alongside the existing `notifyRole('Library', ...)` inside `confirmSslPayment()`'s
+`purpose === 'library_fine'` branch (`server/src/index.ts`), linking to `/admin/fines` instead of
+`/library`. Unlike Shop (where only the merchant hears about their own sales), library fine
+collection is institution-wide, so Admin gets the same real-time visibility Library staff do.
+
+Verified live locally: completed a second real SSLCommerz sandbox payment end-to-end and confirmed
+three `Notification` rows were created — one to Admin Office (`admin@ewubd.edu`, linking to
+`/admin/fines`) and two to the Library Staff accounts (linking to `/library`) — with no changes to
+any other notification path. 65/65 backend tests still passing, both typechecks clean.

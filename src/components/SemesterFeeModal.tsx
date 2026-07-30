@@ -89,7 +89,7 @@ export default function SemesterFeeModal({ open, onOpenChange }: SemesterFeeModa
         if (currentToken) setStoredToken(currentToken);
         if (currentUser) setStoredUser(currentUser);
         localStorage.setItem('ssl_payment', JSON.stringify({ ref: res.transactionRef }));
-        toast.success('Redirecting to SSLCOMMERZ...');
+        toast.success('Redirecting to payment gateway...');
         window.location.href = res.gatewayUrl;
         return;
       }
@@ -209,12 +209,12 @@ export default function SemesterFeeModal({ open, onOpenChange }: SemesterFeeModa
                   <div className="p-3.5 rounded-xl border border-primary/40 bg-primary/5 flex flex-col gap-1">
                     <div className="flex items-center justify-between">
                       <span className="flex items-center gap-2 text-xs font-bold text-foreground">
-                        <CreditCard className="w-4 h-4 text-primary" /> SSLCOMMERZ Hosted Payment
+                        <CreditCard className="w-4 h-4 text-primary" /> Secure Online Payment
                       </span>
                       <span className="text-[10px] font-semibold text-muted-foreground">Bal: {formatCurrency(walletBalance)}</span>
                     </div>
                     <p className="text-[11px] text-muted-foreground mt-0.5">
-                      Payment will be completed using your Smart Campus Wallet through the SSLCOMMERZ secure gateway.
+                      Payment will be completed using your Smart Campus Wallet through the secure payment gateway.
                     </p>
                   </div>
                   {insufficientWallet && (

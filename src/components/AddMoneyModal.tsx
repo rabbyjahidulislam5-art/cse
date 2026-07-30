@@ -93,7 +93,7 @@ export default function AddMoneyModal({ open, onOpenChange }: AddMoneyModalProps
               Top-Up Wallet Balance
             </DialogTitle>
             <DialogDescription className="text-xs text-muted-foreground mt-1">
-              Add funds securely via SSLCommerz (bKash, Nagad, Cards, Internet Banking)
+              Add funds securely via Smart Campus payment system (bKash, Nagad, Cards, Internet Banking)
             </DialogDescription>
           </DialogHeader>
 
@@ -151,7 +151,7 @@ export default function AddMoneyModal({ open, onOpenChange }: AddMoneyModalProps
             <div className="p-3.5 rounded-xl bg-accent/40 border border-border/60 space-y-2">
               <div className="flex items-center gap-2 text-xs font-semibold text-foreground">
                 <CreditCard className="w-4 h-4 text-primary" />
-                <span>SSLCommerz Gateway</span>
+                <span>Secure Payment</span>
               </div>
               <p className="text-[11px] text-muted-foreground">
                 Supports bKash, Nagad, Rocket, Visa, Mastercard, AMEX & all major BD banks.

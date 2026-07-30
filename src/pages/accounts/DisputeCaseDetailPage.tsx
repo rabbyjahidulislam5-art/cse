@@ -311,7 +311,7 @@ export default function DisputeCaseDetailPage() {
             </div>
             <Field icon={Hash} label="Transaction ID" value={<span className="font-mono text-xs">{transaction.transaction.id}</span>} />
             <Field icon={Hash} label="Reference" value={<span className="font-mono text-xs">{transaction.transaction.reference}</span>} />
-            {transaction.gateway?.validationId && <Field icon={Shield} label="SSLCommerz Validation ID" value={<span className="font-mono text-xs">{transaction.gateway.validationId}</span>} />}
+            {transaction.gateway?.validationId && <Field icon={Shield} label="Gateway Validation ID" value={<span className="font-mono text-xs">{transaction.gateway.validationId}</span>} />}
             <Field icon={User} label="Sender" value={transaction.sender?.name} />
             <Field icon={User} label="Receiver" value={transaction.receiver?.name} />
             <Field label="Gateway" value={transaction.gateway?.provider} />

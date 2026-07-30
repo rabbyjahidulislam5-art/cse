@@ -90,7 +90,7 @@ export default function TransactionDetailCard({ transactionId, onRaiseDispute, d
         <div className="space-y-0.5">
           <Row icon={Hash} label="Transaction ID" value={tx.id} mono />
           <Row icon={Hash} label="Reference Number" value={tx.reference} mono />
-          {gateway?.validationId && <Row icon={ShieldCheck} label="SSLCommerz Validation ID" value={gateway.validationId} mono />}
+          {gateway?.validationId && <Row icon={ShieldCheck} label="Gateway Validation ID" value={gateway.validationId} mono />}
           {gateway?.bankTranId && <Row icon={Hash} label="Bank Transaction ID" value={gateway.bankTranId} mono />}
         </div>
 
@@ -114,7 +114,7 @@ export default function TransactionDetailCard({ transactionId, onRaiseDispute, d
         <div className="space-y-0.5">
           <Row icon={CreditCard} label="Payment Source" value={tx.purpose ? tx.purpose.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase()) : tx.type} />
           <Row icon={CreditCard} label="Gateway" value={gateway?.provider || tx.paymentMethod || 'N/A'} />
-          {gateway?.confirmedVia && <Row label="Confirmed Via" value={gateway.confirmedVia === 'ipn' ? 'Server IPN (SSLCommerz)' : 'Browser Validation'} />}
+          {gateway?.confirmedVia && <Row label="Confirmed Via" value={gateway.confirmedVia === 'ipn' ? 'Server IPN' : 'Browser Validation'} />}
         </div>
 
         {(tx.balanceBefore !== null || tx.balanceAfter !== null) && (

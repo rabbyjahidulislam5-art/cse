@@ -16,7 +16,7 @@ type TxType = GetTransactionsOutputType['transactions'][0];
 type TabKey = 'pending' | 'confirmed' | 'cancelled' | 'all';
 
 // Every payment surface in the app (semester fee, library/admin fine, shop payment, wallet
-// top-up via SSLCommerz; withdrawal via bKash/Nagad/Rocket) is routed through an external
+// top-up via the payment gateway; withdrawal via bKash/Nagad/Rocket) is routed through an external
 // gateway and lands in `Transaction.gateway`. This dashboard is scoped to those — internal
 // wallet-to-wallet transfers (`gateway: 'Wallet'`) are excluded server-side and already have
 // their own view in the Ledger.
@@ -70,7 +70,7 @@ export default function PaymentsDashboardPage() {
       <FadeIn>
         <div className="mb-6">
           <h1 className="text-xl font-bold text-foreground">Payments Dashboard</h1>
-          <p className="text-sm text-muted-foreground mt-0.5">All gateway-routed payments — SSLCommerz fees/fines/top-ups, shop payments & mobile banking withdrawals</p>
+          <p className="text-sm text-muted-foreground mt-0.5">All gateway-routed payments — fees/fines/top-ups, shop payments & mobile banking withdrawals</p>
         </div>
       </FadeIn>
 

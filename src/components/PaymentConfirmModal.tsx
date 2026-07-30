@@ -24,9 +24,9 @@ interface PaymentConfirmModalProps {
 
 // Shared confirmation step for every payment entry point (Dues single/mass pay, Shop payment,
 // QR-scan payment) so every payment shows the same receiver/amount/method/warning in the same
-// shape before redirecting to SSLCommerz.
+// shape before redirecting to the payment gateway.
 export default function PaymentConfirmModal({
-  open, onOpenChange, receiverName, receiverRole, payerName, amount, lineItems, method = 'Online Payment (SSLCommerz)', onConfirm, confirmLabel = 'Confirm & Pay', loading,
+  open, onOpenChange, receiverName, receiverRole, payerName, amount, lineItems, method = 'Secure Online Payment', onConfirm, confirmLabel = 'Confirm & Pay', loading,
 }: PaymentConfirmModalProps) {
   return (
     <Dialog open={open} onOpenChange={(v) => !loading && onOpenChange(v)}>
@@ -75,7 +75,7 @@ export default function PaymentConfirmModal({
 
         <div className="flex items-start gap-2 text-xs text-muted-foreground bg-destructive/5 border border-destructive/15 p-3 rounded-xl">
           <AlertTriangle className="w-4 h-4 text-destructive shrink-0 mt-0.5" />
-          <span>This payment is processed by SSLCommerz and cannot be reversed automatically once completed.</span>
+          <span>This payment is processed securely and cannot be reversed automatically once completed.</span>
         </div>
 
         <DialogFooter className="gap-2 sm:gap-2">

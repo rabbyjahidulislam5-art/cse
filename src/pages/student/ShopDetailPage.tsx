@@ -184,7 +184,7 @@ export default function ShopDetailPage() {
           receiverRole="Shop"
           payerName={user?.fullName}
           amount={amt}
-          method={payMode === 'sslcommerz' ? 'Online Payment (SSLCommerz)' : 'Pay Later (7-day due)'}
+          method={payMode === 'sslcommerz' ? 'Secure Online Payment' : 'Pay Later (7-day due)'}
           confirmLabel={payMode === 'sslcommerz' ? 'Proceed to Payment' : 'Create Due'}
           onConfirm={onConfirmed}
         />
