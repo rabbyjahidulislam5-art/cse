@@ -10,6 +10,7 @@ import { formatCurrency } from '@/lib/mock-data';
 import PinDialog from '@/components/PinDialog';
 import OtpDialog from '@/components/OtpDialog';
 import { useUser } from '@/lib/user-context';
+import { redirectToPaymentGateway } from '@/lib/payment-redirect';
 
 interface AddMoneyModalProps {
   open: boolean;
@@ -65,7 +66,10 @@ export default function AddMoneyModal({ open, onOpenChange }: AddMoneyModalProps
     try {
       const res = await initWalletTopUp({ amount: numericAmount, otpId: otpId || validatedOtpId });
       toast.success('Redirecting to payment gateway...');
-      window.location.href = res.gatewayUrl;
+      redirectToPaymentGateway(res.gatewayUrl, res.transactionRef, () => {
+        toast.error('Could not open the payment gateway. Please try again.');
+        setLoading(false);
+      });
     } catch (err: any) {
       if (err.requiresPin) {
         setPinOpen(true);

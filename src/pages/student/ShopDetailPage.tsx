@@ -15,6 +15,7 @@ import { getShopDetail, payShop, initSSLPayment, PIN_REQUIRED_THRESHOLD, OTP_REQ
 import { useUser } from '@/lib/user-context';
 import { CATEGORY_LABELS, formatCurrency } from '@/lib/mock-data';
 import { FadeIn } from '@/components/PageTransition';
+import { redirectToPaymentGateway } from '@/lib/payment-redirect';
 
 type ShopData = NonNullable<GetShopDetailOutputType['shop']>;
 type PayStep = 'idle' | 'amount' | 'method' | 'processing' | 'success';
@@ -76,7 +77,10 @@ export default function ShopDetailPage() {
     try {
       const res = await initSSLPayment({ items: [{ id: shop.id, source: 'shop', amount: amt, label: shop.name }], purpose: 'shop_payment', itemLabel: `Shop Payment — ${shop.name}`, otpId });
       localStorage.setItem('ssl_payment', JSON.stringify({ ref: res.transactionRef }));
-      window.location.href = res.gatewayUrl;
+      redirectToPaymentGateway(res.gatewayUrl, res.transactionRef, () => {
+        toast.error('Could not open the payment gateway. Please try again.');
+        setPayStep('method');
+      });
     } catch (e: any) {
       if (e.requiresPin) setPinOpen(true);
       else if (e.requiresOtp) setOtpOpen(true);

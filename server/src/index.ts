@@ -1633,6 +1633,12 @@ const AUTH_FRESHNESS_WINDOW_MS = 5 * 60 * 1000; // both proofs expire after 5 mi
 // validator if SSLCommerz ever does respond) — this only unblocks new payment attempts.
 const PENDING_TXN_ABANDON_WINDOW_MS = 30 * 60 * 1000;
 
+// Tighter cutoff than the abandon window above — this one is actively enforced (rows past this
+// age get mutated to Cancelled, not just excluded from a count), so it stays conservative
+// relative to how long a real SSLCommerz checkout session (bKash/Nagad/card OTP entry included)
+// is expected to take. Genuinely late confirmations are still accepted right up until this point.
+const PENDING_TXN_TTL_MS = 8 * 60 * 1000;
+
 function sslValidationUrl() {
   const isLive = process.env.SSLCOMMERZ_IS_LIVE === 'true';
   return isLive ? 'https://securepay.sslcommerz.com/validator/api/merchantTransIDvalidationAPI.php' : 'https://sandbox.sslcommerz.com/validator/api/merchantTransIDvalidationAPI.php';
@@ -1664,6 +1670,10 @@ async function confirmSslPayment(reference: string, source: 'ipn' | 'browser-val
   } catch (err: any) {
     console.error(`[confirmSslPayment] Validator call failed for ${reference} (source=${source}):`, err.message || err);
     await prisma.paymentCallback.create({ data: { transactionId: tx.id, reference, source, rawPayload: JSON.stringify(rawPayload), sslStatus: 'VALIDATION_UNREACHABLE', verified: false, ipAddress: ip } }).catch(() => {});
+    if (Date.now() - tx.createdAt.getTime() > PENDING_TXN_TTL_MS) {
+      await prisma.transaction.update({ where: { id: tx.id }, data: { status: 'Cancelled' } }).catch(() => {});
+      return { status: 'failed' as const, message: 'Payment session expired. Please try again.' };
+    }
     return { status: 'pending' as const, message: 'Could not reach the payment gateway validator. Please check again shortly.' };
   }
 
@@ -1809,7 +1819,79 @@ async function confirmSslPayment(reference: string, source: 'ipn' | 'browser-val
     return { status: 'failed' as const, message: `Payment ${sslStatus.toLowerCase()}` };
   }
 
+  if (Date.now() - tx.createdAt.getTime() > PENDING_TXN_TTL_MS) {
+    await prisma.transaction.update({ where: { id: tx.id }, data: { status: 'Cancelled' } }).catch(() => {});
+    return { status: 'failed' as const, message: 'Payment session expired. Please try again.' };
+  }
+
   return { status: 'pending' as const, message: 'Payment is still being processed' };
+}
+
+// Shared by every SSLCommerz-initiating route (wallet top-up, semester-fee payment) — talks to
+// the gateway's session-init API and guarantees the Transaction row is never left dangling as
+// Pending on the way out: any failure (network/timeout, gateway rejection, or a 'SUCCESS'
+// response missing a usable GatewayPageURL) marks it Failed and returns a clean result instead of
+// throwing, so a route-level try/catch can no longer skip that cleanup on the way to a 500.
+async function initiateSslCheckout(params: {
+  txId: string;
+  reference: string;
+  amount: number;
+  productName: string;
+  customer: { name: string; email: string; phone: string };
+  valueA: string;
+  valueB: string;
+}): Promise<{ ok: true; gatewayUrl: string; sessionKey: string } | { ok: false; status: number; message: string }> {
+  const isLive = process.env.SSLCOMMERZ_IS_LIVE === 'true';
+  const SSLCOMMERZ_URL = isLive ? 'https://securepay.sslcommerz.com/gwprocess/v4/api.php' : 'https://sandbox.sslcommerz.com/gwprocess/v4/api.php';
+  const backendUrl = process.env.BACKEND_URL || `http://localhost:${PORT}`;
+
+  const formData = new URLSearchParams({
+    store_id: process.env.SSLCOMMERZ_STORE_ID || '',
+    store_passwd: process.env.SSLCOMMERZ_STORE_PASSWORD || '',
+    total_amount: params.amount.toString(), currency: 'BDT', tran_id: params.reference,
+    // SSLCommerz POSTs to these — they must hit a backend route that can accept a POST and
+    // redirect to the frontend's GET route (see /payment/redirect above), not the SPA directly.
+    success_url: `${backendUrl}/api/payment/redirect?status=success&ref=${params.reference}`,
+    fail_url: `${backendUrl}/api/payment/redirect?status=failed&ref=${params.reference}`,
+    cancel_url: `${backendUrl}/api/payment/redirect?status=cancelled&ref=${params.reference}`,
+    // Real server-to-server IPN — confirmSslPayment() re-validates against SSLCommerz's own
+    // Merchant Transaction Validation API before marking anything Paid.
+    ipn_url: `${backendUrl}/api/payment/ipn`,
+    cus_name: params.customer.name,
+    cus_email: params.customer.email,
+    cus_phone: params.customer.phone,
+    cus_add1: 'University Campus', cus_city: 'Dhaka', cus_country: 'Bangladesh',
+    shipping_method: 'NO', product_name: params.productName,
+    product_category: 'Payment', product_profile: 'general',
+    value_a: params.valueA, value_b: params.valueB, value_c: params.reference, value_d: params.txId,
+  });
+
+  let data: Record<string, unknown>;
+  try {
+    const response = await fetch(SSLCOMMERZ_URL, { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: formData.toString() });
+    data = await response.json() as Record<string, unknown>;
+  } catch (err: any) {
+    console.error(`[initiateSslCheckout] Gateway unreachable for ${params.reference}:`, err.message || err);
+    await prisma.transaction.update({ where: { id: params.txId }, data: { status: 'Failed' } }).catch(() => {});
+    return { ok: false, status: 502, message: 'Could not reach the payment gateway. Please try again.' };
+  }
+
+  if (data.status !== 'SUCCESS') {
+    await prisma.transaction.update({ where: { id: params.txId }, data: { status: 'Failed' } }).catch(() => {});
+    const reason = (data.failedreason as string) || '';
+    let userMessage = reason || 'Payment gateway unavailable.';
+    if (reason.toLowerCase().includes('store credential')) userMessage = 'Payment gateway configuration error. Contact admin.';
+    return { ok: false, status: 400, message: userMessage };
+  }
+
+  const gatewayUrl = data.GatewayPageURL as string | undefined;
+  if (!gatewayUrl) {
+    await prisma.transaction.update({ where: { id: params.txId }, data: { status: 'Failed' } }).catch(() => {});
+    return { ok: false, status: 502, message: 'Payment gateway returned an invalid session. Please try again.' };
+  }
+
+  await prisma.transaction.update({ where: { id: params.txId }, data: { gatewayTxnId: data.sessionkey as string } });
+  return { ok: true, gatewayUrl, sessionKey: data.sessionkey as string };
 }
 
 // SSLCommerz delivers success_url/fail_url/cancel_url as a browser-submitted HTML form POST, not
@@ -1910,6 +1992,13 @@ router.post('/payment/init', authMiddleware, paymentInitLimiter, async (req: Aut
 
     const ref = `SSL-${Date.now().toString(36).toUpperCase()}-${Math.random().toString(36).slice(2, 6).toUpperCase()}`;
 
+    // Self-healing: flip this user's own genuinely-abandoned Pending SSLCommerz rows to Cancelled
+    // before counting — no cron needed, this runs on every new attempt.
+    await prisma.transaction.updateMany({
+      where: { userId, status: 'Pending', gateway: 'SSLCommerz', createdAt: { lt: new Date(Date.now() - PENDING_TXN_TTL_MS) } },
+      data: { status: 'Cancelled' },
+    });
+
     const pendingTxns = await prisma.transaction.findMany({ where: { userId, status: 'Pending', gateway: 'SSLCommerz', createdAt: { gte: new Date(Date.now() - PENDING_TXN_ABANDON_WINDOW_MS) } }, take: 5 });
     if (pendingTxns.length >= 3) return res.status(429).json({ message: 'Too many pending payments. Complete or cancel existing ones first.' });
 
@@ -1927,45 +2016,42 @@ router.post('/payment/init', authMiddleware, paymentInitLimiter, async (req: Aut
     });
 
     const user = await prisma.user.findUnique({ where: { id: userId } });
-    const isLive = process.env.SSLCOMMERZ_IS_LIVE === 'true';
-    const SSLCOMMERZ_URL = isLive ? 'https://securepay.sslcommerz.com/gwprocess/v4/api.php' : 'https://sandbox.sslcommerz.com/gwprocess/v4/api.php';
-    const backendUrl = process.env.BACKEND_URL || `http://localhost:${PORT}`;
-
-    const formData = new URLSearchParams({
-      store_id: process.env.SSLCOMMERZ_STORE_ID || '',
-      store_passwd: process.env.SSLCOMMERZ_STORE_PASSWORD || '',
-      total_amount: amount.toString(), currency: 'BDT', tran_id: ref,
-      // SSLCommerz POSTs to these — they must hit a backend route that can accept a POST and
-      // redirect to the frontend's GET route (see /payment/redirect above), not the SPA directly.
-      success_url: `${backendUrl}/api/payment/redirect?status=success&ref=${ref}`,
-      fail_url: `${backendUrl}/api/payment/redirect?status=failed&ref=${ref}`,
-      cancel_url: `${backendUrl}/api/payment/redirect?status=cancelled&ref=${ref}`,
-      // Real server-to-server IPN — this is what actually confirms payment now, not the browser's return trip.
-      ipn_url: `${backendUrl}/api/payment/ipn`,
-      cus_name: user?.fullName || 'Student',
-      cus_email: user?.email || req.user!.email,
-      cus_phone: user?.phone || '01700000000',
-      cus_add1: 'University Campus', cus_city: 'Dhaka', cus_country: 'Bangladesh',
-      shipping_method: 'NO', product_name: isTopUp ? topUpLabel : (itemLabel || items[0]?.label || 'Campus Payment'),
-      product_category: 'Payment', product_profile: 'general',
-      value_a: userId, value_b: purpose, value_c: ref, value_d: tx.id,
+    const result = await initiateSslCheckout({
+      txId: tx.id, reference: ref, amount,
+      productName: isTopUp ? topUpLabel : (itemLabel || items[0]?.label || 'Campus Payment'),
+      customer: { name: user?.fullName || 'Student', email: user?.email || req.user!.email, phone: user?.phone || '01700000000' },
+      valueA: userId, valueB: purpose,
     });
+    if (!result.ok) return res.status(result.status).json({ message: result.message });
 
-    const response = await fetch(SSLCOMMERZ_URL, { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: formData.toString() });
-    const data = await response.json() as Record<string, unknown>;
-
-    if (data.status !== 'SUCCESS') {
-      await prisma.transaction.update({ where: { id: tx.id }, data: { status: 'Failed' } });
-      const reason = (data.failedreason as string) || '';
-      let userMessage = reason || 'Payment gateway unavailable.';
-      if (reason.toLowerCase().includes('store credential')) userMessage = 'Payment gateway configuration error. Contact admin.';
-      return res.status(400).json({ message: userMessage });
-    }
-
-    await prisma.transaction.update({ where: { id: tx.id }, data: { gatewayTxnId: data.sessionkey as string } });
     await prisma.auditLog.create({ data: { action: 'SSLCommerz Payment Initiated', actorId: userId, entityType: 'Transaction', entityId: tx.id, details: `Amount: ৳${amount}, Purpose: ${purpose}, Ref: ${ref}`, ipAddress: req.ip } });
 
-    res.json({ gatewayUrl: data.GatewayPageURL as string, transactionRef: ref, sessionKey: data.sessionkey as string });
+    res.json({ gatewayUrl: result.gatewayUrl, transactionRef: ref, sessionKey: result.sessionKey });
+  } catch (err: any) {
+    res.status(500).json({ message: err.message });
+  }
+});
+
+// Client-invoked cancel — called by the frontend when a redirect to the gateway demonstrably
+// never happened (blocked navigation, missing gatewayUrl), so the "too many pending" gate clears
+// immediately instead of waiting out PENDING_TXN_TTL_MS. Deliberately not gated by
+// blockIfFinanciallyRestricted or paymentInitLimiter: cancelling a payment that never completed
+// is the opposite of new spend, and must stay available even to a restricted student — otherwise
+// they could get stuck unable to clear their own stuck Pending rows.
+router.post('/payment/cancel', authMiddleware, async (req: AuthRequest, res) => {
+  try {
+    const userId = req.user!.id;
+    const { transactionRef } = req.body as { transactionRef?: string };
+    if (!transactionRef) return res.status(400).json({ message: 'Missing transaction reference.' });
+
+    // One atomic filtered update — combines the ownership check, the "still pending" check, and
+    // the write, so there's no read-then-write race window: this can never downgrade a row that
+    // already resolved to Success/Failed/Cancelled, and can never touch another user's row.
+    const result = await prisma.transaction.updateMany({
+      where: { reference: transactionRef, userId, status: 'Pending' },
+      data: { status: 'Cancelled' },
+    });
+    res.json({ cancelled: result.count > 0 });
   } catch (err: any) {
     res.status(500).json({ message: err.message });
   }
@@ -2220,6 +2306,13 @@ router.post('/semester-fees/pay', authMiddleware, paymentInitLimiter, async (req
     }
 
     // method === 'sslcommerz'
+    // Self-healing: flip this payer's own genuinely-abandoned Pending SSLCommerz rows to
+    // Cancelled before counting — mirrors the same logic in /payment/init.
+    await prisma.transaction.updateMany({
+      where: { userId: payerId, status: 'Pending', gateway: 'SSLCommerz', createdAt: { lt: new Date(Date.now() - PENDING_TXN_TTL_MS) } },
+      data: { status: 'Cancelled' },
+    });
+
     const pendingTxns = await prisma.transaction.findMany({ where: { userId: payerId, status: 'Pending', gateway: 'SSLCommerz', createdAt: { gte: new Date(Date.now() - PENDING_TXN_ABANDON_WINDOW_MS) } }, take: 5 });
     if (pendingTxns.length >= 3) return res.status(429).json({ message: 'Too many pending payments. Complete or cancel existing ones first.' });
 
@@ -2237,48 +2330,17 @@ router.post('/semester-fees/pay', authMiddleware, paymentInitLimiter, async (req
       },
     });
 
-    const isLive = process.env.SSLCOMMERZ_IS_LIVE === 'true';
-    const SSLCOMMERZ_URL = isLive ? 'https://securepay.sslcommerz.com/gwprocess/v4/api.php' : 'https://sandbox.sslcommerz.com/gwprocess/v4/api.php';
-    const backendUrl = process.env.BACKEND_URL || `http://localhost:${PORT}`;
-
-    const formData = new URLSearchParams({
-      store_id: process.env.SSLCOMMERZ_STORE_ID || '',
-      store_passwd: process.env.SSLCOMMERZ_STORE_PASSWORD || '',
-      total_amount: total.toString(), currency: 'BDT', tran_id: ref,
-      // SSLCommerz POSTs to these — they must hit a backend route that can accept a POST and
-      // redirect to the frontend's GET route (see /payment/redirect above), not the SPA directly.
-      success_url: `${backendUrl}/api/payment/redirect?status=success&ref=${ref}`,
-      fail_url: `${backendUrl}/api/payment/redirect?status=failed&ref=${ref}`,
-      cancel_url: `${backendUrl}/api/payment/redirect?status=cancelled&ref=${ref}`,
-      // Real server-to-server IPN — confirmSslPayment() re-validates against SSLCommerz's own
-      // Merchant Transaction Validation API before marking anything Paid, exactly like every
-      // other payment purpose in this app.
-      ipn_url: `${backendUrl}/api/payment/ipn`,
-      cus_name: payer.fullName || 'Student',
-      cus_email: payer.email,
-      cus_phone: payer.phone || '01700000000',
-      cus_add1: 'University Campus', cus_city: 'Dhaka', cus_country: 'Bangladesh',
-      shipping_method: 'NO', product_name: label,
-      product_category: 'Payment', product_profile: 'general',
-      value_a: payerId, value_b: 'semester_fee', value_c: ref, value_d: tx.id,
+    const result = await initiateSslCheckout({
+      txId: tx.id, reference: ref, amount: total, productName: label,
+      customer: { name: payer.fullName || 'Student', email: payer.email, phone: payer.phone || '01700000000' },
+      valueA: payerId, valueB: 'semester_fee',
     });
+    if (!result.ok) return res.status(result.status).json({ message: result.message });
 
-    const response = await fetch(SSLCOMMERZ_URL, { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: formData.toString() });
-    const data = await response.json() as Record<string, unknown>;
-
-    if (data.status !== 'SUCCESS') {
-      await prisma.transaction.update({ where: { id: tx.id }, data: { status: 'Failed' } });
-      const reason = (data.failedreason as string) || '';
-      let userMessage = reason || 'Payment gateway unavailable.';
-      if (reason.toLowerCase().includes('store credential')) userMessage = 'Payment gateway configuration error. Contact admin.';
-      return res.status(400).json({ message: userMessage });
-    }
-
-    await prisma.transaction.update({ where: { id: tx.id }, data: { gatewayTxnId: data.sessionkey as string } });
     await prisma.auditLog.create({ data: { action: 'Semester Fee Payment Initiated (SSLCommerz)', actorId: payerId, entityType: 'Transaction', entityId: tx.id, details: `Amount: ৳${total} for ${target.fullName} (${target.studentId})${isOnBehalf ? ' — on behalf' : ''}, Ref: ${ref}`, ipAddress: req.ip } });
 
     res.json({
-      success: true, method: 'sslcommerz', gatewayUrl: data.GatewayPageURL as string, transactionRef: ref, sessionKey: data.sessionkey as string, amount: total, studentName: target.fullName || target.studentId,
+      success: true, method: 'sslcommerz', gatewayUrl: result.gatewayUrl, transactionRef: ref, sessionKey: result.sessionKey, amount: total, studentName: target.fullName || target.studentId,
       items: items.map(i => ({ source: i.source, label: i.label, amount: i.amount })), breakdown,
     });
   } catch (err: any) {

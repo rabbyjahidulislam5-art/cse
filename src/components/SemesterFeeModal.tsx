@@ -11,6 +11,7 @@ import { useUser } from '@/lib/user-context';
 import { getStoredToken, getStoredUser, setStoredToken, setStoredUser } from '@/lib/auth-storage';
 import PinDialog from '@/components/PinDialog';
 import OtpDialog from '@/components/OtpDialog';
+import { redirectToPaymentGateway } from '@/lib/payment-redirect';
 
 interface SemesterFeeModalProps {
   open: boolean;
@@ -106,7 +107,10 @@ export default function SemesterFeeModal({ open, onOpenChange }: SemesterFeeModa
         if (currentUser) setStoredUser(currentUser);
         localStorage.setItem('ssl_payment', JSON.stringify({ ref: res.transactionRef }));
         toast.success('Redirecting to payment gateway...');
-        window.location.href = res.gatewayUrl;
+        redirectToPaymentGateway(res.gatewayUrl, res.transactionRef, () => {
+          toast.error('Could not open the payment gateway. Please try again.');
+          setPaying(false);
+        });
         return;
       }
       setSuccessInfo({

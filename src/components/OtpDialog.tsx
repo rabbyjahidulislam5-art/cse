@@ -87,7 +87,7 @@ export default function OtpDialog({ open, onOpenChange, purpose, onSuccess }: Ot
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-sm glass-strong rounded-2xl p-6">
+      <DialogContent className="sm:max-w-sm glass-strong rounded-2xl p-5 sm:p-6">
         <DialogHeader className="text-center">
           <div className="mx-auto w-16 h-16 rounded-2xl bg-primary/10 flex items-center justify-center mb-3">
             <Mail className="w-8 h-8 text-primary" />
@@ -106,7 +106,7 @@ export default function OtpDialog({ open, onOpenChange, purpose, onSuccess }: Ot
 
         {sent && (
           <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} className="space-y-5 mt-2">
-            <div className="flex gap-2.5 justify-center" onPaste={handlePaste}>
+            <div className="grid grid-cols-6 gap-2 sm:gap-2.5 w-full" onPaste={handlePaste}>
               {code.map((d, i) => (
                 <input
                   key={i}
@@ -117,7 +117,7 @@ export default function OtpDialog({ open, onOpenChange, purpose, onSuccess }: Ot
                   value={d}
                   onChange={(e) => handleDigit(i, e.target.value)}
                   onKeyDown={(e) => handleKeyDown(i, e)}
-                  className={`w-12 h-14 rounded-xl border-2 text-center text-xl font-bold bg-accent/50 text-foreground transition-all outline-none ${
+                  className={`w-full max-w-12 min-w-0 h-11 sm:h-14 mx-auto rounded-xl border-2 text-center text-xl font-bold bg-accent/50 text-foreground transition-all outline-none ${
                     d ? 'border-primary' : 'border-border/60 focus:border-primary/50'
                   }`}
                   autoFocus={i === 0}

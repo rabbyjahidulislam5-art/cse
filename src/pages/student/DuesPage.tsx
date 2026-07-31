@@ -18,6 +18,7 @@ import { useNotificationSocket } from '@/lib/socket';
 import { useUser } from '@/lib/user-context';
 import { formatCurrency } from '@/lib/mock-data';
 import { FadeIn } from '@/components/PageTransition';
+import { redirectToPaymentGateway } from '@/lib/payment-redirect';
 
 type DueItem = GetDuesOutputType['semester'][0];
 type SslPurpose = 'semester_fee' | 'library_fine' | 'admin_fine' | 'pay_later' | 'mass_pay';
@@ -149,7 +150,10 @@ export default function DuesPage() {
     try {
       const res = await initSSLPayment({ items: pending.items, purpose: pending.purpose as any, itemLabel: pending.itemLabel, otpId });
       localStorage.setItem('ssl_payment', JSON.stringify({ ref: res.transactionRef }));
-      window.location.href = res.gatewayUrl;
+      redirectToPaymentGateway(res.gatewayUrl, res.transactionRef, () => {
+        toast.error('Could not open the payment gateway. Please try again.');
+        setPaying(false);
+      });
     } catch (e: any) {
       if (e.requiresPin) { setPinOpen(true); }
       else if (e.requiresOtp) { setOtpOpen(true); }

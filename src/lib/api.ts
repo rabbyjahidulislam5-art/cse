@@ -296,6 +296,9 @@ export const initWalletTopUp = (input: { amount: number; otpId?: string }) =>
     otpId: input.otpId,
   });
 
+export const cancelPayment = (input: { transactionRef: string }) =>
+  apiCall<{ cancelled: boolean }>('/payment/cancel', input);
+
 export const withdrawFromWallet = (input: { amount: number; mobileNumber: string; provider?: string }) =>
   apiCall<{ success: boolean; newBalance: number; transactionId: string; reference: string; message: string }>('/wallet/withdraw', input);
 

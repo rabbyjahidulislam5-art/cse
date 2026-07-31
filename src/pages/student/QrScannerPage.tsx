@@ -19,6 +19,7 @@ import {
 import { useUser } from '@/lib/user-context';
 import { formatCurrency } from '@/lib/mock-data';
 import { FadeIn } from '@/components/PageTransition';
+import { redirectToPaymentGateway } from '@/lib/payment-redirect';
 
 type ShopInfo = NonNullable<ValidateQrMerchantOutputType['shop']>;
 type LibraryInfo = NonNullable<ValidateLibraryQrOutputType['library']>;
@@ -93,7 +94,10 @@ export default function QrScannerPage() {
         const { fineId } = await createLibraryQrPayment({ amount: amt });
         const res = await initSSLPayment({ items: [{ id: fineId, source: 'library', amount: amt, label: 'Library Payment' }], purpose: 'library_fine', itemLabel: 'Library Payment', otpId });
         localStorage.setItem('ssl_payment', JSON.stringify({ ref: res.transactionRef }));
-        window.location.href = res.gatewayUrl;
+        redirectToPaymentGateway(res.gatewayUrl, res.transactionRef, () => {
+          toast.error('Could not open the payment gateway. Please try again.');
+          setStep('method');
+        });
       } catch (e: any) {
         if (e.requiresPin) setPinOpen(true);
         else if (e.requiresOtp) setOtpOpen(true);
@@ -108,7 +112,10 @@ export default function QrScannerPage() {
     try {
       const res = await initSSLPayment({ items: [{ id: shop.id, source: 'shop', amount: amt, label: shop.name }], purpose: 'shop_payment', itemLabel: shop.name, otpId });
       localStorage.setItem('ssl_payment', JSON.stringify({ ref: res.transactionRef }));
-      window.location.href = res.gatewayUrl;
+      redirectToPaymentGateway(res.gatewayUrl, res.transactionRef, () => {
+        toast.error('Could not open the payment gateway. Please try again.');
+        setStep('method');
+      });
     } catch (e: any) {
       if (e.requiresPin) setPinOpen(true);
       else if (e.requiresOtp) setOtpOpen(true);
