@@ -92,7 +92,7 @@ export default function AdminLayout() {
                   {user?.firstName?.charAt(0) || 'A'}
                 </button>
               </DropdownMenuTrigger>
-              <DropdownMenuContent align="end" className="w-56 glass-strong rounded-xl p-1.5">
+              <DropdownMenuContent align="end" sideOffset={8} collisionPadding={12} className="w-56 glass-strong rounded-xl p-1.5">
                 <div className="px-3 py-2.5">
                   <p className="text-sm font-semibold text-foreground">{user?.fullName || 'Admin'}</p>
                   <p className="text-xs text-muted-foreground truncate mt-0.5">{user?.email}</p>

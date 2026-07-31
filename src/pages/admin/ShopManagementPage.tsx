@@ -149,12 +149,12 @@ export default function ShopManagementPage() {
   return (
     <div className="container mx-auto px-4 sm:px-6 py-6 max-w-6xl">
       <FadeIn>
-        <div className="flex items-center justify-between mb-6">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-6">
           <div>
             <h1 className="text-xl font-bold text-foreground">Shop Management</h1>
             <p className="text-sm text-muted-foreground mt-0.5">{shops.length} shops registered</p>
           </div>
-          <Button onClick={openCreate} size="sm" className="shadow-lg shadow-primary/20">
+          <Button onClick={openCreate} size="sm" className="shadow-lg shadow-primary/20 shrink-0 self-start sm:self-auto">
             <Plus className="w-4 h-4 mr-1.5" /> Add Shop
           </Button>
         </div>
@@ -189,44 +189,54 @@ export default function ShopManagementPage() {
             <AnimatePresence>
               {filtered.map((shop) => (
                 <motion.div key={shop.id} layout initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }}
-                  className="rounded-xl border border-border/60 bg-card p-4 flex items-center gap-4 hover:border-primary/10 transition-colors">
-                  <div className="w-11 h-11 rounded-xl bg-accent flex items-center justify-center shrink-0">
-                    <Store className="w-5 h-5 text-muted-foreground" />
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2">
-                      <p className="text-sm font-semibold text-foreground truncate">{shop.name}</p>
-                      <StatusBadge status={shop.status} />
+                  className="rounded-xl border border-border/60 bg-card p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3.5 hover:border-primary/10 transition-colors">
+                  <div className="flex items-start gap-3.5 flex-1 min-w-0">
+                    <div className="w-11 h-11 rounded-xl bg-accent flex items-center justify-center shrink-0 mt-0.5 sm:mt-0">
+                      <Store className="w-5 h-5 text-muted-foreground" />
                     </div>
-                    <div className="flex items-center gap-3 mt-0.5">
-                      <span className="text-xs text-muted-foreground">{shop.category}</span>
-                      {shop.location && <span className="text-xs text-muted-foreground flex items-center gap-1"><MapPin className="w-3 h-3" />{shop.location}</span>}
-                    </div>
-                    {(shop.ownerEmail || shop.contactNumber) && (
-                      <div className="flex items-center gap-3 mt-1 flex-wrap">
-                        {shop.ownerEmail && <span className="text-[11px] text-muted-foreground font-mono">{shop.ownerEmail}</span>}
-                        {shop.contactNumber && <span className="text-[11px] text-muted-foreground">{shop.contactNumber}</span>}
-                        {shop.mustChangePassword && <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-amber-500/10 text-amber-500 font-semibold">Pending first login</span>}
-                        {!shop.mustChangePassword && !shop.emailVerified && <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-amber-500/10 text-amber-500 font-semibold">Email unverified</span>}
+                    <div className="flex-1 min-w-0 space-y-1">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <p className="text-sm font-semibold text-foreground truncate">{shop.name}</p>
+                        <StatusBadge status={shop.status} />
                       </div>
-                    )}
+                      <div className="flex items-center gap-3 flex-wrap">
+                        <span className="text-xs text-muted-foreground">{shop.category}</span>
+                        {shop.location && (
+                          <span className="text-xs text-muted-foreground flex items-center gap-1">
+                            <MapPin className="w-3 h-3 shrink-0" />
+                            <span className="truncate">{shop.location}</span>
+                          </span>
+                        )}
+                      </div>
+                      {(shop.ownerEmail || shop.contactNumber) && (
+                        <div className="flex items-center gap-2 pt-0.5 flex-wrap">
+                          {shop.ownerEmail && <span className="text-[11px] text-muted-foreground font-mono truncate">{shop.ownerEmail}</span>}
+                          {shop.contactNumber && <span className="text-[11px] text-muted-foreground">{shop.contactNumber}</span>}
+                          {shop.mustChangePassword && <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-amber-500/10 text-amber-500 font-semibold">Pending first login</span>}
+                          {!shop.mustChangePassword && !shop.emailVerified && <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-amber-500/10 text-amber-500 font-semibold">Email unverified</span>}
+                        </div>
+                      )}
+                    </div>
                   </div>
-                  <div className="text-right shrink-0 hidden sm:block">
-                    <p className="text-xs text-muted-foreground">Pending Settlement</p>
-                    <p className={`text-sm font-bold tabular ${shop.pendingSettlement > 0 ? 'text-[hsl(var(--chart-4))]' : 'text-muted-foreground'}`}>{formatCurrency(shop.pendingSettlement)}</p>
-                  </div>
-                  <div className="flex items-center gap-1.5 shrink-0">
-                    <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => openEdit(shop)}><Pencil className="w-3.5 h-3.5" /></Button>
-                    <Button variant="ghost" size="icon" className="h-8 w-8 text-primary" title="Record Settlement" onClick={() => openSettle(shop)}><Landmark className="w-3.5 h-3.5" /></Button>
-                    {shop.status === 'Active' && (
-                      <Button variant="ghost" size="icon" className="h-8 w-8 text-[hsl(var(--chart-4))]" onClick={() => setConfirmAction({ shop, action: 'suspend' })}><Ban className="w-3.5 h-3.5" /></Button>
-                    )}
-                    {shop.status === 'Suspended' && (
-                      <Button variant="ghost" size="icon" className="h-8 w-8 text-[hsl(var(--chart-3))]" onClick={() => setConfirmAction({ shop, action: 'activate' })}><CheckCircle className="w-3.5 h-3.5" /></Button>
-                    )}
-                    {shop.status !== 'Removed' && (
-                      <Button variant="ghost" size="icon" className="h-8 w-8 text-destructive" onClick={() => setConfirmAction({ shop, action: 'remove' })}><Trash2 className="w-3.5 h-3.5" /></Button>
-                    )}
+
+                  <div className="flex items-center justify-between sm:justify-end gap-4 shrink-0 pt-2.5 sm:pt-0 border-t border-border/40 sm:border-t-0">
+                    <div className="text-left sm:text-right shrink-0">
+                      <p className="text-[11px] sm:text-xs text-muted-foreground">Pending Settlement</p>
+                      <p className={`text-sm font-bold tabular ${shop.pendingSettlement > 0 ? 'text-[hsl(var(--chart-4))]' : 'text-muted-foreground'}`}>{formatCurrency(shop.pendingSettlement)}</p>
+                    </div>
+                    <div className="flex items-center gap-1 shrink-0">
+                      <Button variant="ghost" size="icon" className="h-8 w-8" title="Edit Shop" onClick={() => openEdit(shop)}><Pencil className="w-3.5 h-3.5" /></Button>
+                      <Button variant="ghost" size="icon" className="h-8 w-8 text-primary" title="Record Settlement" onClick={() => openSettle(shop)}><Landmark className="w-3.5 h-3.5" /></Button>
+                      {shop.status === 'Active' && (
+                        <Button variant="ghost" size="icon" className="h-8 w-8 text-[hsl(var(--chart-4))]" title="Suspend Shop" onClick={() => setConfirmAction({ shop, action: 'suspend' })}><Ban className="w-3.5 h-3.5" /></Button>
+                      )}
+                      {shop.status === 'Suspended' && (
+                        <Button variant="ghost" size="icon" className="h-8 w-8 text-[hsl(var(--chart-3))]" title="Activate Shop" onClick={() => setConfirmAction({ shop, action: 'activate' })}><CheckCircle className="w-3.5 h-3.5" /></Button>
+                      )}
+                      {shop.status !== 'Removed' && (
+                        <Button variant="ghost" size="icon" className="h-8 w-8 text-destructive" title="Remove Shop" onClick={() => setConfirmAction({ shop, action: 'remove' })}><Trash2 className="w-3.5 h-3.5" /></Button>
+                      )}
+                    </div>
                   </div>
                 </motion.div>
               ))}
@@ -237,7 +247,7 @@ export default function ShopManagementPage() {
 
       {/* Create/Edit Dialog */}
       <Dialog open={formOpen} onOpenChange={setFormOpen}>
-        <DialogContent className="glass-strong rounded-2xl max-w-md">
+        <DialogContent className="glass-strong rounded-2xl w-[calc(100vw-2rem)] sm:max-w-md max-h-[90vh] overflow-y-auto p-4 sm:p-6">
           <DialogHeader>
             <DialogTitle>{editShop ? 'Edit Shop' : 'Add New Shop'}</DialogTitle>
           </DialogHeader>
@@ -292,7 +302,7 @@ export default function ShopManagementPage() {
 
       {/* Confirm Action */}
       <AlertDialog open={!!confirmAction} onOpenChange={(o) => !o && setConfirmAction(null)}>
-        <AlertDialogContent className="glass-strong rounded-2xl">
+        <AlertDialogContent className="glass-strong rounded-2xl w-[calc(100vw-2rem)] sm:max-w-md p-4 sm:p-6">
           <AlertDialogHeader>
             <AlertDialogTitle>
               {confirmAction?.action === 'remove' ? 'Remove Shop' : confirmAction?.action === 'suspend' ? 'Suspend Shop' : 'Activate Shop'}
@@ -317,7 +327,7 @@ export default function ShopManagementPage() {
 
       {/* Record Settlement */}
       <Dialog open={!!settleShop} onOpenChange={(o) => !o && setSettleShop(null)}>
-        <DialogContent className="glass-strong rounded-2xl max-w-md">
+        <DialogContent className="glass-strong rounded-2xl w-[calc(100vw-2rem)] sm:max-w-md max-h-[90vh] overflow-y-auto p-4 sm:p-6">
           <DialogHeader>
             <DialogTitle>Record Settlement — {settleShop?.name}</DialogTitle>
             <DialogDescription>Confirm this shop has been paid the collected amount outside the app.</DialogDescription>

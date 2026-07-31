@@ -109,12 +109,12 @@ export default function StaffAccountsPage() {
   return (
     <div className="container mx-auto px-4 sm:px-6 py-6 max-w-6xl">
       <FadeIn>
-        <div className="flex items-center justify-between mb-6">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-6">
           <div>
             <h1 className="text-xl font-bold text-foreground">Staff Accounts</h1>
             <p className="text-sm text-muted-foreground mt-0.5">{staff.length} staff members</p>
           </div>
-          <Button onClick={openCreate} size="sm" className="shadow-lg shadow-primary/20">
+          <Button onClick={openCreate} size="sm" className="shadow-lg shadow-primary/20 shrink-0 self-start sm:self-auto">
             <Plus className="w-4 h-4 mr-1.5" /> Add Staff
           </Button>
         </div>
@@ -138,28 +138,30 @@ export default function StaffAccountsPage() {
             <AnimatePresence>
               {filtered.map(s => (
                 <motion.div key={s.id} layout initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }}
-                  className="rounded-xl border border-border/60 bg-card p-4 flex items-center gap-4 hover:border-primary/10 transition-colors">
-                  <div className="w-11 h-11 rounded-xl flex items-center justify-center shrink-0" style={{ background: `hsl(var(${roleBadgeColor[s.role] || '--chart-1'}) / 0.1)` }}>
-                    <span className="text-sm font-bold" style={{ color: `hsl(var(${roleBadgeColor[s.role] || '--chart-1'}))` }}>{s.fullName.charAt(0)}</span>
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2">
-                      <p className="text-sm font-semibold text-foreground truncate">{s.fullName}</p>
-                      <StatusBadge status={s.status} />
+                  className="rounded-xl border border-border/60 bg-card p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3.5 hover:border-primary/10 transition-colors">
+                  <div className="flex items-start gap-3.5 flex-1 min-w-0">
+                    <div className="w-11 h-11 rounded-xl flex items-center justify-center shrink-0 mt-0.5 sm:mt-0" style={{ background: `hsl(var(${roleBadgeColor[s.role] || '--chart-1'}) / 0.1)` }}>
+                      <span className="text-sm font-bold" style={{ color: `hsl(var(${roleBadgeColor[s.role] || '--chart-1'}))` }}>{s.fullName.charAt(0)}</span>
                     </div>
-                    <div className="flex items-center gap-2 mt-0.5">
-                      <span className="text-[10px] px-2 py-0.5 rounded-full font-medium" style={{ background: `hsl(var(${roleBadgeColor[s.role] || '--chart-1'}) / 0.1)`, color: `hsl(var(${roleBadgeColor[s.role] || '--chart-1'}))` }}>
-                        {s.role}
-                      </span>
-                      <span className="text-xs text-muted-foreground truncate">{s.email}</span>
+                    <div className="flex-1 min-w-0 space-y-1">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <p className="text-sm font-semibold text-foreground truncate">{s.fullName}</p>
+                        <StatusBadge status={s.status} />
+                      </div>
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="text-[10px] px-2 py-0.5 rounded-full font-medium shrink-0" style={{ background: `hsl(var(${roleBadgeColor[s.role] || '--chart-1'}) / 0.1)`, color: `hsl(var(${roleBadgeColor[s.role] || '--chart-1'}))` }}>
+                          {s.role}
+                        </span>
+                        <span className="text-xs text-muted-foreground truncate">{s.email}</span>
+                      </div>
                     </div>
                   </div>
-                  <div className="flex items-center gap-1.5 shrink-0">
-                    <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => openEdit(s)}><Pencil className="w-3.5 h-3.5" /></Button>
+                  <div className="flex items-center gap-1 shrink-0 justify-end pt-2 sm:pt-0 border-t border-border/40 sm:border-t-0">
+                    <Button variant="ghost" size="icon" className="h-8 w-8" title="Edit Staff" onClick={() => openEdit(s)}><Pencil className="w-3.5 h-3.5" /></Button>
                     {s.status === 'Active' ? (
-                      <Button variant="ghost" size="icon" className="h-8 w-8 text-[hsl(var(--chart-4))]" onClick={() => setConfirmAction({ staff: s, action: 'suspend' })}><Ban className="w-3.5 h-3.5" /></Button>
+                      <Button variant="ghost" size="icon" className="h-8 w-8 text-[hsl(var(--chart-4))]" title="Suspend Staff" onClick={() => setConfirmAction({ staff: s, action: 'suspend' })}><Ban className="w-3.5 h-3.5" /></Button>
                     ) : (
-                      <Button variant="ghost" size="icon" className="h-8 w-8 text-[hsl(var(--chart-3))]" onClick={() => setConfirmAction({ staff: s, action: 'activate' })}><CheckCircle className="w-3.5 h-3.5" /></Button>
+                      <Button variant="ghost" size="icon" className="h-8 w-8 text-[hsl(var(--chart-3))]" title="Activate Staff" onClick={() => setConfirmAction({ staff: s, action: 'activate' })}><CheckCircle className="w-3.5 h-3.5" /></Button>
                     )}
                   </div>
                 </motion.div>
@@ -171,7 +173,7 @@ export default function StaffAccountsPage() {
 
       {/* Create/Edit Dialog */}
       <Dialog open={formOpen} onOpenChange={setFormOpen}>
-        <DialogContent className="glass-strong rounded-2xl max-w-md">
+        <DialogContent className="glass-strong rounded-2xl w-[calc(100vw-2rem)] sm:max-w-md max-h-[90vh] overflow-y-auto p-4 sm:p-6">
           <DialogHeader>
             <DialogTitle>{editStaff ? 'Edit Staff' : 'Add Staff Account'}</DialogTitle>
           </DialogHeader>
@@ -215,7 +217,7 @@ export default function StaffAccountsPage() {
 
       {/* Confirm Action */}
       <AlertDialog open={!!confirmAction} onOpenChange={o => !o && setConfirmAction(null)}>
-        <AlertDialogContent className="glass-strong rounded-2xl">
+        <AlertDialogContent className="glass-strong rounded-2xl w-[calc(100vw-2rem)] sm:max-w-md p-4 sm:p-6">
           <AlertDialogHeader>
             <AlertDialogTitle>{confirmAction?.action === 'suspend' ? 'Suspend Staff' : 'Activate Staff'}</AlertDialogTitle>
             <AlertDialogDescription>
