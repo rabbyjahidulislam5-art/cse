@@ -21,8 +21,6 @@ export default function LibraryHomePage() {
 
   return (
     <div className="container mx-auto px-4 sm:px-6 py-6 max-w-4xl">
-      <motion.h1 initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }} className="text-xl font-bold text-foreground mb-6">Library Dashboard</motion.h1>
-
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-8">
         <motion.button initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.05 }}
           onClick={() => navigate('/library/fines/assign')}

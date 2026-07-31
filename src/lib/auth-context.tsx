@@ -594,8 +594,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
                 <GraduationCap className="w-7 h-7 text-primary-foreground" />
               </div>
               <div>
-                <h1 className="text-2xl font-black tracking-tight text-foreground">Smart Campus</h1>
-                <p className="text-xs font-medium text-primary tracking-wide uppercase mt-0.5">East West University Wallet</p>
+                <h1 className="text-2xl font-black tracking-tight text-foreground">EWU Campus Wallet</h1>
               </div>
             </div>
 
@@ -1005,10 +1004,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
             {/* Footer info & Dev Mode Toggle */}
             <div className="pt-2.5 border-t border-border/40 text-center space-y-2">
-              <p className="text-[11px] text-muted-foreground flex items-center justify-center gap-1">
-                <ShieldCheck className="w-3.5 h-3.5 text-primary" />
-                Bank-Grade 256-bit SSL Encryption · EWU Campus Network
-              </p>
               <div className="flex justify-center pt-1">
                 <button
                   type="button"

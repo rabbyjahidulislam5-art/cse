@@ -68,18 +68,14 @@ export default function AdminHomePage() {
 
   return (
     <div className="container mx-auto px-4 sm:px-6 py-6 max-w-6xl">
-      <FadeIn>
-        <div className="mb-6">
-          <h1 className="text-xl font-bold text-foreground">Admin Dashboard</h1>
-          <p className="text-sm text-muted-foreground mt-1">System overview and quick actions</p>
-        </div>
-        {data && data.totalShops === 0 && (
+      {data && data.totalShops === 0 && (
+        <FadeIn>
           <Button onClick={handleSeed} disabled={seeding} variant="outline" size="sm" className="mb-4">
             {seeding ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <Database className="w-4 h-4 mr-2" />}
             {seeding ? 'Seeding...' : 'Seed Demo Data'}
           </Button>
-        )}
-      </FadeIn>
+        </FadeIn>
+      )}
 
       <FadeIn delay={0.05}>
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-8">

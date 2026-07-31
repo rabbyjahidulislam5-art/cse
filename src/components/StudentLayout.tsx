@@ -87,7 +87,7 @@ function LayoutInner() {
             </div>
             <div className="hidden sm:block">
               <span className="font-bold text-foreground text-sm tracking-tight">Smart Campus</span>
-              <span className="text-[10px] text-muted-foreground block -mt-0.5">Digital Wallet</span>
+              <span className="text-[10px] text-muted-foreground block -mt-0.5">EWU Campus Wallet</span>
             </div>
           </button>
 

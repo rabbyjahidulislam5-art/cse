@@ -4,7 +4,7 @@ import { motion } from 'framer-motion';
 import { GraduationCap, ShieldAlert, ChevronRight, Loader2, CheckCircle2 } from 'lucide-react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 import { getDues, type GetDuesOutputType } from '@/lib/api';
-import { formatCurrency } from '@/lib/mock-data';
+import { formatCurrency, formatDueDate } from '@/lib/mock-data';
 import StatusBadge from '@/components/StatusBadge';
 
 // The payment-category chooser used both from the Accounts Office QR scan and the student
@@ -92,7 +92,7 @@ export default function PaymentCategoryModal({ open, onOpenChange }: Props) {
                           </div>
                           <div className="flex items-center justify-between gap-2 mt-1 flex-wrap">
                             <div className="flex items-center gap-2 min-w-0 flex-wrap">
-                              {item.dueDate && <span className="text-[10px] text-muted-foreground whitespace-nowrap">Due: {item.dueDate}</span>}
+                              {item.dueDate && <span className="text-[10px] text-muted-foreground whitespace-nowrap">Due: {formatDueDate(item.dueDate)}</span>}
                               <StatusBadge status={item.status} />
                             </div>
                             <span className="text-sm font-bold text-foreground tabular shrink-0">{formatCurrency(item.amount)}</span>

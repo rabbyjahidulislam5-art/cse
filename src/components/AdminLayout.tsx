@@ -61,7 +61,7 @@ export default function AdminLayout() {
             </div>
             <div className="hidden sm:block">
               <span className="font-bold text-foreground text-sm tracking-tight">Admin Office</span>
-              <span className="text-[10px] text-muted-foreground block -mt-0.5">Smart Campus</span>
+              <span className="text-[10px] text-muted-foreground block -mt-0.5">EWU Digital Wallet</span>
             </div>
           </button>
 
