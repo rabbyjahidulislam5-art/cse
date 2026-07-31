@@ -15,7 +15,7 @@ import { formatCurrency } from '@/lib/mock-data';
 
 // Unified Outstanding Due Settlement — routes a financially restricted student can still reach.
 // Everything else redirects to /student/dues, where the consolidated settlement lives.
-const RESTRICTION_ALLOWED_PREFIXES = ['/student/dues', '/student/profile'];
+const RESTRICTION_ALLOWED_PREFIXES = ['/student/dues', '/student/profile', '/student/settings'];
 
 const primaryNavItems = [
   { to: '/student', icon: Home, label: 'Home', end: true },
@@ -73,6 +73,7 @@ function LayoutInner() {
       ) : undefined,
     },
     { to: '/student/profile', icon: UserCircle, label: 'Profile' },
+    { to: '/student/settings', icon: Settings, label: 'Settings' },
   ];
 
   return (
@@ -138,7 +139,7 @@ function LayoutInner() {
                   <DropdownMenuItem onClick={() => navigate('/student/profile')} className="rounded-lg">
                     <UserCircle className="w-4 h-4 mr-2" /> Profile
                   </DropdownMenuItem>
-                  <DropdownMenuItem onClick={() => navigate('/student/profile')} className="rounded-lg">
+                  <DropdownMenuItem onClick={() => navigate('/student/settings')} className="rounded-lg">
                     <Settings className="w-4 h-4 mr-2" /> Settings
                   </DropdownMenuItem>
                   <DropdownMenuSeparator className="bg-border/50" />

@@ -28,6 +28,7 @@ const ShopDetailPage = lazy(() => import('./pages/student/ShopDetailPage'));
 const DuesPage = lazy(() => import('./pages/student/DuesPage'));
 const LedgerPage = lazy(() => import('./pages/student/LedgerPage'));
 const ProfilePage = lazy(() => import('./pages/student/ProfilePage'));
+const SettingsPage = lazy(() => import('./pages/student/SettingsPage'));
 const QrScannerPage = lazy(() => import('./pages/student/QrScannerPage'));
 const TransferPage = lazy(() => import('./pages/student/TransferPage'));
 const WithdrawPage = lazy(() => import('./pages/student/WithdrawPage'));
@@ -114,6 +115,7 @@ export default function App() {
           <Route path="ledger" element={<LedgerPage />} />
           <Route path="payments" element={<PaymentsDashboardPage />} />
           <Route path="profile" element={<ProfilePage />} />
+          <Route path="settings" element={<SettingsPage />} />
           <Route path="scan" element={<QrScannerPage />} />
           <Route path="transfer" element={<TransferPage />} />
           <Route path="withdraw" element={<WithdrawPage />} />

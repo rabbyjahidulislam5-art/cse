@@ -64,7 +64,6 @@ export default function HomePage() {
     { label: 'Scan & Pay', icon: ScanLine, onClick: () => navigate('/student/scan'), color: 'from-secondary/15 to-secondary/5', iconColor: 'text-secondary' },
     { label: 'Add Money', icon: PlusCircle, onClick: () => setAddMoneyOpen(true), color: 'from-primary/15 to-primary/5', iconColor: 'text-primary' },
     { label: 'Transfer', icon: ArrowRightLeft, onClick: () => navigate('/student/transfer'), color: 'from-[hsl(var(--chart-3))]/15 to-[hsl(var(--chart-3))]/5', iconColor: 'text-[hsl(var(--chart-3))]' },
-    { label: 'Withdraw', icon: ArrowUpRight, onClick: () => navigate('/student/withdraw'), color: 'from-[hsl(var(--chart-4))]/15 to-[hsl(var(--chart-4))]/5', iconColor: 'text-[hsl(var(--chart-4))]' },
     // Opens the payment-category chooser (all unpaid dues — semester fee, admin fines, library
     // fines, shop dues) rather than jumping straight into one payment type.
     { label: 'Pay Dues', icon: ShieldAlert, onClick: () => setPayCategoryOpen(true), color: 'from-[hsl(var(--chart-5))]/15 to-[hsl(var(--chart-5))]/5', iconColor: 'text-[hsl(var(--chart-5))]' },
@@ -118,7 +117,6 @@ export default function HomePage() {
           <WalletCard
             balance={wallet?.balance || 0}
             onAddMoney={() => setAddMoneyOpen(true)}
-            onWithdraw={() => navigate('/student/withdraw')}
           />
         </FadeIn>
         <FadeIn delay={0.15} className="lg:col-span-2">

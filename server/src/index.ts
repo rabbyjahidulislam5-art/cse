@@ -1083,46 +1083,51 @@ async function generateReceiptPdf(tx: {
   const filename = `${tx.reference}.pdf`;
   const filepath = path.join(dir, filename);
 
-  if (!fs.existsSync(filepath)) {
-    await new Promise<void>((resolve, reject) => {
-      const doc = new PDFDocument({ size: 'A4', margin: 50 });
-      const stream = fs.createWriteStream(filepath);
-      doc.pipe(stream);
-
-      doc.fontSize(18).font('Helvetica-Bold').text('Smart Campus — Payment Receipt', { align: 'center' });
-      doc.fontSize(10).font('Helvetica').fillColor('#666').text('East West University Digital Wallet', { align: 'center' });
-      doc.moveDown(2);
-
-      const rows: [string, string][] = [
-        ['Receipt Number', tx.reference],
-        ['Transaction ID', tx.id],
-        ['SSLCommerz Transaction ID', tx.gatewayTxnId || 'N/A'],
-        ['Validation ID', tx.bankTxnId || 'N/A'],
-        ['Date', tx.createdAt.toLocaleDateString('en-US', { timeZone: 'Asia/Dhaka', dateStyle: 'medium' })],
-        ['Time', tx.createdAt.toLocaleTimeString('en-US', { timeZone: 'Asia/Dhaka', timeStyle: 'short' })],
-        ['Amount', `৳ ${tx.amount.toLocaleString()}`],
-        ['Payment Method', tx.paymentMethod || tx.gateway || 'N/A'],
-        ['Receiver', tx.shop?.name || tx.type],
-        ['Student Name', tx.user?.fullName || 'N/A'],
-        ['Student ID', tx.user?.studentId || 'N/A'],
-        ['Status', tx.status],
-      ];
-
-      doc.fillColor('#000');
-      rows.forEach(([label, value]) => {
-        doc.font('Helvetica-Bold').fontSize(11).text(`${label}:`, 50, doc.y, { continued: true, width: 220 });
-        doc.font('Helvetica').text(`  ${value}`);
-        doc.moveDown(0.5);
-      });
-
-      doc.moveDown(2);
-      doc.fontSize(9).fillColor('#999').text('This receipt was generated automatically and, where applicable, verified via SSLCommerz.', { align: 'center' });
-
-      doc.end();
-      stream.on('finish', () => resolve());
-      stream.on('error', reject);
-    });
+  // Overwrite existing cached file if needed to fix previously corrupted PDF builds
+  if (fs.existsSync(filepath)) {
+    try { fs.unlinkSync(filepath); } catch {}
   }
+
+  await new Promise<void>((resolve, reject) => {
+    const doc = new PDFDocument({ size: 'A4', margin: 50 });
+    const stream = fs.createWriteStream(filepath);
+    doc.pipe(stream);
+
+    doc.fontSize(18).font('Helvetica-Bold').text('EWU Campus Wallet — Payment Receipt', { align: 'center' });
+    doc.fontSize(10).font('Helvetica').fillColor('#666').text('East West University Digital Wallet', { align: 'center' });
+    doc.moveDown(2);
+
+    const formattedAmount = `Tk. ${tx.amount.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+
+    const rows: [string, string][] = [
+      ['Receipt Number', tx.reference],
+      ['Transaction ID', tx.id],
+      ['Gateway Transaction ID', tx.gatewayTxnId || 'N/A'],
+      ['Validation ID', tx.bankTxnId || 'N/A'],
+      ['Date', tx.createdAt.toLocaleDateString('en-US', { timeZone: 'Asia/Dhaka', dateStyle: 'medium' })],
+      ['Time', tx.createdAt.toLocaleTimeString('en-US', { timeZone: 'Asia/Dhaka', timeStyle: 'short' })],
+      ['Amount', formattedAmount],
+      ['Payment Method', tx.paymentMethod || tx.gateway || 'N/A'],
+      ['Receiver', tx.shop?.name || tx.type],
+      ['Student Name', tx.user?.fullName || 'N/A'],
+      ['Student ID', tx.user?.studentId || 'N/A'],
+      ['Status', tx.status],
+    ];
+
+    doc.fillColor('#000');
+    rows.forEach(([label, value]) => {
+      doc.font('Helvetica-Bold').fontSize(11).text(`${label}:`, 50, doc.y, { continued: true, width: 220 });
+      doc.font('Helvetica').text(`  ${value}`);
+      doc.moveDown(0.5);
+    });
+
+    doc.moveDown(2);
+    doc.fontSize(9).fillColor('#999').text('This receipt was generated automatically by the EWU Campus Wallet System.', { align: 'center' });
+
+    doc.end();
+    stream.on('finish', () => resolve());
+    stream.on('error', reject);
+  });
 
   const backendUrl = process.env.BACKEND_URL || `http://localhost:${PORT}`;
   return `${backendUrl}/uploads/receipts/${filename}`;
@@ -1160,6 +1165,36 @@ router.post('/receipt', authMiddleware, async (req: AuthRequest, res) => {
 });
 
 // ─── TRANSFER ───
+router.post('/transfer/lookup', authMiddleware, async (req: AuthRequest, res) => {
+  try {
+    const senderId = req.user!.id;
+    const { recipientIdentifier } = req.body;
+    const trimmed = String(recipientIdentifier || '').trim();
+    if (!trimmed) return res.status(400).json({ message: 'Recipient identifier is required' });
+
+    let recipient = await prisma.user.findUnique({ where: { email: trimmed } });
+    if (!recipient) recipient = await prisma.user.findUnique({ where: { studentId: trimmed } });
+
+    if (!recipient) return res.status(404).json({ message: 'No student account found with this Email or Student ID.' });
+    if (recipient.id === senderId) return res.status(400).json({ message: 'You cannot transfer money to yourself.' });
+    if (recipient.status === 'Suspended') return res.status(403).json({ message: 'Recipient account is currently suspended.' });
+
+    res.json({
+      found: true,
+      recipient: {
+        id: recipient.id,
+        fullName: recipient.fullName || 'Student',
+        email: recipient.email,
+        studentId: recipient.studentId || 'N/A',
+        department: recipient.department || 'N/A',
+        batch: recipient.batch || 'N/A',
+      },
+    });
+  } catch (err: any) {
+    res.status(500).json({ message: err.message });
+  }
+});
+
 router.post('/transfer', authMiddleware, blockIfFinanciallyRestricted, async (req: AuthRequest, res) => {
   try {
     const senderId = req.user!.id;

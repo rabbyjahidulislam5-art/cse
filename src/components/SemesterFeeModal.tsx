@@ -9,6 +9,8 @@ import { lookupSemesterFeeStudent, paySemesterFee, type SemesterFeeLookupOutputT
 import { formatCurrency } from '@/lib/mock-data';
 import { useUser } from '@/lib/user-context';
 import { getStoredToken, getStoredUser, setStoredToken, setStoredUser } from '@/lib/auth-storage';
+import PinDialog from '@/components/PinDialog';
+import OtpDialog from '@/components/OtpDialog';
 
 interface SemesterFeeModalProps {
   open: boolean;
@@ -80,14 +82,23 @@ export default function SemesterFeeModal({ open, onOpenChange }: SemesterFeeModa
       toast.error('Insufficient Wallet Balance.');
       return;
     }
-    executePay();
+    setPinOpen(true);
   };
 
-  const executePay = async () => {
+  const onPinSuccess = () => {
+    setOtpOpen(true);
+  };
+
+  const onOtpVerified = (otpId: string) => {
+    setValidatedOtpId(otpId);
+    executePay(otpId);
+  };
+
+  const executePay = async (otpId?: string) => {
     if (!result?.student) return;
     setPaying(true);
     try {
-      const res = await paySemesterFee({ studentId: result.student.studentId, method: 'sslcommerz' });
+      const res = await paySemesterFee({ studentId: result.student.studentId, method: 'sslcommerz', otpId: otpId || validatedOtpId });
       if (res.gatewayUrl) {
         const currentToken = getStoredToken();
         const currentUser = getStoredUser();
@@ -306,6 +317,23 @@ export default function SemesterFeeModal({ open, onOpenChange }: SemesterFeeModa
           )}
         </DialogContent>
       </Dialog>
+
+      <PinDialog
+        open={pinOpen}
+        onOpenChange={setPinOpen}
+        mode="verify"
+        verifyLength={user?.pinLength || 4}
+        onSuccess={onPinSuccess}
+        title="Verify PIN for Semester Fee"
+        description={`Confirm your wallet PIN to proceed with ৳${totalDue.toLocaleString()} fee payment.`}
+      />
+
+      <OtpDialog
+        open={otpOpen}
+        onOpenChange={setOtpOpen}
+        purpose="Payment"
+        onSuccess={onOtpVerified}
+      />
     </>
   );
 }

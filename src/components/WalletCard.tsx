@@ -52,7 +52,7 @@ export default function WalletCard({ balance, onAddMoney, onWithdraw }: WalletCa
       <div className="relative z-10 mb-4">
         <div className="flex items-center gap-2 mb-3">
           <Wallet className="w-4.5 h-4.5 text-primary-foreground/60" />
-          <span className="text-sm text-primary-foreground/60 font-medium tracking-wide uppercase text-[11px]">Campus Wallet</span>
+          <span className="text-sm text-primary-foreground/60 font-medium tracking-wide uppercase text-[11px]">EWU Campus Wallet</span>
         </div>
 
         <div className="flex items-center gap-3 mb-1">

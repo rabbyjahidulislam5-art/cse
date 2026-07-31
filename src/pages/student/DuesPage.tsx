@@ -158,16 +158,14 @@ export default function DuesPage() {
     }
   };
 
-  // Confirm step complete — gate by amount before actually opening a gateway session.
+  // Confirm step complete — sequence: Confirmation -> Wallet PIN -> Email OTP -> Gateway.
   const onConfirmed = () => {
     setConfirmOpen(false);
-    if (pendingAmount >= PIN_REQUIRED_THRESHOLD) { setPinOpen(true); return; }
-    executePayment();
+    setPinOpen(true);
   };
 
   const onPinVerified = () => {
-    if (pendingAmount >= OTP_REQUIRED_THRESHOLD) { setOtpOpen(true); return; }
-    executePayment();
+    setOtpOpen(true);
   };
 
   const onOtpVerified = (otpId: string) => executePayment(otpId);
@@ -292,11 +290,11 @@ export default function DuesPage() {
       )}
 
       <Tabs value={activeTab} onValueChange={setActiveTab}>
-        <TabsList className="w-full sm:w-auto mb-5 bg-accent/50 p-1 rounded-xl">
-          <TabsTrigger value="semester" className="gap-1.5 rounded-lg data-[state=active]:bg-card data-[state=active]:shadow-sm"><GraduationCap className="w-3.5 h-3.5" /> Semester</TabsTrigger>
-          <TabsTrigger value="library" className="gap-1.5 rounded-lg data-[state=active]:bg-card data-[state=active]:shadow-sm"><BookOpen className="w-3.5 h-3.5" /> Library</TabsTrigger>
-          <TabsTrigger value="admin" className="gap-1.5 rounded-lg data-[state=active]:bg-card data-[state=active]:shadow-sm"><ShieldAlert className="w-3.5 h-3.5" /> Admin</TabsTrigger>
-          <TabsTrigger value="payLater" className="gap-1.5 rounded-lg data-[state=active]:bg-card data-[state=active]:shadow-sm"><Clock className="w-3.5 h-3.5" /> Pay Later</TabsTrigger>
+        <TabsList className="grid grid-cols-4 w-full sm:w-auto sm:flex mb-5 bg-accent/50 p-1 rounded-xl h-auto min-h-[44px]">
+          <TabsTrigger value="semester" className="gap-1 sm:gap-1.5 px-1 sm:px-3 text-[11px] sm:text-sm font-medium rounded-lg data-[state=active]:bg-card data-[state=active]:shadow-sm justify-center truncate"><GraduationCap className="w-3.5 h-3.5 shrink-0" /> Semester</TabsTrigger>
+          <TabsTrigger value="library" className="gap-1 sm:gap-1.5 px-1 sm:px-3 text-[11px] sm:text-sm font-medium rounded-lg data-[state=active]:bg-card data-[state=active]:shadow-sm justify-center truncate"><BookOpen className="w-3.5 h-3.5 shrink-0" /> Library</TabsTrigger>
+          <TabsTrigger value="admin" className="gap-1 sm:gap-1.5 px-1 sm:px-3 text-[11px] sm:text-sm font-medium rounded-lg data-[state=active]:bg-card data-[state=active]:shadow-sm justify-center truncate"><ShieldAlert className="w-3.5 h-3.5 shrink-0" /> Admin</TabsTrigger>
+          <TabsTrigger value="payLater" className="gap-1 sm:gap-1.5 px-1 sm:px-3 text-[11px] sm:text-sm font-medium rounded-lg data-[state=active]:bg-card data-[state=active]:shadow-sm justify-center truncate"><Clock className="w-3.5 h-3.5 shrink-0" /> Pay Later</TabsTrigger>
         </TabsList>
         <TabsContent value="semester">{renderList(dues?.semester || [], 'semester')}</TabsContent>
         <TabsContent value="library">{renderList(dues?.library || [], 'library')}</TabsContent>

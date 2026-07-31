@@ -197,24 +197,6 @@ export default function ProfilePage() {
         </div>
       </FadeIn>
 
-      {/* Security */}
-      <FadeIn delay={0.2}>
-        <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-3">Security</h3>
-        <button
-          onClick={() => { setPinMode(user.pinSet ? 'change' : 'set'); setPinOpen(true); }}
-          className="w-full rounded-xl border border-border/60 bg-card p-4 flex items-center gap-4 hover:border-primary/20 transition-colors mb-6"
-        >
-          <div className={`w-12 h-12 rounded-xl flex items-center justify-center ${user.pinSet ? 'bg-[hsl(var(--chart-3))]/10' : 'bg-[hsl(var(--chart-4))]/10'}`}>
-            {user.pinSet ? <ShieldCheck className="w-6 h-6 text-[hsl(var(--chart-3))]" /> : <Lock className="w-6 h-6 text-[hsl(var(--chart-4))]" />}
-          </div>
-          <div className="flex-1 text-left">
-            <p className="text-sm font-semibold text-foreground">Wallet PIN</p>
-            <p className="text-xs text-muted-foreground">{user.pinSet ? 'PIN is active. Tap to change.' : 'Set a PIN to secure your wallet.'}</p>
-          </div>
-          <ChevronRight className="w-4 h-4 text-muted-foreground" />
-        </button>
-      </FadeIn>
-
       {/* Logout */}
       <FadeIn delay={0.25}>
         <Button

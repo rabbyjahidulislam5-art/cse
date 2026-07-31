@@ -270,6 +270,9 @@ export const markNotificationRead = (input: { id?: string; source?: 'general' | 
 export const getReceipt = (input: { transactionId: string }) =>
   apiCall<{ url: string; [key: string]: any }>('/receipt', input);
 
+export const lookupTransferRecipient = (input: { recipientIdentifier: string }) =>
+  apiCall<{ found: boolean; recipient: { id: string; fullName: string; email: string; studentId: string; department: string; batch: string } }>('/transfer/lookup', input);
+
 export const transferMoney = (input: { recipientIdentifier: string; amount: number; note?: string }) =>
   apiCall<{ success: boolean; newBalance: number; transactionId: string; recipientName: string }>('/transfer', input);
 

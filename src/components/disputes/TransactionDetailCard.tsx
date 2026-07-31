@@ -144,15 +144,15 @@ export default function TransactionDetailCard({ transactionId, onRaiseDispute, d
         )}
 
         {/* Actions */}
-        <div className="flex flex-wrap gap-2 pt-1">
-          <Button variant="outline" size="sm" className="rounded-lg gap-1.5 text-xs" disabled={receiptLoading} onClick={() => handleReceipt(false)}>
+        <div className="flex flex-col sm:flex-row sm:items-center sm:flex-wrap gap-2 pt-1">
+          <Button variant="outline" size="sm" className="w-full sm:w-auto rounded-lg gap-1.5 text-xs" disabled={receiptLoading} onClick={() => handleReceipt(false)}>
             {receiptLoading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Download className="w-3.5 h-3.5" />} Download Receipt
           </Button>
-          <Button variant="outline" size="sm" className="rounded-lg gap-1.5 text-xs" disabled={receiptLoading} onClick={() => handleReceipt(true)}>
+          <Button variant="outline" size="sm" className="w-full sm:w-auto rounded-lg gap-1.5 text-xs" disabled={receiptLoading} onClick={() => handleReceipt(true)}>
             <ExternalLink className="w-3.5 h-3.5" /> Print Receipt
           </Button>
           {tx.status === 'Success' && !dispute && !disableDispute && onRaiseDispute && (
-            <Button size="sm" className="rounded-lg gap-1.5 text-xs ml-auto" onClick={() => onRaiseDispute(detail)}>
+            <Button size="sm" className="w-full sm:w-auto rounded-lg gap-1.5 text-xs sm:ml-auto" onClick={() => onRaiseDispute(detail)}>
               <ScrollText className="w-3.5 h-3.5" /> Raise Dispute
             </Button>
           )}
