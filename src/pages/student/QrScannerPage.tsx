@@ -146,7 +146,7 @@ export default function QrScannerPage() {
     ? [{ key: 'ssl' as const, label: 'Online Payment', icon: CreditCard, desc: 'Cards, bKash, Nagad, Rocket' }]
     : [
         { key: 'ssl' as const, label: 'Online Payment', icon: CreditCard, desc: 'Cards, bKash, Nagad, Rocket' },
-        { key: 'later' as const, label: 'Pay Later', icon: Clock, desc: '7-day payment deadline' },
+        { key: 'later' as const, label: 'Pay Later', icon: Clock, desc: 'No fixed deadline — pay anytime' },
       ];
 
   return (
@@ -315,7 +315,7 @@ export default function QrScannerPage() {
           receiverRole={entity === 'library' ? 'Library' : 'Shop'}
           payerName={user?.fullName}
           amount={amt}
-          method={payMode === 'ssl' ? 'Secure Online Payment' : 'Pay Later (7-day due)'}
+          method={payMode === 'ssl' ? 'Secure Online Payment' : 'Pay Later (Outstanding until paid)'}
           confirmLabel={payMode === 'ssl' ? 'Proceed to Payment' : 'Create Due'}
           onConfirm={onConfirmed}
         />

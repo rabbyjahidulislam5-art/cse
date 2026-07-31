@@ -1,5 +1,5 @@
 import { Outlet, NavLink, useNavigate } from 'react-router-dom';
-import { Home, Users, BookOpen, FileText, ScrollText, LogOut, Landmark, Receipt, BarChart3, ShieldAlert, QrCode } from 'lucide-react';
+import { Home, Users, BookOpen, FileText, ScrollText, LogOut, Landmark, Receipt, BarChart3, ShieldAlert, QrCode, Banknote } from 'lucide-react';
 import { useAuth } from '@/lib/auth-context';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger, DropdownMenuSeparator } from '@/components/ui/dropdown-menu';
 import { motion } from 'framer-motion';
@@ -44,6 +44,7 @@ export default function AccountsLayout() {
     { to: '/accounts/analytics', icon: BarChart3, label: 'Analytics' },
     { to: '/accounts/ledger', icon: BookOpen, label: 'Ledger' },
     { to: '/accounts/admin-fines', icon: ShieldAlert, label: 'Admin Fines' },
+    { to: '/accounts/manual-payment', icon: Banknote, label: 'Bank Payment' },
   ];
 
   if (isLoading || !user || (user as any).role !== 'Accounts Office') return null;

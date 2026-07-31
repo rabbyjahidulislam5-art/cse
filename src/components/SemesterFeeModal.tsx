@@ -3,7 +3,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, Di
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { GraduationCap, Search, CreditCard, Loader2, ArrowRight, ArrowLeft, CheckCircle2, UserRound, AlertTriangle } from 'lucide-react';
+import { GraduationCap, Search, CreditCard, Loader2, ArrowRight, ArrowLeft, CheckCircle2, UserRound, AlertTriangle, Layers } from 'lucide-react';
 import { toast } from 'sonner';
 import { lookupSemesterFeeStudent, paySemesterFee, type SemesterFeeLookupOutputType } from '@/lib/api';
 import { formatCurrency } from '@/lib/mock-data';
@@ -16,6 +16,11 @@ interface SemesterFeeModalProps {
 }
 
 type Step = 'search' | 'review' | 'success';
+
+// Unified Outstanding Due Settlement — short, student-facing category tags for the breakdown.
+const SOURCE_TAGS: Record<string, string> = {
+  semester: 'Semester Fee', library: 'Library Fine', admin: 'Admin Fine', payLater: 'Shop Due',
+};
 
 export default function SemesterFeeModal({ open, onOpenChange }: SemesterFeeModalProps) {
   const { user, wallet, refreshDashboard } = useUser();
@@ -194,6 +199,27 @@ export default function SemesterFeeModal({ open, onOpenChange }: SemesterFeeModa
                     <span className="font-bold text-foreground tabular text-base">{formatCurrency(totalDue)}</span>
                   </div>
                 </div>
+
+                {/* Unified Outstanding Due Settlement — only shown when this payment actually
+                    bundles more than the semester fee itself (library fine, admin fine, and/or a
+                    shop pay-later due), so a plain semester-fee-only payment looks exactly as it
+                    always has. */}
+                {result.items && result.items.length > 1 && (
+                  <div className="rounded-xl border border-primary/30 bg-primary/5 p-4 space-y-2">
+                    <div className="flex items-center gap-2 text-xs font-semibold text-primary uppercase tracking-wide">
+                      <Layers className="w-3.5 h-3.5" /> Consolidated Settlement — Includes All Outstanding Dues
+                    </div>
+                    {result.items.map((item, idx) => (
+                      <div key={idx} className="flex justify-between text-sm">
+                        <span className="text-muted-foreground">{SOURCE_TAGS[item.source] || item.source}{item.label ? ` — ${item.label}` : ''}</span>
+                        <span className="font-medium text-foreground shrink-0 ml-3">{formatCurrency(item.amount)}</span>
+                      </div>
+                    ))}
+                    <p className="text-[11px] text-muted-foreground pt-1 border-t border-primary/10">
+                      One payment settles all of the above — each amount is credited to its own department automatically.
+                    </p>
+                  </div>
+                )}
 
                 {isOnBehalf && (
                   <div className="flex items-center gap-2 p-2.5 rounded-lg bg-secondary/10 border border-secondary/20 text-xs text-secondary font-medium">

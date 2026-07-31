@@ -13,7 +13,7 @@ import OtpDialog from '@/components/OtpDialog';
 import PaymentConfirmModal from '@/components/PaymentConfirmModal';
 import { toast } from 'sonner';
 import { GraduationCap, BookOpen, ShieldAlert, Loader2, CheckCircle2, Clock, CreditCard } from 'lucide-react';
-import { getDues, disputeFine, initSSLPayment, PIN_REQUIRED_THRESHOLD, OTP_REQUIRED_THRESHOLD, type GetDuesOutputType, type SslPayItem } from '@/lib/api';
+import { getDues, disputeFine, initSSLPayment, getFinancialStatus, PIN_REQUIRED_THRESHOLD, OTP_REQUIRED_THRESHOLD, type GetDuesOutputType, type SslPayItem, type FinancialStatusOutputType } from '@/lib/api';
 import { useNotificationSocket } from '@/lib/socket';
 import { useUser } from '@/lib/user-context';
 import { formatCurrency } from '@/lib/mock-data';
@@ -37,6 +37,7 @@ export default function DuesPage() {
   const walletBalance = wallet?.balance ?? 0;
   const [dues, setDues] = useState<GetDuesOutputType | null>(null);
   const [loading, setLoading] = useState(true);
+  const [financialStatus, setFinancialStatus] = useState<FinancialStatusOutputType | null>(null);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [paying, setPaying] = useState(false);
   const [disputeOpen, setDisputeOpen] = useState(false);
@@ -67,6 +68,10 @@ export default function DuesPage() {
   };
 
   useEffect(() => { loadDues(); }, [user]);
+
+  // Unified Outstanding Due Settlement — live restriction check, shown inline here with the exact
+  // reason and reused below to explain that paying the Semester Fee clears everything at once.
+  useEffect(() => { if (user) getFinancialStatus().then(setFinancialStatus).catch(() => {}); }, [user]);
 
   // A new fine (or a fine getting cancelled/updated) must show up here immediately, not just on
   // next page visit — refetch whenever a payment-category notification arrives live.
@@ -114,15 +119,26 @@ export default function DuesPage() {
   };
 
   const handlePaySingle = (item: DueItem) => {
-    if (walletBalance < item.amount) {
-      toast.error(`Insufficient Wallet Balance. Available: ৳${walletBalance.toLocaleString()}, Required: ৳${item.amount.toLocaleString()}`);
+    // Unified Outstanding Due Settlement — paying a Semester Fee here (the student's own direct
+    // "Pay" click, not just the dedicated Pay-Semester-Fee search flow) automatically bundles
+    // every other pending due into the same payment. /payment/init already accepts a mixed items
+    // array regardless of purpose, so this is a pure frontend change — the backend needs nothing
+    // new here. Any other source pays exactly as it always has, individually.
+    const bundleWithSemester = item.source === 'semester';
+    const itemsToPay = bundleWithSemester ? allItems.filter(i => i.status === 'pending') : [item];
+    const total = itemsToPay.reduce((s, i) => s + i.amount, 0);
+
+    if (walletBalance < total) {
+      toast.error(`Insufficient Wallet Balance. Available: ৳${walletBalance.toLocaleString()}, Required: ৳${total.toLocaleString()}`);
       return;
     }
+    const uniqueSources = new Set(itemsToPay.map(d => d.source));
+    const bundled = bundleWithSemester && itemsToPay.length > 1;
     setPending({
-      items: [{ id: item.id, source: item.source as SslPayItem['source'], amount: item.amount, label: item.label }],
-      purpose: PURPOSE_MAP[item.source] || 'semester_fee',
-      itemLabel: item.label,
-      receiverName: RECEIVER_ROLE_MAP[item.source] || 'Campus Office',
+      items: itemsToPay.map(d => ({ id: d.id, source: d.source as SslPayItem['source'], amount: d.amount, label: d.label })),
+      purpose: bundleWithSemester ? 'semester_fee' : (PURPOSE_MAP[item.source] || 'semester_fee'),
+      itemLabel: bundled ? `Semester Fee + ${itemsToPay.length - 1} other outstanding due${itemsToPay.length - 1 === 1 ? '' : 's'}` : item.label,
+      receiverName: uniqueSources.size === 1 ? (RECEIVER_ROLE_MAP[[...uniqueSources][0]] || 'Campus Office') : 'Multiple Offices',
     });
     setConfirmOpen(true);
   };
@@ -260,6 +276,20 @@ export default function DuesPage() {
           )}
         </div>
       </FadeIn>
+
+      {financialStatus?.restricted && (
+        <FadeIn>
+          <div className="mb-6 rounded-2xl border border-destructive/30 bg-destructive/5 p-4 sm:p-5 flex items-start gap-3">
+            <ShieldAlert className="w-5 h-5 text-destructive shrink-0 mt-0.5" />
+            <div className="space-y-1">
+              <p className="text-sm font-bold text-destructive">Account Financially Restricted</p>
+              <p className="text-xs text-muted-foreground">
+                {financialStatus.reason} Pay your Semester Fee below — it automatically settles every other outstanding due (library, admin, and shop) in one payment and restores full account access immediately.
+              </p>
+            </div>
+          </div>
+        </FadeIn>
+      )}
 
       <Tabs value={activeTab} onValueChange={setActiveTab}>
         <TabsList className="w-full sm:w-auto mb-5 bg-accent/50 p-1 rounded-xl">

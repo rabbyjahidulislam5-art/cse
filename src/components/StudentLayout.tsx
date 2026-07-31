@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Outlet, NavLink, useNavigate, useLocation } from 'react-router-dom';
-import { GraduationCap, Home, Store, FileWarning, ScanLine, LogOut, Settings, ScrollText, CreditCard, History, UserCircle } from 'lucide-react';
+import { GraduationCap, Home, Store, FileWarning, ScanLine, LogOut, Settings, ScrollText, CreditCard, History, UserCircle, ShieldAlert } from 'lucide-react';
 import { useAuth } from '@/lib/auth-context';
 import { UserProvider, useUser } from '@/lib/user-context';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -10,6 +10,12 @@ import { getDisputeBadgeCounts } from '@/lib/disputeApi';
 import { useDisputeSocket } from '@/lib/socket';
 import NotificationBell from '@/components/NotificationBell';
 import { MoreMenuDesktop, MoreMenuMobile, type MoreMenuItem } from '@/components/MoreMenu';
+import { getFinancialStatus, type FinancialStatusOutputType } from '@/lib/api';
+import { formatCurrency } from '@/lib/mock-data';
+
+// Unified Outstanding Due Settlement — routes a financially restricted student can still reach.
+// Everything else redirects to /student/dues, where the consolidated settlement lives.
+const RESTRICTION_ALLOWED_PREFIXES = ['/student/dues', '/student/profile'];
 
 const primaryNavItems = [
   { to: '/student', icon: Home, label: 'Home', end: true },
@@ -24,6 +30,7 @@ function LayoutInner() {
   const { user, loading } = useUser();
   const { logout } = useAuth();
   const [pendingCases, setPendingCases] = useState(0);
+  const [financialStatus, setFinancialStatus] = useState<FinancialStatusOutputType | null>(null);
 
   useEffect(() => {
     if (!user) return;
@@ -36,6 +43,25 @@ function LayoutInner() {
   }, [user]);
 
   useDisputeSocket(() => setPendingCases(c => c + 1));
+
+  // Financial restriction is derived live server-side, never cached on the login-time user
+  // object — a Semester Fee can go overdue, or get cleared by a settlement, at any point during
+  // a long-lived session. Polled the same way the dispute badge above is, so it self-heals
+  // shortly after either happens without requiring a re-login.
+  useEffect(() => {
+    if (!user) return;
+    const fetchStatus = () => getFinancialStatus().then(setFinancialStatus).catch(() => {});
+    fetchStatus();
+    const interval = setInterval(fetchStatus, 30000);
+    return () => clearInterval(interval);
+  }, [user]);
+
+  const restricted = !!financialStatus?.restricted;
+  useEffect(() => {
+    if (!restricted) return;
+    const onAllowedRoute = RESTRICTION_ALLOWED_PREFIXES.some(p => location.pathname.startsWith(p));
+    if (!onAllowedRoute) navigate('/student/dues', { replace: true });
+  }, [restricted, location.pathname, navigate]);
 
   const overflowItems: MoreMenuItem[] = [
     { to: '/student/payments', icon: CreditCard, label: 'Payments' },
@@ -125,6 +151,19 @@ function LayoutInner() {
           </div>
         </div>
       </nav>
+
+      {/* Financial restriction notice — persistent, not dismissible; clears itself the moment
+          the overdue Semester Fee is settled (online or via Accounts Office's offline recording). */}
+      {restricted && (
+        <div className="w-full bg-destructive/10 border-b border-destructive/20">
+          <div className="container mx-auto px-4 sm:px-6 py-2.5 flex items-center gap-2.5 text-xs sm:text-sm text-destructive">
+            <ShieldAlert className="w-4 h-4 shrink-0" />
+            <span className="font-medium">
+              Account financially restricted — outstanding balance {formatCurrency(financialStatus?.totalOutstanding || 0)}. Settle your dues below to restore full access.
+            </span>
+          </div>
+        </div>
+      )}
 
       {/* Main content */}
       <main className="flex-1 pb-20 md:pb-0">

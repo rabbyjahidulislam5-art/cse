@@ -296,12 +296,20 @@ export const initWalletTopUp = (input: { amount: number; otpId?: string }) =>
 export const withdrawFromWallet = (input: { amount: number; mobileNumber: string; provider?: string }) =>
   apiCall<{ success: boolean; newBalance: number; transactionId: string; reference: string; message: string }>('/wallet/withdraw', input);
 
+// Unified Outstanding Due Settlement — a bundled item pulled in alongside the Semester Fee
+// (library fine, admin fine, or shop pay-later due), shown so the student sees exactly what a
+// single consolidated payment covers before paying.
+export type SettlementItem = { source: string; label: string; amount: number };
+export type SettlementBreakdown = { semester: number; library: number; admin: number; payLater: number };
+
 export type SemesterFeeLookupOutputType = {
   found: boolean;
   student?: { fullName: string; studentId: string; department: string; batch: string };
   totalDue: number;
   feeCount: number;
   fees: Array<{ id: string; label: string; amount: number; dueDate: string }>;
+  items?: SettlementItem[];
+  breakdown?: SettlementBreakdown;
 };
 
 export type PaySemesterFeeOutputType = {
@@ -315,7 +323,45 @@ export type PaySemesterFeeOutputType = {
   paidByName?: string;
   studentName?: string;
   gatewayUrl?: string;
+  items?: SettlementItem[];
+  breakdown?: SettlementBreakdown;
 };
+
+export type FinancialStatusOutputType = {
+  restricted: boolean;
+  reason: string | null;
+  overdueFees: Array<{ id: string; label: string; amount: number; dueDate: string }>;
+  totalOutstanding: number;
+};
+
+export const getFinancialStatus = () =>
+  apiCall<FinancialStatusOutputType>('/student/financial-status', {});
+
+export type StudentOutstandingDuesOutputType = {
+  found: boolean;
+  student: { fullName: string; studentId: string; department: string; batch: string };
+  items: SettlementItem[];
+  total: number;
+  breakdown: SettlementBreakdown;
+  restricted: boolean;
+  reason: string | null;
+};
+
+export const getStudentOutstandingDues = (input: { studentId: string }) =>
+  apiCall<StudentOutstandingDuesOutputType>('/accounts/student-outstanding-dues', input);
+
+export type RecordManualPaymentOutputType = {
+  success: boolean;
+  reference: string;
+  amount: number;
+  items: SettlementItem[];
+  breakdown: SettlementBreakdown;
+  wasRestricted: boolean;
+  studentName: string;
+};
+
+export const recordManualBankPayment = (input: { studentId: string; bankReference: string; amountReceived: number; note?: string }) =>
+  apiCall<RecordManualPaymentOutputType>('/accounts/manual-payment/record', input);
 
 export const lookupSemesterFeeStudent = (input: { studentId: string }) =>
   apiCall<SemesterFeeLookupOutputType>('/semester-fees/lookup', input);

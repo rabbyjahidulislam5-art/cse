@@ -107,7 +107,7 @@ model Transaction {
   shopId         String?
   gateway        String?
   gatewayTxnId   String?
-  bankTxnId      String?
+  bankTxnId      String?  @unique
   idempotencyKey String?
   description    String?
   paymentMethod  String?
@@ -203,6 +203,8 @@ model SemesterFee {
   reference String?
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+
+  @@index([studentId, status])
 }
 
 // Singleton-style entity for the Library's permanent QR/identity — unlike Shop, Library Staff
@@ -250,6 +252,8 @@ model LibraryFine {
   reference String?
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+
+  @@index([studentId, status])
 }
 
 model AdminFine {
@@ -272,6 +276,8 @@ model AdminFine {
   reconciledById String?
   createdAt      DateTime  @default(now())
   updatedAt      DateTime  @updatedAt
+
+  @@index([studentId, status])
 }
 
 model PayLaterDue {
@@ -288,6 +294,8 @@ model PayLaterDue {
   paymentReference String?
   createdAt        DateTime @default(now())
   updatedAt        DateTime @updatedAt
+
+  @@index([studentId, status])
 }
 
 model OtpCode {

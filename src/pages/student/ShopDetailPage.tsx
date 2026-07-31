@@ -154,7 +154,7 @@ export default function ShopDetailPage() {
                 <div className="text-center py-2"><span className="text-3xl font-bold text-foreground tabular">{formatCurrency(amt)}</span></div>
                 {([
                   { key: 'sslcommerz' as const, label: 'Online Payment', icon: CreditCard, desc: 'Cards, bKash, Nagad, Rocket' },
-                  { key: 'later' as const, label: 'Pay Later', icon: Clock, desc: '7-day payment deadline' },
+                  { key: 'later' as const, label: 'Pay Later', icon: Clock, desc: 'No fixed deadline — pay anytime' },
                 ]).map(m => (
                   <button key={m.key} onClick={() => setPayMode(m.key)}
                     className={`w-full p-4 rounded-xl border-2 text-left transition-all flex items-center gap-4 ${payMode === m.key ? 'border-primary bg-primary/5' : 'border-border/60 hover:border-muted-foreground/30'}`}>
@@ -184,7 +184,7 @@ export default function ShopDetailPage() {
           receiverRole="Shop"
           payerName={user?.fullName}
           amount={amt}
-          method={payMode === 'sslcommerz' ? 'Secure Online Payment' : 'Pay Later (7-day due)'}
+          method={payMode === 'sslcommerz' ? 'Secure Online Payment' : 'Pay Later (Outstanding until paid)'}
           confirmLabel={payMode === 'sslcommerz' ? 'Proceed to Payment' : 'Create Due'}
           onConfirm={onConfirmed}
         />

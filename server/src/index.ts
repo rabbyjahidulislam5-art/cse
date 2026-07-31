@@ -20,6 +20,8 @@ import {
 } from './lib/merchantService';
 import { parseLibraryQrPayload, ensureLibrarySingleton } from './lib/libraryService';
 import { parseAccountsQrPayload, ensureAccountsOfficeSingleton } from './lib/accountsService';
+import { markItemPaid, getOutstandingDues, isFinanciallyRestricted, PayItem } from './lib/settlement';
+import { blockIfFinanciallyRestricted } from './lib/restriction';
 import http from 'http';
 import studentDisputeRouter from './routes/disputes/student';
 import accountsDisputeRouter from './routes/disputes/accounts';
@@ -47,6 +49,16 @@ const paymentIpnLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   message: { message: 'Too many requests.' },
+});
+// Accounts Office offline bank-payment recording — a real financial write action, rate limited
+// the same way every other staff settlement action in this app is.
+const manualPaymentLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  limit: 10,
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: (req: AuthRequest) => req.user?.id || ipKeyGenerator(req.ip || 'unknown'),
+  message: { message: 'Too many settlement attempts. Please wait a moment and try again.' },
 });
 
 const app = express();
@@ -805,17 +817,17 @@ router.post('/shops/detail', async (req, res) => {
 // Instant "Pay Now" shop payments no longer exist here — those go through
 // /payment/init (purpose: 'shop_payment', see SSL PAYMENT section below). This route only
 // creates a deferred due; no money moves and no gateway is involved until it's settled later.
-router.post('/shops/pay', authMiddleware, async (req: AuthRequest, res) => {
+router.post('/shops/pay', authMiddleware, blockIfFinanciallyRestricted, async (req: AuthRequest, res) => {
   try {
     const userId = req.user!.id;
     const { shopId, shopName, amount, description } = req.body;
     const ref = `SHP-${Date.now().toString(36).toUpperCase()}`;
 
-    const dueDate = new Date();
-    dueDate.setDate(dueDate.getDate() + 7);
-
+    // Shop Pay Later is a Lifetime Outstanding Due — no computed expiry, no countdown, no fixed
+    // deadline. It stays 'Pending' indefinitely until paid individually from the Shop module, or
+    // swept into the student's next Semester Fee settlement (see /semester-fees/pay).
     const due = await prisma.payLaterDue.create({
-      data: { reference: ref, studentId: userId, shopId, amount, status: 'Pending', dueDate: dueDate.toISOString().split('T')[0], description: description || shopName },
+      data: { reference: ref, studentId: userId, shopId, amount, status: 'Pending', description: description || shopName },
     });
 
     const tx = await prisma.transaction.create({
@@ -828,7 +840,7 @@ router.post('/shops/pay', authMiddleware, async (req: AuthRequest, res) => {
 
     void notifyUser({
       recipientId: userId, category: 'payment', type: 'shop.paylater.created',
-      title: 'Pay-Later Due Created', body: `৳${amount.toLocaleString()} due at ${shopName || 'a shop'} by ${dueDate.toLocaleDateString()}.`,
+      title: 'Pay-Later Due Created', body: `৳${amount.toLocaleString()} due at ${shopName || 'a shop'}. No fixed deadline — pay anytime, or it settles automatically with your next Semester Fee payment.`,
       link: '/student/dues',
       emailSubject: `Pay-Later Due Created — ৳${amount} — Smart Campus`,
     });
@@ -896,6 +908,23 @@ router.post('/dues', authMiddleware, async (req: AuthRequest, res) => {
       })),
       payLater: pl.map(r => ({ id: r.id, source: 'payLater', label: r.description || r.reference || '', amount: r.amount || 0, status: (r.status || 'Pending').toLowerCase(), dueDate: r.dueDate || '', reference: r.reference || '' })),
     });
+  } catch (err: any) {
+    res.status(500).json({ message: err.message });
+  }
+});
+
+// Unified Outstanding Due Settlement — live restriction check, not a cached login-time field.
+// A restriction can newly appear (a semester fee going overdue) or clear (any settlement path)
+// during a long-lived session, so the frontend calls this fresh rather than trusting the user
+// object saved at login. Self-scoped to the caller — no studentId override, unlike /dues.
+router.post('/student/financial-status', authMiddleware, async (req: AuthRequest, res) => {
+  try {
+    if (req.user!.role !== 'Student') return res.json({ restricted: false, reason: null, overdueFees: [], totalOutstanding: 0 });
+    const [status, outstanding] = await Promise.all([
+      isFinanciallyRestricted(req.user!.id),
+      getOutstandingDues(req.user!.id),
+    ]);
+    res.json({ restricted: status.restricted, reason: status.reason, overdueFees: status.overdueFees, totalOutstanding: outstanding.total });
   } catch (err: any) {
     res.status(500).json({ message: err.message });
   }
@@ -1131,7 +1160,7 @@ router.post('/receipt', authMiddleware, async (req: AuthRequest, res) => {
 });
 
 // ─── TRANSFER ───
-router.post('/transfer', authMiddleware, async (req: AuthRequest, res) => {
+router.post('/transfer', authMiddleware, blockIfFinanciallyRestricted, async (req: AuthRequest, res) => {
   try {
     const senderId = req.user!.id;
     const { recipientIdentifier, amount, note } = req.body;
@@ -1569,42 +1598,6 @@ const AUTH_FRESHNESS_WINDOW_MS = 5 * 60 * 1000; // both proofs expire after 5 mi
 // validator if SSLCommerz ever does respond) — this only unblocks new payment attempts.
 const PENDING_TXN_ABANDON_WINDOW_MS = 30 * 60 * 1000;
 
-interface PayItem { id: string; source: 'semester' | 'library' | 'admin' | 'payLater' | 'shop' | 'wallet'; amount: number; label: string }
-
-async function markItemPaid(item: PayItem, reference: string, userId?: string, db: any = prisma) {
-  if (item.source === 'semester') {
-    await db.semesterFee.update({ where: { id: item.id }, data: { status: 'Paid', reference } }).catch(() => {});
-    await db.feeInvoice.updateMany({ where: { OR: [{ id: item.id }, { batchItemId: item.id }] }, data: { status: 'Paid' } }).catch(() => {});
-  }
-  else if (item.source === 'library') await db.libraryFine.update({ where: { id: item.id }, data: { status: 'Paid', reference } }).catch(() => {});
-  else if (item.source === 'admin') await db.adminFine.update({ where: { id: item.id }, data: { status: 'Paid', reference } }).catch(() => {});
-  else if (item.source === 'payLater') await db.payLaterDue.update({ where: { id: item.id }, data: { status: 'Paid', paymentReference: reference } }).catch(() => {});
-
-  if (userId) {
-    const studentUser = await db.user.findUnique({ where: { id: userId } });
-    if (studentUser) {
-      const lastLedger = await db.ledgerEntry.findFirst({
-        where: { studentId: studentUser.id },
-        orderBy: { createdAt: 'desc' },
-      });
-      const previousBalance = lastLedger ? lastLedger.balanceAfter : 0;
-      const newBalance = Math.max(0, previousBalance - (item.amount || 0));
-
-      await db.ledgerEntry.create({
-        data: {
-          entryNumber: `LED-CR-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
-          studentId: studentUser.id,
-          type: 'CREDIT_PAYMENT',
-          creditAmount: Number(item.amount) || 0,
-          balanceAfter: newBalance,
-          reference: reference,
-          description: `${item.label || 'Fee Payment'} by Student (${studentUser.fullName || studentUser.studentId})`,
-        },
-      }).catch(() => {});
-    }
-  }
-}
-
 function sslValidationUrl() {
   const isLive = process.env.SSLCOMMERZ_IS_LIVE === 'true';
   return isLive ? 'https://securepay.sslcommerz.com/validator/api/merchantTransIDvalidationAPI.php' : 'https://sandbox.sslcommerz.com/validator/api/merchantTransIDvalidationAPI.php';
@@ -1803,6 +1796,20 @@ router.post('/payment/init', authMiddleware, paymentInitLimiter, async (req: Aut
 
     if (!SSL_PURPOSES.includes(purpose)) return res.status(400).json({ message: 'Invalid payment purpose.' });
 
+    // Financial restriction blocks only NEW discretionary spend — a fresh online shop purchase —
+    // never a payment that settles an existing due (semester_fee/library_fine/admin_fine/
+    // pay_later all stay open, since those are how a student clears the restriction, and the spec
+    // requires individual due payment to keep working unconditionally).
+    if (purpose === 'shop_payment') {
+      const restriction = await isFinanciallyRestricted(userId);
+      if (restriction.restricted) {
+        return res.status(403).json({
+          message: 'Your account is financially restricted due to an overdue Semester Fee payment. New shop purchases are unavailable until your outstanding dues are settled.',
+          financiallyRestricted: true, reason: restriction.reason, overdueFees: restriction.overdueFees,
+        });
+      }
+    }
+
     // Wallet top-up has no fee/fine/shop items to validate — the user is simply adding money to
     // their wallet via SSLCommerz. Every other purpose still goes through normal item validation.
     const isTopUp = purpose === 'wallet_topup';
@@ -1990,7 +1997,15 @@ router.post('/semester-fees/lookup', authMiddleware, semesterFeeLookupLimiter, a
     const student = await prisma.user.findFirst({ where: { studentId, role: 'Student' } });
     if (!student) return res.status(404).json({ message: 'No student found with this ID.' });
 
-    const { fees, total } = await getPendingSemesterFees(student.id);
+    const { fees } = await getPendingSemesterFees(student.id);
+    // Unified Outstanding Due Settlement only activates when there's an actual Semester Fee
+    // invoice to attach it to — a student with only a library/admin/shop due and no semester fee
+    // keeps using those modules' own individual payment flows untouched (hard backward-
+    // compatibility requirement). When a semester fee IS pending, the total shown here must match
+    // what /semester-fees/pay actually charges, so the review step never shows one number and
+    // then charges a higher one.
+    const hasSemesterFee = fees.length > 0;
+    const outstanding = hasSemesterFee ? await getOutstandingDues(student.id) : null;
 
     // Only the fields the payer needs to confirm they have the right person — no email, no
     // internal id, no other account details.
@@ -2002,9 +2017,11 @@ router.post('/semester-fees/lookup', authMiddleware, semesterFeeLookupLimiter, a
         department: student.department || '',
         batch: student.batch || '',
       },
-      totalDue: total,
+      totalDue: outstanding ? outstanding.total : 0,
       feeCount: fees.length,
       fees: fees.map(f => ({ id: f.id, label: f.label || 'Semester Fee', amount: f.amount, dueDate: f.dueDate || '' })),
+      items: outstanding ? outstanding.items.map(i => ({ source: i.source, label: i.label, amount: i.amount })) : [],
+      breakdown: outstanding ? outstanding.breakdown : undefined,
     });
   } catch (err: any) {
     res.status(500).json({ message: err.message });
@@ -2024,11 +2041,24 @@ router.post('/semester-fees/pay', authMiddleware, paymentInitLimiter, async (req
     const target = await prisma.user.findFirst({ where: { studentId: cleanStudentId, role: 'Student' } });
     if (!target) return res.status(404).json({ message: 'No student found with this ID.' });
 
-    // Recomputed fresh, right now — this is the amount that's actually charged, regardless of
-    // anything the client believes the total to be.
-    const { fees, total } = await getPendingSemesterFees(target.id);
-    if (!fees.length || total <= 0) {
+    // Unified Outstanding Due Settlement only activates when there's an actual pending Semester
+    // Fee to attach it to — this route stays specifically "pay the semester fee (and sweep in
+    // everything else outstanding)", not a general-purpose pay-anything endpoint. A student with
+    // only a library/admin/shop due and no semester fee keeps using those modules' own individual
+    // payment flows (hard backward-compatibility requirement) rather than this one.
+    const { fees: pendingSemesterFees } = await getPendingSemesterFees(target.id);
+    if (!pendingSemesterFees.length) {
       return res.status(400).json({ message: 'No pending semester fees found for this student.' });
+    }
+
+    // Recomputed fresh, right now, across every due source (semester fee, library fine, admin
+    // fine, shop pay-later) — this is the amount actually charged, regardless of anything the
+    // client believes the total to be. The per-source updates this triggers (markItemPaid) still
+    // route each amount to its own department's ledger — only the payment step is unified, never
+    // the bookkeeping.
+    const { items, total, breakdown } = await getOutstandingDues(target.id);
+    if (!items.length || total <= 0) {
+      return res.status(400).json({ message: 'No pending dues found for this student.' });
     }
 
     const isOnBehalf = target.id !== payerId;
@@ -2053,8 +2083,10 @@ router.post('/semester-fees/pay', authMiddleware, paymentInitLimiter, async (req
     }
 
     const ref = `SEM-${Date.now().toString(36).toUpperCase()}-${Math.random().toString(36).slice(2, 6).toUpperCase()}`;
-    const label = `Semester Fee — ${target.fullName || target.studentId}${isOnBehalf ? ` (paid by ${payer.fullName || payer.email})` : ''}`;
-    const itemsJson = JSON.stringify(fees.map(f => ({ id: f.id, source: 'semester', amount: f.amount, label: f.label })));
+    const label = breakdown.library || breakdown.admin || breakdown.payLater
+      ? `Consolidated Settlement (Semester Fee + Outstanding Dues) — ${target.fullName || target.studentId}${isOnBehalf ? ` (paid by ${payer.fullName || payer.email})` : ''}`
+      : `Semester Fee — ${target.fullName || target.studentId}${isOnBehalf ? ` (paid by ${payer.fullName || payer.email})` : ''}`;
+    const itemsJson = JSON.stringify(items);
 
     if (method === 'wallet') {
       const wallet = await prisma.wallet.findFirst({ where: { ownerId: payerId } });
@@ -2074,13 +2106,11 @@ router.post('/semester-fees/pay', authMiddleware, paymentInitLimiter, async (req
           });
           if (walletUpdate.count === 0) throw new Error('INSUFFICIENT_BALANCE');
 
-          // Guards the same race on the fee rows — if someone else settled these fees a moment
-          // ago, this update touches 0 rows and we roll the whole transaction back.
-          const feesUpdate = await txClient.semesterFee.updateMany({
-            where: { studentId: target.id, status: 'Pending' },
-            data: { status: 'Paid', reference: ref },
-          });
-          if (feesUpdate.count !== fees.length) throw new Error('FEES_CHANGED');
+          // Settle every bundled due (semester + library + admin + pay-later) atomically — each
+          // call is its own conditional updateMany guarded on status:'Pending', so a due settled
+          // by a concurrent request a moment ago throws SettlementConflictError and rolls the
+          // whole transaction back rather than silently double-crediting or partially applying.
+          for (const item of items) await markItemPaid(item, ref, target.id, txClient);
 
           // Financial Dispute module — fetched here (before the Transaction row is written) so the
           // post-decrement balance can be captured on the row itself; additive to the existing flow.
@@ -2113,8 +2143,8 @@ router.post('/semester-fees/pay', authMiddleware, paymentInitLimiter, async (req
           return freshWallet?.balance || 0;
         });
       } catch (e: any) {
-        if (e.message === 'FEES_CHANGED') {
-          return res.status(409).json({ message: 'These fees were already settled. Please look up the student again.' });
+        if (e.name === 'SettlementConflictError' || String(e.message).startsWith('SETTLEMENT_CONFLICT')) {
+          return res.status(409).json({ message: 'One or more of these dues were already settled elsewhere. Please look up the student again.' });
         }
         return res.status(400).json({ message: 'Insufficient balance in your wallet' });
       }
@@ -2150,6 +2180,7 @@ router.post('/semester-fees/pay', authMiddleware, paymentInitLimiter, async (req
       return res.json({
         success: true, method: 'wallet', amount: total, reference: ref, newBalance,
         paidByName: payer.fullName || payer.email, studentName: target.fullName || target.studentId,
+        items: items.map(i => ({ source: i.source, label: i.label, amount: i.amount })), breakdown,
       });
     }
 
@@ -2211,7 +2242,10 @@ router.post('/semester-fees/pay', authMiddleware, paymentInitLimiter, async (req
     await prisma.transaction.update({ where: { id: tx.id }, data: { gatewayTxnId: data.sessionkey as string } });
     await prisma.auditLog.create({ data: { action: 'Semester Fee Payment Initiated (SSLCommerz)', actorId: payerId, entityType: 'Transaction', entityId: tx.id, details: `Amount: ৳${total} for ${target.fullName} (${target.studentId})${isOnBehalf ? ' — on behalf' : ''}, Ref: ${ref}`, ipAddress: req.ip } });
 
-    res.json({ success: true, method: 'sslcommerz', gatewayUrl: data.GatewayPageURL as string, transactionRef: ref, sessionKey: data.sessionkey as string, amount: total, studentName: target.fullName || target.studentId });
+    res.json({
+      success: true, method: 'sslcommerz', gatewayUrl: data.GatewayPageURL as string, transactionRef: ref, sessionKey: data.sessionkey as string, amount: total, studentName: target.fullName || target.studentId,
+      items: items.map(i => ({ source: i.source, label: i.label, amount: i.amount })), breakdown,
+    });
   } catch (err: any) {
     res.status(500).json({ message: err.message });
   }
@@ -3352,6 +3386,124 @@ router.post('/accounts/admin-fines/reconcile', authMiddleware, requireAccounts, 
     await prisma.adminFine.update({ where: { id: fineId }, data: { reconciledAt: new Date(), reconciledById: req.user!.id } });
     await prisma.auditLog.create({ data: { action: 'Admin Fine Reconciled', actorId: req.user!.id, entityType: 'AdminFine', entityId: fineId, details: `Reconciled ৳${fine.amount.toLocaleString()} (ref ${fine.reference || 'n/a'})`, ipAddress: req.ip } });
     res.json({ success: true, message: 'Fine marked reconciled' });
+  } catch (err: any) {
+    res.status(500).json({ message: err.message });
+  }
+});
+
+// ─── OFFLINE BANK PAYMENT SETTLEMENT ───
+// A student who paid manually at a bank brings the receipt to Accounts Office. Staff look the
+// student up, verify the receipt, and record it here — the same Unified Outstanding Due
+// Settlement (markItemPaid over every source) that an online payment triggers, just without a
+// wallet debit, since the money was already received outside the platform. Because settling the
+// overdue Semester Fee is what clears isFinanciallyRestricted(), the student's account is
+// reactivated as a side effect of this succeeding — no separate "unlock account" step exists or
+// is needed.
+router.post('/accounts/student-outstanding-dues', authMiddleware, requireAccounts, async (req: AuthRequest, res) => {
+  try {
+    const studentId = String(req.body?.studentId || '').trim();
+    if (!studentId) return res.status(400).json({ message: 'Enter a valid Student ID.' });
+
+    const target = await prisma.user.findFirst({ where: { studentId, role: 'Student' } });
+    if (!target) return res.status(404).json({ message: 'No student found with this ID.' });
+
+    const [outstanding, restriction] = await Promise.all([
+      getOutstandingDues(target.id),
+      isFinanciallyRestricted(target.id),
+    ]);
+
+    res.json({
+      found: true,
+      student: { fullName: target.fullName || 'Student', studentId: target.studentId || '', department: target.department || '', batch: target.batch || '' },
+      items: outstanding.items.map(i => ({ source: i.source, label: i.label, amount: i.amount })),
+      total: outstanding.total,
+      breakdown: outstanding.breakdown,
+      restricted: restriction.restricted,
+      reason: restriction.reason,
+    });
+  } catch (err: any) {
+    res.status(500).json({ message: err.message });
+  }
+});
+
+router.post('/accounts/manual-payment/record', authMiddleware, requireAccounts, manualPaymentLimiter, async (req: AuthRequest, res) => {
+  try {
+    const staff = req.user!;
+    const studentId = String(req.body?.studentId || '').trim();
+    const bankReference = String(req.body?.bankReference || '').trim();
+    const amountReceived = Number(req.body?.amountReceived);
+    const note = req.body?.note ? String(req.body.note).slice(0, 1000) : undefined;
+
+    if (!studentId) return res.status(400).json({ message: 'Enter a valid Student ID.' });
+    if (!bankReference || bankReference.length < 3) return res.status(400).json({ message: 'Enter the bank receipt / reference number.' });
+    if (!amountReceived || amountReceived <= 0) return res.status(400).json({ message: 'Enter a valid amount received.' });
+
+    const target = await prisma.user.findFirst({ where: { studentId, role: 'Student' } });
+    if (!target) return res.status(404).json({ message: 'No student found with this ID.' });
+
+    // Friendly pre-check before hitting the DB's unique constraint — the constraint itself
+    // (Transaction.bankTxnId @unique) is the real idempotency guarantee under concurrent staff
+    // submissions; this just gives a clean message in the common (non-racing) case.
+    const existing = await prisma.transaction.findFirst({ where: { bankTxnId: bankReference } });
+    if (existing) return res.status(409).json({ message: 'This bank reference has already been recorded against a payment.' });
+
+    const outstanding = await getOutstandingDues(target.id);
+    if (!outstanding.items.length || outstanding.total <= 0) {
+      return res.status(400).json({ message: 'This student has no outstanding dues to settle.' });
+    }
+    if (amountReceived < outstanding.total) {
+      return res.status(400).json({ message: `Amount received (৳${amountReceived.toLocaleString()}) is less than the total outstanding (৳${outstanding.total.toLocaleString()}). Full settlement is required to record this payment.` });
+    }
+
+    const wasRestricted = (await isFinanciallyRestricted(target.id)).restricted;
+    const ref = `BANK-${Date.now().toString(36).toUpperCase()}-${Math.random().toString(36).slice(2, 6).toUpperCase()}`;
+    const itemsJson = JSON.stringify(outstanding.items);
+
+    try {
+      await prisma.$transaction(async (txClient) => {
+        for (const item of outstanding.items) await markItemPaid(item, ref, target.id, txClient);
+
+        await txClient.transaction.create({
+          data: {
+            reference: ref, userId: target.id, type: 'Manual Bank Settlement', direction: 'Debit',
+            amount: outstanding.total, status: 'Success', gateway: 'Manual', paymentMethod: 'Bank Transfer',
+            purpose: 'unified_settlement', bankTxnId: bankReference, itemsJson,
+            description: `Offline bank payment recorded by Accounts Office (${staff.fullName || staff.email})${note ? ` — ${note}` : ''}`,
+            ipAddress: req.ip,
+          },
+        });
+
+        await txClient.auditLog.create({
+          data: {
+            action: 'Manual Bank Payment Recorded', actorId: staff.id, entityType: 'Transaction', entityId: target.id,
+            details: `Settled ৳${outstanding.total.toLocaleString()} for ${target.fullName || target.studentId} (${target.studentId}) via bank reference ${bankReference}${wasRestricted ? ' — account reactivated' : ''}`,
+            ipAddress: req.ip,
+          },
+        });
+      }, { timeout: 30000, maxWait: 15000 });
+    } catch (e: any) {
+      if (e.name === 'SettlementConflictError' || String(e.message).startsWith('SETTLEMENT_CONFLICT')) {
+        return res.status(409).json({ message: 'One or more of these dues were already settled elsewhere. Please look up the student again.' });
+      }
+      if (e.code === 'P2002') {
+        return res.status(409).json({ message: 'This bank reference has already been recorded against a payment.' });
+      }
+      throw e;
+    }
+
+    void notifyUser({
+      recipientId: target.id, category: 'payment', type: 'unified_settlement.manual',
+      title: wasRestricted ? 'Account Reactivated — Payment Recorded' : 'Payment Recorded',
+      body: `৳${outstanding.total.toLocaleString()} received and settled by Accounts Office. Reference: ${ref}.${wasRestricted ? ' Your account access has been restored.' : ''}`,
+      link: '/student/dues',
+      emailSubject: `Payment Recorded — ৳${outstanding.total.toLocaleString()} — Smart Campus`,
+    });
+
+    res.json({
+      success: true, reference: ref, amount: outstanding.total,
+      items: outstanding.items.map(i => ({ source: i.source, label: i.label, amount: i.amount })),
+      breakdown: outstanding.breakdown, wasRestricted, studentName: target.fullName || target.studentId,
+    });
   } catch (err: any) {
     res.status(500).json({ message: err.message });
   }
