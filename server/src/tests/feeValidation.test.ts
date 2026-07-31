@@ -172,6 +172,158 @@ describe('Fee Management Service — Unit Tests', () => {
       expect(result.isValid).toBe(false);
       expect(result.errors).toContain('Fee already pushed for this student');
     });
+
+    describe('Row vs. Officer-selected context (Step 1 metadata)', () => {
+      const context = { department: 'Computer Science', program: 'Undergraduate', semester: 'Summer', academicYear: '2027' };
+
+      it('should pass when row semester/program/academicYear match the selected context', () => {
+        const row = {
+          studentId: 'STU-2026-001',
+          studentName: 'Jahidul Islam',
+          email: 'jahid@ewu.edu.bd',
+          department: 'Computer Science',
+          program: 'Undergraduate',
+          semester: 'Summer',
+          academicYear: '2027',
+          amount: 45500,
+        };
+
+        const result = validateImportRow(row, existingStudents, existingPushedStudentIds, new Set(), context);
+        expect(result.isValid).toBe(true);
+      });
+
+      it('should reject row if Semester does not match the selected context', () => {
+        const row = {
+          studentId: 'STU-2026-001',
+          studentName: 'Jahidul Islam',
+          email: 'jahid@ewu.edu.bd',
+          department: 'Computer Science',
+          program: 'Undergraduate',
+          semester: 'Spring',
+          academicYear: '2027',
+          amount: 45500,
+        };
+
+        const result = validateImportRow(row, existingStudents, existingPushedStudentIds, new Set(), context);
+        expect(result.isValid).toBe(false);
+        expect(result.errors).toContain('Semester mismatch');
+      });
+
+      it('should reject row if Program does not match the selected context', () => {
+        const row = {
+          studentId: 'STU-2026-001',
+          studentName: 'Jahidul Islam',
+          email: 'jahid@ewu.edu.bd',
+          department: 'Computer Science',
+          program: 'Postgraduate',
+          semester: 'Summer',
+          academicYear: '2027',
+          amount: 45500,
+        };
+
+        const result = validateImportRow(row, existingStudents, existingPushedStudentIds, new Set(), context);
+        expect(result.isValid).toBe(false);
+        expect(result.errors).toContain('Program mismatch');
+      });
+
+      it('should reject row if Academic Year does not match the selected context', () => {
+        const row = {
+          studentId: 'STU-2026-001',
+          studentName: 'Jahidul Islam',
+          email: 'jahid@ewu.edu.bd',
+          department: 'Computer Science',
+          program: 'Undergraduate',
+          semester: 'Summer',
+          academicYear: '2026',
+          amount: 45500,
+        };
+
+        const result = validateImportRow(row, existingStudents, existingPushedStudentIds, new Set(), context);
+        expect(result.isValid).toBe(false);
+        expect(result.errors).toContain('Academic year mismatch');
+      });
+
+      it('should not double-count Department mismatch when both the DB check and context check would flag it', () => {
+        const row = {
+          studentId: 'STU-2026-001',
+          studentName: 'Jahidul Islam',
+          email: 'jahid@ewu.edu.bd',
+          department: 'EEE',
+          program: 'Undergraduate',
+          semester: 'Summer',
+          academicYear: '2027',
+          amount: 45500,
+        };
+
+        const result = validateImportRow(row, existingStudents, existingPushedStudentIds, new Set(), context);
+        expect(result.errors.filter(e => e === 'Department mismatch')).toHaveLength(1);
+      });
+
+      it('should remain backward-compatible when no context is passed (existing 4-arg call sites)', () => {
+        const row = {
+          studentId: 'STU-2026-001',
+          studentName: 'Jahidul Islam',
+          email: 'jahid@ewu.edu.bd',
+          department: 'Computer Science',
+          program: 'Undergraduate',
+          semester: 'Spring', // would mismatch a context, but none is passed
+          academicYear: '2020',
+          amount: 45500,
+        };
+
+        const result = validateImportRow(row, existingStudents, existingPushedStudentIds, new Set());
+        expect(result.isValid).toBe(true);
+      });
+    });
+
+    it('should reject a row with an unparsable due date', () => {
+      const row = {
+        studentId: 'STU-2026-001',
+        studentName: 'Jahidul Islam',
+        email: 'jahid@ewu.edu.bd',
+        department: 'Computer Science',
+        program: 'Undergraduate',
+        amount: 45500,
+        dueDate: 'not-a-date',
+      };
+
+      const result = validateImportRow(row, existingStudents, existingPushedStudentIds, new Set());
+      expect(result.isValid).toBe(false);
+      expect(result.errors).toContain('Invalid due date');
+    });
+
+    it('should reject a due date that is calendar-invalid even though Date.parse silently rolls it over (e.g. Feb 31)', () => {
+      // Real case found via live testing: Date.parse('2027-02-31') doesn't return NaN, it
+      // silently returns March 3rd 2027 — a naive isNaN(Date.parse(...)) check misses this.
+      const row = {
+        studentId: 'STU-2026-001',
+        studentName: 'Jahidul Islam',
+        email: 'jahid@ewu.edu.bd',
+        department: 'Computer Science',
+        program: 'Undergraduate',
+        amount: 45500,
+        dueDate: '2027-02-31',
+      };
+
+      const result = validateImportRow(row, existingStudents, existingPushedStudentIds, new Set());
+      expect(result.isValid).toBe(false);
+      expect(result.errors).toContain('Invalid due date');
+    });
+
+    it('should accept a genuinely valid ISO due date', () => {
+      const row = {
+        studentId: 'STU-2026-001',
+        studentName: 'Jahidul Islam',
+        email: 'jahid@ewu.edu.bd',
+        department: 'Computer Science',
+        program: 'Undergraduate',
+        amount: 45500,
+        dueDate: '2027-02-28',
+      };
+
+      const result = validateImportRow(row, existingStudents, existingPushedStudentIds, new Set());
+      expect(result.isValid).toBe(true);
+    });
   });
 
   describe('Maker / Checker / Approver Workflow Permissions', () => {

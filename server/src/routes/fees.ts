@@ -9,6 +9,7 @@ import {
   validateImportRow,
   validateApprovalWorkflowPermissions,
   parseImportRows,
+  findMissingRequiredColumns,
   generateAdvisingExcelBuffer,
   generateAdvisingCsvString,
   generateAdvisingPdfBuffer,
@@ -142,24 +143,30 @@ router.get('/accounts/fee-import/template', async (_req: AuthRequest, res: Respo
 router.post('/accounts/fee-import/validate', upload.single('file'), async (req: AuthRequest, res: Response): Promise<void> => {
   try {
     const { department = 'Computer Science', program = 'Undergraduate', semester = 'Spring', academicYear = '2026' } = req.body;
+    const context = { department, program, semester, academicYear };
     let parsedRows: ImportRowData[] = [];
 
     if (req.file) {
       const buffer = req.file.buffer;
+      let raw: any[][] = [];
       if (req.file.originalname.endsWith('.csv')) {
         const text = buffer.toString('utf-8');
-        const lines = text.split('\n').map(l => l.split(',').map(c => c.replace(/^"|"$/g, '').trim()));
-        parsedRows = parseImportRows(lines);
+        raw = text.split('\n').map(l => l.split(',').map(c => c.replace(/^"|"$/g, '').trim()));
       } else {
         const workbook = new ExcelJS.Workbook();
         await workbook.xlsx.load(buffer as any);
         const sheet = workbook.worksheets[0];
-        const raw: any[][] = [];
         sheet.eachRow((row) => {
           raw.push((row.values as any[]).slice(1));
         });
-        parsedRows = parseImportRows(raw);
       }
+
+      const missingColumns = findMissingRequiredColumns(raw);
+      if (missingColumns.length > 0) {
+        res.status(400).json({ error: `Missing required column(s): ${missingColumns.join(', ')}` });
+        return;
+      }
+      parsedRows = parseImportRows(raw);
     } else if (req.body.rows && Array.isArray(req.body.rows)) {
       parsedRows = req.body.rows;
     }
@@ -175,8 +182,14 @@ router.post('/accounts/fee-import/validate', upload.single('file'), async (req: 
       select: { id: true, studentId: true, fullName: true, email: true, department: true, batch: true, status: true },
     });
 
+    // Scoped to the same department/program/semester/academicYear the Officer selected —
+    // a student who already received e.g. Fall 2026 fee must still be able to receive
+    // Summer 2027 fee; only a duplicate within the *same* fee context is blocked.
     const existingPushed = await prisma.feeInvoice.findMany({
-      where: { status: { in: ['Unpaid', 'Paid'] } },
+      where: {
+        status: { in: ['Unpaid', 'Paid'] },
+        batchItem: { batch: { department, program, semester, academicYear } },
+      },
       select: { student: { select: { studentId: true } } },
     });
     const existingPushedStudentIds = new Set(
@@ -192,7 +205,7 @@ router.post('/accounts/fee-import/validate', upload.single('file'), async (req: 
 
     const validatedItems = parsedRows.map((row) => {
       const dbStudent = existingStudents.find(s => s.studentId === row.studentId);
-      const valRes = validateImportRow(row, existingStudents, existingPushedStudentIds, fileStudentIdsSeen);
+      const valRes = validateImportRow(row, existingStudents, existingPushedStudentIds, fileStudentIdsSeen, context);
 
       let status = 'Valid';
       if (!valRes.isValid) {
@@ -220,6 +233,19 @@ router.post('/accounts/fee-import/validate', upload.single('file'), async (req: 
     });
 
     const autoFeeLabel = generateFeeLabel(semester, academicYear);
+
+    // Best-effort audit trail — never let a logging failure fail validation itself.
+    try {
+      await prisma.auditLog.create({
+        data: {
+          action: 'FEE_IMPORT_VALIDATED',
+          actorId: getAuthUser(req).id,
+          entityType: 'SemesterFeeValidation',
+          details: `Validated ${parsedRows.length} row(s) for ${autoFeeLabel} (${department}/${program}): ${validCount} valid, ${invalidCount} invalid, ${duplicateCount} duplicate.`,
+          ipAddress: req.ip,
+        },
+      });
+    } catch { /* non-blocking */ }
 
     res.status(200).json({
       summary: {
@@ -296,6 +322,19 @@ router.post('/accounts/fee-import/submit', async (req: AuthRequest, res: Respons
       },
       include: { items: true },
     });
+
+    try {
+      await prisma.auditLog.create({
+        data: {
+          action: 'FEE_BATCH_CREATED',
+          actorId: user.id,
+          entityType: 'SemesterFeeBatch',
+          entityId: batch.id,
+          details: `Created batch ${batch.batchNumber} (${label}) with ${items.length} row(s), ${validCount} valid.`,
+          ipAddress: req.ip,
+        },
+      });
+    } catch { /* non-blocking */ }
 
     res.status(201).json({ success: true, message: 'Fee batch created successfully', batch });
   } catch (err: any) {
@@ -418,6 +457,25 @@ router.post('/accounts/fee-import/approve', async (req: AuthRequest, res: Respon
       data: { status: nextStatus, ...updateData },
     });
 
+    const auditActionByAction: Record<string, string> = {
+      SUBMIT_FOR_REVIEW: 'FEE_BATCH_SUBMITTED_FOR_REVIEW',
+      VERIFY_BATCH: 'FEE_BATCH_VERIFIED',
+      APPROVE_BATCH: 'FEE_BATCH_APPROVED',
+      REJECT_BATCH: 'FEE_BATCH_REJECTED',
+    };
+    try {
+      await prisma.auditLog.create({
+        data: {
+          action: auditActionByAction[action] || `FEE_BATCH_${action}`,
+          actorId: user.id,
+          entityType: 'SemesterFeeBatch',
+          entityId: batchId,
+          details: reason ? `${action} on batch ${updatedBatch.batchNumber}: ${reason}` : `${action} on batch ${updatedBatch.batchNumber}`,
+          ipAddress: req.ip,
+        },
+      });
+    } catch { /* non-blocking */ }
+
     res.status(200).json({ success: true, message: `Batch ${action} completed successfully`, batch: updatedBatch });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
@@ -453,131 +511,178 @@ router.post('/accounts/fee-import/push', async (req: AuthRequest, res: Response)
       return;
     }
 
-    // Execute fee push for all valid items in batch
-    let pushedCount = 0;
-    for (const item of batch.items) {
-      const studentUser = await prisma.user.findFirst({
-        where: { OR: [{ studentId: item.studentId }, { email: item.studentEmail.toLowerCase() }] },
+    const pushJob = await prisma.feePushJob.create({
+      data: { batchId, status: 'Processing', totalCount: batch.items.length, startedAt: new Date() },
+    });
+
+    const skippedReasons: string[] = [];
+
+    try {
+      // Every invoice/ledger/notification for the whole batch commits together or not at all —
+      // a mid-loop failure (e.g. a Neon connection drop) can never leave partial fee records.
+      const pushedCount = await prisma.$transaction(async (txClient) => {
+        let count = 0;
+        for (const item of batch.items) {
+          const studentUser = await txClient.user.findFirst({
+            where: { OR: [{ studentId: item.studentId }, { email: item.studentEmail.toLowerCase() }] },
+          });
+
+          if (!studentUser) {
+            skippedReasons.push(`${item.studentId}: student record not found`);
+            continue;
+          }
+
+          const invoiceNumber = `INV-${batch.academicYear}-${Date.now().toString().slice(-6)}-${count + 1}`;
+          const refNumber = `REF-FEE-${Date.now()}-${count + 1}`;
+
+          // 1. Create Formal Invoice
+          const invoice = await txClient.feeInvoice.create({
+            data: {
+              invoiceNumber,
+              batchItemId: item.id,
+              studentId: studentUser.id,
+              amount: item.finalAmount,
+              feeLabel: item.feeLabel || batch.label,
+              dueDate: item.dueDate || `${batch.academicYear}-08-30`,
+              status: 'Unpaid',
+            },
+          });
+
+          // 2. Create SemesterFee Due Record for Student App
+          await txClient.semesterFee.create({
+            data: {
+              studentId: studentUser.id,
+              amount: item.finalAmount,
+              label: item.feeLabel || batch.label,
+              dueDate: item.dueDate || `${batch.academicYear}-08-30`,
+              status: 'Pending',
+              reference: refNumber,
+            },
+          });
+
+          // 3. Create Payment Request
+          const paymentRequest = await txClient.paymentRequest.create({
+            data: {
+              requestRef: `PR-${invoiceNumber}`,
+              invoiceId: invoice.id,
+              studentId: studentUser.id,
+              amount: item.finalAmount,
+              status: 'Pending',
+            },
+          });
+
+          // 4. Create Payment Gateway Session with pre-configured locked amount
+          await txClient.paymentGatewaySession.create({
+            data: {
+              sessionKey: `SES-${Date.now()}-${count + 1}`,
+              paymentRequestId: paymentRequest.id,
+              studentId: studentUser.id,
+              amount: item.finalAmount,
+              feeLabel: item.feeLabel || batch.label,
+              gateway: 'SSLCommerz',
+              status: 'Active',
+            },
+          });
+
+          // 5. Create Double-Entry Ledger Entry (Debit Due)
+          const lastLedger = await txClient.ledgerEntry.findFirst({
+            where: { studentId: studentUser.id },
+            orderBy: { createdAt: 'desc' },
+          });
+          const previousBalance = lastLedger ? lastLedger.balanceAfter : 0;
+          const newBalance = previousBalance + item.finalAmount;
+
+          await txClient.ledgerEntry.create({
+            data: {
+              entryNumber: `LED-${Date.now()}-${count + 1}`,
+              studentId: studentUser.id,
+              invoiceId: invoice.id,
+              type: 'DEBIT_DUE',
+              debitAmount: item.finalAmount,
+              balanceAfter: newBalance,
+              reference: refNumber,
+              description: `${item.feeLabel || batch.label} imposed by Accounts`,
+            },
+          });
+
+          // 6. Create Student Notification
+          await txClient.notification.create({
+            data: {
+              recipientId: studentUser.id,
+              category: 'Fee',
+              type: 'SemesterFeePushed',
+              title: 'Semester Fee Imposed',
+              body: `Your ${item.feeLabel || batch.label} of ৳${item.finalAmount.toLocaleString()} has been published. Due date: ${item.dueDate || 'N/A'}.`,
+              link: '/student/dues',
+            },
+          });
+
+          // Update item status
+          await txClient.semesterFeeItem.update({
+            where: { id: item.id },
+            data: { status: 'Pushed' },
+          });
+
+          count++;
+        }
+
+        // Update batch to Pushed
+        await txClient.semesterFeeBatch.update({
+          where: { id: batchId },
+          data: { status: 'Pushed', pushedAt: new Date() },
+        });
+
+        return count;
       });
 
-      if (!studentUser) continue;
-
-      const invoiceNumber = `INV-${batch.academicYear}-${Date.now().toString().slice(-6)}-${pushedCount + 1}`;
-      const refNumber = `REF-FEE-${Date.now()}-${pushedCount + 1}`;
-
-      // 1. Create Formal Invoice
-      const invoice = await prisma.feeInvoice.create({
+      await prisma.feePushJob.update({
+        where: { id: pushJob.id },
         data: {
-          invoiceNumber,
-          batchItemId: item.id,
-          studentId: studentUser.id,
-          amount: item.finalAmount,
-          feeLabel: item.feeLabel || batch.label,
-          dueDate: item.dueDate || `${batch.academicYear}-08-30`,
-          status: 'Unpaid',
+          status: 'Completed',
+          processedCount: pushedCount,
+          completedAt: new Date(),
+          errorLog: skippedReasons.length > 0 ? skippedReasons.join('; ') : null,
         },
       });
 
-      // 2. Create SemesterFee Due Record for Student App
-      await prisma.semesterFee.create({
+      // Create Accounts Audit Log
+      await prisma.auditLog.create({
         data: {
-          studentId: studentUser.id,
-          amount: item.finalAmount,
-          label: item.feeLabel || batch.label,
-          dueDate: item.dueDate || `${batch.academicYear}-08-30`,
-          status: 'Pending',
-          reference: refNumber,
+          action: 'FEE_BATCH_PUSHED',
+          actorId: user.id,
+          entityType: 'SemesterFeeBatch',
+          entityId: batchId,
+          details: `Pushed fee batch ${batch.batchNumber} containing ${pushedCount} student invoices totaling ৳${batch.totalAmount.toLocaleString()}.`,
         },
       });
 
-      // 3. Create Payment Request
-      const paymentRequest = await prisma.paymentRequest.create({
-        data: {
-          requestRef: `PR-${invoiceNumber}`,
-          invoiceId: invoice.id,
-          studentId: studentUser.id,
-          amount: item.finalAmount,
-          status: 'Pending',
-        },
+      res.status(200).json({
+        success: true,
+        message: `Successfully pushed semester fees for ${pushedCount} students.`,
+        pushedCount,
+        pushJobId: pushJob.id,
+        batchNumber: batch.batchNumber,
+        startedAt: pushJob.startedAt,
+        completedAt: new Date(),
       });
-
-      // 4. Create Payment Gateway Session with pre-configured locked amount
-      await prisma.paymentGatewaySession.create({
-        data: {
-          sessionKey: `SES-${Date.now()}-${pushedCount + 1}`,
-          paymentRequestId: paymentRequest.id,
-          studentId: studentUser.id,
-          amount: item.finalAmount,
-          feeLabel: item.feeLabel || batch.label,
-          gateway: 'SSLCommerz',
-          status: 'Active',
-        },
+    } catch (pushErr: any) {
+      await prisma.feePushJob.update({
+        where: { id: pushJob.id },
+        data: { status: 'Failed', completedAt: new Date(), errorLog: pushErr.message || 'Unknown error during fee push' },
       });
-
-      // 5. Create Double-Entry Ledger Entry (Debit Due)
-      const lastLedger = await prisma.ledgerEntry.findFirst({
-        where: { studentId: studentUser.id },
-        orderBy: { createdAt: 'desc' },
-      });
-      const previousBalance = lastLedger ? lastLedger.balanceAfter : 0;
-      const newBalance = previousBalance + item.finalAmount;
-
-      await prisma.ledgerEntry.create({
-        data: {
-          entryNumber: `LED-${Date.now()}-${pushedCount + 1}`,
-          studentId: studentUser.id,
-          invoiceId: invoice.id,
-          type: 'DEBIT_DUE',
-          debitAmount: item.finalAmount,
-          balanceAfter: newBalance,
-          reference: refNumber,
-          description: `${item.feeLabel || batch.label} imposed by Accounts`,
-        },
-      });
-
-      // 6. Create Student Notification
-      await prisma.notification.create({
-        data: {
-          recipientId: studentUser.id,
-          category: 'Fee',
-          type: 'SemesterFeePushed',
-          title: 'Semester Fee Imposed',
-          body: `Your ${item.feeLabel || batch.label} of ৳${item.finalAmount.toLocaleString()} has been published. Due date: ${item.dueDate || 'N/A'}.`,
-          link: '/student/dues',
-        },
-      });
-
-      // Update item status
-      await prisma.semesterFeeItem.update({
-        where: { id: item.id },
-        data: { status: 'Pushed' },
-      });
-
-      pushedCount++;
+      try {
+        await prisma.auditLog.create({
+          data: {
+            action: 'FEE_BATCH_PUSH_FAILED',
+            actorId: user.id,
+            entityType: 'SemesterFeeBatch',
+            entityId: batchId,
+            details: `Fee push failed for batch ${batch.batchNumber}: ${pushErr.message || 'Unknown error'}`,
+          },
+        });
+      } catch { /* non-blocking */ }
+      throw pushErr;
     }
-
-    // Update batch to Pushed
-    await prisma.semesterFeeBatch.update({
-      where: { id: batchId },
-      data: { status: 'Pushed', pushedAt: new Date() },
-    });
-
-    // Create Accounts Audit Log
-    await prisma.auditLog.create({
-      data: {
-        action: 'FEE_BATCH_PUSHED',
-        actorId: user.id,
-        entityType: 'SemesterFeeBatch',
-        entityId: batchId,
-        details: `Pushed fee batch ${batch.batchNumber} containing ${pushedCount} student invoices totaling ৳${batch.totalAmount.toLocaleString()}.`,
-      },
-    });
-
-    res.status(200).json({
-      success: true,
-      message: `Successfully pushed semester fees for ${pushedCount} students.`,
-      pushedCount,
-    });
   } catch (err: any) {
     res.status(500).json({ error: err.message || 'Fee push failed' });
   }

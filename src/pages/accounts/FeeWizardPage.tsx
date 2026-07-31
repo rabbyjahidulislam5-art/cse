@@ -362,7 +362,7 @@ export default function FeeWizardPage() {
             </div>
             <div className="bg-destructive/10 p-4 rounded-xl border border-destructive/20">
               <p className="text-xs text-destructive font-semibold">Error Rows</p>
-              <p className="text-2xl font-black text-destructive mt-1">{validationResult.summary.errorRows || 0}</p>
+              <p className="text-2xl font-black text-destructive mt-1">{(validationResult.summary.invalidRows || 0) + (validationResult.summary.duplicateRows || 0)}</p>
             </div>
             <div className="bg-primary/10 p-4 rounded-xl border border-primary/20">
               <p className="text-xs text-primary font-semibold">Total Amount</p>
@@ -409,10 +409,12 @@ export default function FeeWizardPage() {
                       <td className="p-3 font-mono text-emerald-400">৳{(item.waiver || 0).toLocaleString()}</td>
                       <td className="p-3 font-mono font-bold text-primary">৳{(item.amount || item.total || item.finalAmount || 0).toLocaleString()}</td>
                       <td className="p-3">
-                        {item.valid ? (
+                        {item.status === 'Valid' ? (
                           <span className="px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-400 font-semibold text-[10px]">Valid</span>
                         ) : (
-                          <span className="px-2 py-0.5 rounded-full bg-destructive/20 text-destructive font-semibold text-[10px]">{item.error || 'Invalid'}</span>
+                          <span title={item.validationErrors?.join(', ')} className="px-2 py-0.5 rounded-full bg-destructive/20 text-destructive font-semibold text-[10px]">
+                            {item.status === 'Duplicate' ? 'Duplicate' : (item.validationErrors?.[0] || 'Invalid')}
+                          </span>
                         )}
                       </td>
                     </tr>

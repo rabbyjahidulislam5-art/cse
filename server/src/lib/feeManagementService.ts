@@ -28,6 +28,20 @@ export interface ValidationResult {
   errors: string[];
 }
 
+// Date.parse('2027-02-31') doesn't return NaN — it silently rolls over to March 3rd — so a
+// plain isNaN(Date.parse(...)) check misses calendar-invalid dates like Feb 31. Round-trip
+// through UTC components instead: an invalid day/month combination won't reproduce itself.
+function isValidCalendarDate(value: string): boolean {
+  const isoMatch = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value.trim());
+  if (!isoMatch) return !isNaN(Date.parse(value));
+  const year = Number(isoMatch[1]);
+  const month = Number(isoMatch[2]);
+  const day = Number(isoMatch[3]);
+  if (month < 1 || month > 12) return false;
+  const date = new Date(Date.UTC(year, month - 1, day));
+  return date.getUTCFullYear() === year && date.getUTCMonth() === month - 1 && date.getUTCDate() === day;
+}
+
 export function generateFeeLabel(semester: string, academicYear: string): string {
   const cleanSemester = (semester || 'Spring').trim();
   const cleanYear = (academicYear || '2026').trim();
@@ -60,7 +74,8 @@ export function validateImportRow(
     status: string;
   }>,
   existingPushedStudentIds: Set<string>,
-  fileStudentIdsSeen: Set<string>
+  fileStudentIdsSeen: Set<string>,
+  context?: { department: string; program: string; semester: string; academicYear: string }
 ): ValidationResult {
   const errors: string[] = [];
 
@@ -90,6 +105,31 @@ export function validateImportRow(
 
   if (isNaN(amount) || amount <= 0) {
     errors.push('Amount must be positive');
+  }
+
+  // Cross-check the row's own metadata against what the Accounts Officer selected in Step 1,
+  // so a file carrying the wrong semester/program/year can never silently pass as Valid.
+  if (context) {
+    const program = (row.program || '').trim();
+    const semester = (row.semester || '').trim();
+    const academicYear = (row.academicYear || '').trim();
+
+    if (department && department.toLowerCase() !== context.department.trim().toLowerCase() && !errors.includes('Department mismatch')) {
+      errors.push('Department mismatch');
+    }
+    if (program && program.toLowerCase() !== context.program.trim().toLowerCase()) {
+      errors.push('Program mismatch');
+    }
+    if (semester && semester.toLowerCase() !== context.semester.trim().toLowerCase()) {
+      errors.push('Semester mismatch');
+    }
+    if (academicYear && academicYear !== context.academicYear.trim()) {
+      errors.push('Academic year mismatch');
+    }
+  }
+
+  if (row.dueDate && !isValidCalendarDate(row.dueDate)) {
+    errors.push('Invalid due date');
   }
 
   if (existingPushedStudentIds.has(studentId)) {
@@ -151,6 +191,18 @@ export function validateApprovalWorkflowPermissions(
   }
 
   return { allowed: false, reason: 'Invalid action or role permission' };
+}
+
+// Checked before parseImportRows so a malformed/misnamed header produces a specific error
+// message instead of parseImportRows silently dropping every row (studentIdIdx === -1 makes
+// `!r[studentIdIdx]` true for every row) and the caller seeing a generic "no data found".
+export function findMissingRequiredColumns(rows: any[][]): string[] {
+  if (!rows || rows.length === 0) return ['Student ID', 'Amount'];
+  const header = rows[0].map(h => String(h || '').trim().toLowerCase());
+  const missing: string[] = [];
+  if (!header.some(h => h.includes('student id') || h === 'studentid' || h === 'id')) missing.push('Student ID');
+  if (!header.some(h => h.includes('amount') || h.includes('tuition'))) missing.push('Amount');
+  return missing;
 }
 
 export function parseImportRows(rows: any[][]): ImportRowData[] {
