@@ -141,7 +141,6 @@ export default function SemesterFeeModal({ open, onOpenChange }: SemesterFeeModa
                   Pay Semester Fee
                 </DialogTitle>
                 <DialogDescription className="text-xs text-muted-foreground mt-1">
-                  Look up a Student ID to view and pay a pending semester fee — yours or someone else's.
                 </DialogDescription>
               </DialogHeader>
 
@@ -159,9 +158,7 @@ export default function SemesterFeeModal({ open, onOpenChange }: SemesterFeeModa
                     disabled={searching}
                     maxLength={40}
                   />
-                  <p className="text-[11px] text-muted-foreground mt-1.5">
-                    Defaults to your own ID — enter another student's ID to pay on their behalf.
-                  </p>
+
                 </div>
               </div>
 
@@ -255,7 +252,7 @@ export default function SemesterFeeModal({ open, onOpenChange }: SemesterFeeModa
                       <span className="text-[10px] font-semibold text-muted-foreground">Bal: {formatCurrency(walletBalance)}</span>
                     </div>
                     <p className="text-[11px] text-muted-foreground mt-0.5">
-                      Payment will be completed using your Smart Campus Wallet through the secure payment gateway.
+                      Payment will be completed using your ewu Campus Wallet through the secure payment gateway.
                     </p>
                   </div>
                   {insufficientWallet && (

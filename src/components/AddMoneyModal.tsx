@@ -102,7 +102,7 @@ export default function AddMoneyModal({ open, onOpenChange }: AddMoneyModalProps
             </DialogTitle>
             <DialogDescription className="text-xs text-muted-foreground mt-1">
               {step === 'amount'
-                ? 'Add funds securely via Smart Campus payment system (bKash, Nagad, Cards, Internet Banking)'
+                ? ''
                 : 'Review your top-up details before proceeding'}
             </DialogDescription>
           </DialogHeader>

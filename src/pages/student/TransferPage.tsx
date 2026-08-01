@@ -115,7 +115,7 @@ export default function TransferPage() {
           <ArrowLeft className="w-5 h-5 text-muted-foreground" />
         </button>
         <div className="flex-1">
-          <h1 className="text-lg font-bold text-foreground">Transfer Money</h1>
+          <h1 className="text-lg font-bold text-foreground">Fund Transfer</h1>
           <p className="text-xs text-muted-foreground">Send money securely to another student</p>
         </div>
       </div>

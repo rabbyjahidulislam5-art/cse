@@ -113,9 +113,7 @@ export default function DisputeDetailPage() {
 
       <FadeIn>
         <div className="flex flex-wrap gap-2 mb-4">
-          <Button variant="outline" size="sm" className="rounded-lg gap-1.5 text-xs" disabled={pdfLoading} onClick={handlePdf}>
-            {pdfLoading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Download className="w-3.5 h-3.5" />} Download Dispute PDF
-          </Button>
+
           <Button variant="outline" size="sm" className="rounded-lg gap-1.5 text-xs" onClick={() => setShowTimeline(v => !v)}>
             <History className="w-3.5 h-3.5" /> {showTimeline ? 'Hide' : 'Show'} Audit Timeline
           </Button>

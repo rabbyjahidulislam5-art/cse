@@ -63,13 +63,13 @@ export default function HomePage() {
   const quickActions = [
     { label: 'Scan & Pay', icon: ScanLine, onClick: () => navigate('/student/scan'), color: 'from-secondary/15 to-secondary/5', iconColor: 'text-secondary' },
     { label: 'Add Money', icon: PlusCircle, onClick: () => setAddMoneyOpen(true), color: 'from-primary/15 to-primary/5', iconColor: 'text-primary' },
-    { label: 'Transfer', icon: ArrowRightLeft, onClick: () => navigate('/student/transfer'), color: 'from-[hsl(var(--chart-3))]/15 to-[hsl(var(--chart-3))]/5', iconColor: 'text-[hsl(var(--chart-3))]' },
+    { label: 'Fund Transfer', icon: ArrowRightLeft, onClick: () => navigate('/student/transfer'), color: 'from-[hsl(var(--chart-3))]/15 to-[hsl(var(--chart-3))]/5', iconColor: 'text-[hsl(var(--chart-3))]' },
     // Opens the payment-category chooser (all unpaid dues — semester fee, admin fines, library
     // fines, shop dues) rather than jumping straight into one payment type.
-    { label: 'Pay Dues', icon: ShieldAlert, onClick: () => setPayCategoryOpen(true), color: 'from-[hsl(var(--chart-5))]/15 to-[hsl(var(--chart-5))]/5', iconColor: 'text-[hsl(var(--chart-5))]' },
+    { label: 'Administrative Dues', icon: ShieldAlert, onClick: () => setPayCategoryOpen(true), color: 'from-[hsl(var(--chart-5))]/15 to-[hsl(var(--chart-5))]/5', iconColor: 'text-[hsl(var(--chart-5))]' },
     { label: 'Semester Fee', icon: GraduationCap, onClick: () => setSemesterFeeOpen(true), color: 'from-secondary/15 to-secondary/5', iconColor: 'text-secondary' },
     { label: 'Payments', icon: CreditCard, onClick: () => navigate('/student/payments'), color: 'from-primary/15 to-primary/5', iconColor: 'text-primary' },
-    { label: 'Financial Disputes', icon: ScrollText, onClick: () => navigate('/student/disputes'), color: 'from-destructive/15 to-destructive/5', iconColor: 'text-destructive' },
+    { label: 'Disputes', icon: ScrollText, onClick: () => navigate('/student/disputes'), color: 'from-destructive/15 to-destructive/5', iconColor: 'text-destructive' },
   ];
 
   if (loading) {
@@ -96,7 +96,6 @@ export default function HomePage() {
             <h1 className="text-xl sm:text-2xl font-bold text-foreground">
               Welcome, <span className="text-gradient">{user?.fullName?.split(' ')[0] || 'Student'}</span>
             </h1>
-            <p className="text-sm text-muted-foreground mt-0.5">Manage your campus finances</p>
           </div>
           {!user?.pinSet && (
             <motion.button

@@ -15,9 +15,9 @@ import NotificationBell from '@/components/NotificationBell';
 
 const desktopNavItems = [
   { to: '/library', icon: LayoutDashboard, label: 'Home', end: true },
-  { to: '/library/fines/assign', icon: BookX, label: 'Sales' },
+  { to: '/library/fines/assign', icon: BookX, label: 'Penalty Fee' },
   { to: '/library/qr', icon: QrCode, label: 'QR Code' },
-  { to: '/library/notifications', icon: Bell, label: 'Alerts' },
+  { to: '/library/notifications', icon: Bell, label: 'Notification' },
 ];
 
 export default function LibraryLayout() {
@@ -73,7 +73,7 @@ export default function LibraryLayout() {
             </div>
           </button>
 
-          {/* Desktop Navigation: Home → Sales → QR Code → Alerts → More */}
+          {/* Desktop Navigation: Home → Penalty Fee → QR Code → Notification → More */}
           <div className="hidden md:flex items-center gap-0.5 bg-accent/50 rounded-xl p-1">
             {desktopNavItems.map((item) => (
               <NavLink
@@ -175,7 +175,7 @@ export default function LibraryLayout() {
 
       <main className="flex-1 pb-20 md:pb-0"><Outlet /></main>
 
-      {/* Mobile Bottom Navigation (5 items: Home, Sales, QR Code, Alerts, More) */}
+      {/* Mobile Bottom Navigation (5 items: Home, Penalty Fee, QR Code, Notification, More) */}
       <nav className="md:hidden fixed bottom-0 left-0 right-0 z-40 glass-strong safe-area-bottom border-t border-border/40">
         <div className="flex items-center justify-around h-[68px] px-1">
           <NavLink
@@ -206,7 +206,7 @@ export default function LibraryLayout() {
             {({ isActive }) => (
               <>
                 <BookX className={`w-5 h-5 transition-transform ${isActive ? 'scale-110' : ''}`} />
-                <span className={`text-[10px] ${isActive ? 'font-bold' : 'font-medium'}`}>Sales</span>
+                <span className={`text-[10px] ${isActive ? 'font-bold' : 'font-medium'}`}>Penalty Fee</span>
               </>
             )}
           </NavLink>
@@ -238,7 +238,7 @@ export default function LibraryLayout() {
             {({ isActive }) => (
               <>
                 <Bell className={`w-5 h-5 transition-transform ${isActive ? 'scale-110' : ''}`} />
-                <span className={`text-[10px] ${isActive ? 'font-bold' : 'font-medium'}`}>Alerts</span>
+                <span className={`text-[10px] ${isActive ? 'font-bold' : 'font-medium'}`}>Notification</span>
               </>
             )}
           </NavLink>

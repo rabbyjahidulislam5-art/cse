@@ -70,7 +70,7 @@ export default function PaymentsDashboardPage() {
       <FadeIn>
         <div className="mb-6">
           <h1 className="text-xl font-bold text-foreground">Payments Dashboard</h1>
-          <p className="text-sm text-muted-foreground mt-0.5">All gateway-routed payments — fees/fines/top-ups, shop payments & mobile banking withdrawals</p>
+
         </div>
       </FadeIn>
 

@@ -43,7 +43,6 @@ export default function SettingsPage() {
       <FadeIn>
         <div className="mb-6">
           <h1 className="text-xl font-bold text-foreground">Settings</h1>
-          <p className="text-sm text-muted-foreground mt-0.5">Manage your wallet PIN, security settings, and account preferences</p>
         </div>
       </FadeIn>
 
@@ -74,33 +73,7 @@ export default function SettingsPage() {
         </div>
       </FadeIn>
 
-      {/* Account Preferences & Notifications */}
-      <FadeIn delay={0.15}>
-        <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-3">Preferences & Alerts</h3>
-        <div className="rounded-2xl border border-border/60 bg-card p-5 space-y-4 mb-6">
-          <div className="flex items-center justify-between py-1">
-            <div className="space-y-0.5">
-              <Label className="text-sm font-medium text-foreground flex items-center gap-2">
-                <Bell className="w-4 h-4 text-primary" /> Transaction Notifications
-              </Label>
-              <p className="text-xs text-muted-foreground">Receive real-time notifications for deposits, payments, and transfers</p>
-            </div>
-            <ToggleSwitch checked={emailAlerts} onChange={setEmailAlerts} />
-          </div>
 
-          <div className="h-px bg-border/40" />
-
-          <div className="flex items-center justify-between py-1">
-            <div className="space-y-0.5">
-              <Label className="text-sm font-medium text-foreground flex items-center gap-2">
-                <Shield className="w-4 h-4 text-secondary" /> Security & OTP Alerts
-              </Label>
-              <p className="text-xs text-muted-foreground">Receive email alerts for login attempts and sensitive PIN/OTP actions</p>
-            </div>
-            <ToggleSwitch checked={securityAlerts} onChange={setSecurityAlerts} />
-          </div>
-        </div>
-      </FadeIn>
 
       {/* Active Session Info */}
       <FadeIn delay={0.2}>
