@@ -39,6 +39,9 @@ model User {
   flagReason         String?
   mustChangePassword Boolean   @default(false)
   emailVerified      Boolean   @default(false)
+  employeeId         String?
+  designation        String?
+  joiningDate        String?
   createdAt          DateTime  @default(now())
   updatedAt          DateTime  @updatedAt
 
@@ -77,6 +80,12 @@ model User {
   paymentRequests    PaymentRequest[]
   gatewaySessions    PaymentGatewaySession[]
   ledgerEntries      LedgerEntry[]
+
+  // Enterprise Shop Settlement Workflow
+  settlementRequestsRequested   SettlementRequest[]        @relation("SettlementRequestedBy")
+  settlementRequestsAdminReview SettlementRequest[]        @relation("SettlementAdminReviewed")
+  settlementRequestsAccounts    SettlementRequest[]        @relation("SettlementAccountsProcessed")
+  settlementStatusChanges       SettlementStatusHistory[]  @relation("SettlementStatusChangedBy")
 }
 
 model Wallet {
@@ -167,14 +176,21 @@ model Shop {
   contactNumber  String?
   ownerName      String?
   description    String?
-  operatingHours String?
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
+  operatingHours     String?
+  // Bank account information for settlement disbursement
+  bankAccountName    String?
+  bankAccountNumber  String?
+  bankName           String?
+  bankBranch         String?
+  bankRoutingNumber  String?
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
 
-  transactions      Transaction[]
-  payLaterDues      PayLaterDue[]
-  settlements       Settlement[]
-  forwardedDisputes Dispute[]     @relation("DisputeForwardedShop")
+  transactions         Transaction[]
+  payLaterDues         PayLaterDue[]
+  settlements          Settlement[]
+  settlementRequests   SettlementRequest[]
+  forwardedDisputes    Dispute[]     @relation("DisputeForwardedShop")
 }
 
 // Records a manual internal reconciliation — Admin Office confirming a shop's collected
@@ -190,6 +206,80 @@ model Settlement {
   settledBy String?
   settledAt DateTime @default(now())
   createdAt DateTime @default(now())
+
+  // Link to the SettlementRequest that triggered this settlement record (if applicable).
+  // Null for legacy settlements recorded before the approval workflow existed.
+  settlementRequestId String?
+  settlementRequest   SettlementRequest? @relation(fields: [settlementRequestId], references: [id])
+}
+
+// ─── ENTERPRISE SHOP SETTLEMENT WORKFLOW ───
+//
+// Production-grade settlement lifecycle: Shop requests → Admin reviews/approves → Accounts
+// Office verifies via OTP → SSLCommerz payment → Wallet credit → Ledger update.
+// Every status transition is immutably recorded in SettlementStatusHistory.
+// The existing Settlement model (above) continues to serve as the append-only bookkeeping
+// record — a new Settlement row is created when a SettlementRequest reaches Paid status.
+
+model SettlementRequest {
+  id                  String    @id @default(cuid())
+  reference           String    @unique  // STL-2026-000001
+  shop                Shop      @relation(fields: [shopId], references: [id])
+  shopId              String
+  requestedBy         User      @relation("SettlementRequestedBy", fields: [requestedById], references: [id])
+  requestedById       String
+  requestedAmount     Float
+  // Bank account snapshot at request time (copied from Shop, immutable after submission)
+  bankAccountName     String?
+  bankAccountNumber   String?
+  bankName            String?
+  bankBranch          String?
+  bankRoutingNumber   String?
+  notes               String?
+  status              String    @default("PendingReview")
+  // Admin review
+  adminReviewedBy     User?     @relation("SettlementAdminReviewed", fields: [adminReviewedById], references: [id])
+  adminReviewedById   String?
+  adminRemarks        String?
+  adminReviewedAt     DateTime?
+  // Accounts processing
+  accountsProcessedBy User?     @relation("SettlementAccountsProcessed", fields: [accountsProcessedById], references: [id])
+  accountsProcessedById String?
+  accountsProcessedAt DateTime?
+  otpVerifiedAt       DateTime?
+  // SSLCommerz payment
+  sslcommerzTranId    String?
+  sslcommerzSessionKey String?
+  paymentReference    String?
+  walletTxnId         String?
+  paidAt              DateTime?
+  failureReason       String?
+  // Idempotency — prevents duplicate submissions for the same pending balance
+  idempotencyKey      String    @unique
+  createdAt           DateTime  @default(now())
+  updatedAt           DateTime  @updatedAt
+
+  statusHistory       SettlementStatusHistory[]
+  settlements         Settlement[]
+
+  @@index([shopId, status])
+  @@index([status])
+}
+
+// Immutable audit trail for every settlement status transition. No record may be modified
+// after creation — each transition is a new row.
+model SettlementStatusHistory {
+  id                    String            @id @default(cuid())
+  settlementRequest     SettlementRequest @relation(fields: [settlementRequestId], references: [id])
+  settlementRequestId   String
+  fromStatus            String
+  toStatus              String
+  changedBy             User              @relation("SettlementStatusChangedBy", fields: [changedById], references: [id])
+  changedById           String
+  reason                String?
+  ipAddress             String?
+  deviceInfo            String?
+  createdAt             DateTime          @default(now())
 }
 
 model SemesterFee {

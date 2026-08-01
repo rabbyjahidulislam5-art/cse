@@ -13,7 +13,7 @@ const primaryNavItems = [
   { to: '/shop', icon: Home, label: 'Home', end: true },
   { to: '/shop/ledger', icon: History, label: 'Sales' },
   { to: '/shop/qr', icon: QrCode, label: 'QR Code' },
-  { to: '/shop/notifications', icon: BellRing, label: 'Alerts' },
+  { to: '/shop/notifications', icon: BellRing, label: 'Notification' },
 ];
 
 // A short synthesized beep via the Web Audio API — no external audio asset needed, so there's
@@ -118,7 +118,7 @@ export default function ShopLayout() {
                     {isActive && <motion.div layoutId="shop-nav" className="absolute inset-0 gradient-primary rounded-lg shadow-lg shadow-primary/20" transition={{ type: 'spring', stiffness: 400, damping: 30 }} />}
                     <span className="relative z-10 flex items-center gap-2">
                       <item.icon className="w-4 h-4" /> {item.label}
-                      {item.label === 'Alerts' && unreadNotifs > 0 && (
+                      {item.label === 'Notification' && unreadNotifs > 0 && (
                         <span className="min-w-[16px] h-4 px-1 rounded-full bg-destructive text-[9px] font-bold text-white flex items-center justify-center">{unreadNotifs > 99 ? '99+' : unreadNotifs}</span>
                       )}
                     </span>
@@ -165,7 +165,7 @@ export default function ShopLayout() {
                 <>
                   <div className="relative">
                     <item.icon className={`w-5 h-5 transition-all ${isActive ? 'scale-110' : ''}`} />
-                    {item.label === 'Alerts' && unreadNotifs > 0 && (
+                    {item.label === 'Notification' && unreadNotifs > 0 && (
                       <span className="absolute -top-1 -right-1.5 min-w-[14px] h-3.5 px-0.5 rounded-full bg-destructive text-[8px] font-bold text-white flex items-center justify-center">{unreadNotifs > 9 ? '9+' : unreadNotifs}</span>
                     )}
                   </div>

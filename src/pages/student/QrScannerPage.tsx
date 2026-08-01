@@ -132,11 +132,26 @@ export default function QrScannerPage() {
   const onConfirmed = () => {
     setConfirmOpen(false);
     if (payMode === 'later') { proceedToPay(); return; }
+    
+    if (entity === 'shop') {
+      // Always require PIN for Shop online payment
+      setPinOpen(true);
+      return;
+    }
+    
+    // For library and other entities, use standard threshold logic
     if (amt >= PIN_REQUIRED_THRESHOLD) { setPinOpen(true); return; }
     proceedToPay();
   };
 
   const onPinVerified = () => {
+    if (entity === 'shop') {
+      // Always require Email OTP after successful PIN verification for Shop Payment
+      setOtpOpen(true);
+      return;
+    }
+    
+    // For library and other entities, use standard threshold logic
     if (amt >= OTP_REQUIRED_THRESHOLD) { setOtpOpen(true); return; }
     proceedToPay();
   };

@@ -102,9 +102,7 @@ export default function DisputesDashboardPage() {
             <SelectItem value="Closed">Closed</SelectItem>
           </SelectContent>
         </Select>
-        <Button variant={assignedToMe ? 'default' : 'outline'} size="sm" onClick={() => setAssignedToMe(v => !v)} className="shrink-0">
-          Assigned to Me
-        </Button>
+
         <Button variant="outline" size="icon" onClick={() => load(status, search, assignedToMe)}><RefreshCw className="w-4 h-4" /></Button>
       </div>
 

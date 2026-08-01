@@ -77,6 +77,11 @@ const AccountsNotificationsPage = lazy(() => import('./pages/accounts/AccountsNo
 const AdministrativeFinesPage = lazy(() => import('./pages/accounts/AdministrativeFinesPage'));
 const AccountsQrPage = lazy(() => import('./pages/accounts/AccountsQrPage'));
 const ManualBankPaymentPage = lazy(() => import('./pages/accounts/ManualBankPaymentPage'));
+const AccountsChangeTempPasswordPage = lazy(() => import('./pages/accounts/AccountsChangeTempPasswordPage'));
+const AccountsVerifyEmailPage = lazy(() => import('./pages/accounts/AccountsVerifyEmailPage'));
+const AccountsProfilePage = lazy(() => import('./pages/accounts/AccountsProfilePage'));
+const AccountsWalletPage = lazy(() => import('./pages/accounts/AccountsWalletPage'));
+const SettlementProcessingPage = lazy(() => import('./pages/accounts/SettlementProcessingPage'));
 
 // Shop pages
 const ShopHomePage = lazy(() => import('./pages/shop/ShopHomePage'));
@@ -88,6 +93,7 @@ const ShopDisputeDetailPage = lazy(() => import('./pages/shop/ShopDisputeDetailP
 const ShopChangeTempPasswordPage = lazy(() => import('./pages/shop/ShopChangeTempPasswordPage'));
 const ShopVerifyEmailPage = lazy(() => import('./pages/shop/ShopVerifyEmailPage'));
 const ShopProfilePage = lazy(() => import('./pages/shop/ShopProfilePage'));
+const ShopSettlementsPage = lazy(() => import('./pages/shop/ShopSettlementsPage'));
 
 function RouteFallback() {
   return (
@@ -100,103 +106,111 @@ function RouteFallback() {
 export default function App() {
   return (
     <GoogleOAuthProvider clientId={GOOGLE_CLIENT_ID} locale="en">
-    <AuthProvider>
-    <BrowserRouter>
-      <Suspense fallback={<RouteFallback />}>
-      <Routes>
-        <Route path="/" element={<LandingPage />} />
-        
-        {/* Student Dashboard */}
-        <Route path="/student" element={<StudentLayout />}>
-          <Route index element={<HomePage />} />
-          <Route path="shops" element={<ShopsPage />} />
-          <Route path="shops/:shopId" element={<ShopDetailPage />} />
-          <Route path="dues" element={<DuesPage />} />
-          <Route path="ledger" element={<LedgerPage />} />
-          <Route path="payments" element={<PaymentsDashboardPage />} />
-          <Route path="profile" element={<ProfilePage />} />
-          <Route path="settings" element={<SettingsPage />} />
-          <Route path="scan" element={<QrScannerPage />} />
-          <Route path="transfer" element={<TransferPage />} />
-          <Route path="withdraw" element={<WithdrawPage />} />
-          <Route path="payment-result" element={<PaymentResultPage />} />
-          <Route path="notifications" element={<NotificationsPage />} />
-          <Route path="receipt" element={<ReceiptPage />} />
-          <Route path="disputes" element={<DisputesPage />} />
-          <Route path="disputes/detail" element={<DisputeDetailPage />} />
-        </Route>
+      <AuthProvider>
+        <BrowserRouter>
+          <Suspense fallback={<RouteFallback />}>
+            <Routes>
+              <Route path="/" element={<LandingPage />} />
 
-        {/* Admin Office Dashboard */}
-        <Route path="/admin" element={<AdminLayout />}>
-          <Route index element={<AdminHomePage />} />
-          <Route path="shops" element={<ShopManagementPage />} />
-          <Route path="fines" element={<FinesPage />} />
-          <Route path="audit" element={<AuditLogsPage />} />
-          <Route path="staff" element={<StaffAccountsPage />} />
-          <Route path="disputes" element={<DisputeOversightPage />} />
-          <Route path="disputes/detail" element={<AdminDisputeDetailPage />} />
-          <Route path="notifications" element={<AdminNotificationsPage />} />
-        </Route>
+              {/* Student Dashboard */}
+              <Route path="/student" element={<StudentLayout />}>
+                <Route index element={<HomePage />} />
+                <Route path="shops" element={<ShopsPage />} />
+                <Route path="shops/:shopId" element={<ShopDetailPage />} />
+                <Route path="dues" element={<DuesPage />} />
+                <Route path="ledger" element={<LedgerPage />} />
+                <Route path="payments" element={<PaymentsDashboardPage />} />
+                <Route path="profile" element={<ProfilePage />} />
+                <Route path="settings" element={<SettingsPage />} />
+                <Route path="scan" element={<QrScannerPage />} />
+                <Route path="transfer" element={<TransferPage />} />
+                <Route path="withdraw" element={<WithdrawPage />} />
+                <Route path="payment-result" element={<PaymentResultPage />} />
+                <Route path="notifications" element={<NotificationsPage />} />
+                <Route path="receipt" element={<ReceiptPage />} />
+                <Route path="disputes" element={<DisputesPage />} />
+                <Route path="disputes/detail" element={<DisputeDetailPage />} />
+              </Route>
 
-        {/* Library first-login onboarding — standalone, outside LibraryLayout (no nav chrome, mandatory) */}
-        <Route path="/library/change-password" element={<LibraryChangeTempPasswordPage />} />
-        <Route path="/library/verify-email" element={<LibraryVerifyEmailPage />} />
+              {/* Admin Office Dashboard */}
+              <Route path="/admin" element={<AdminLayout />}>
+                <Route index element={<AdminHomePage />} />
+                <Route path="shops" element={<ShopManagementPage />} />
+                <Route path="fines" element={<FinesPage />} />
+                <Route path="audit" element={<AuditLogsPage />} />
+                <Route path="staff" element={<StaffAccountsPage />} />
+                <Route path="disputes" element={<DisputeOversightPage />} />
+                <Route path="disputes/detail" element={<AdminDisputeDetailPage />} />
+                <Route path="notifications" element={<AdminNotificationsPage />} />
+              </Route>
 
-        {/* Library Dashboard */}
-        <Route path="/library" element={<LibraryLayout />}>
-          <Route index element={<LibraryHomePage />} />
-          <Route path="lookup" element={<StudentLookupPage />} />
-          <Route path="fines/assign" element={<FineImpositionPage />} />
-          <Route path="fines/waive" element={<FineWaiverPage />} />
-          <Route path="clearance" element={<ClearanceStatusPage />} />
-          <Route path="disputes" element={<LibraryDisputesPage />} />
-          <Route path="disputes/detail" element={<LibraryDisputeDetailPage />} />
-          <Route path="notifications" element={<LibraryNotificationsPage />} />
-          <Route path="qr" element={<LibraryQrPage />} />
-          <Route path="profile" element={<LibraryProfilePage />} />
-        </Route>
+              {/* Library first-login onboarding — standalone, outside LibraryLayout (no nav chrome, mandatory) */}
+              <Route path="/library/change-password" element={<LibraryChangeTempPasswordPage />} />
+              <Route path="/library/verify-email" element={<LibraryVerifyEmailPage />} />
 
-        {/* Accounts Office Dashboard */}
-        <Route path="/accounts" element={<AccountsLayout />}>
-          <Route index element={<AccountsHomePage />} />
-          <Route path="fee-push" element={<SemesterFeePushPage />} />
-          <Route path="fee-wizard" element={<FeeWizardPage />} />
-          <Route path="ledger" element={<AccountsLedgerPage />} />
-          <Route path="adjustments" element={<FeeAdjustmentsPage />} />
-          <Route path="analytics" element={<CollectionAnalyticsPage />} />
-          <Route path="disputes" element={<DisputesDashboardPage />} />
-          <Route path="disputes/detail" element={<DisputeCaseDetailPage />} />
-          <Route path="disputes/reports" element={<DisputeReportsPage />} />
-          <Route path="notifications" element={<AccountsNotificationsPage />} />
-          <Route path="admin-fines" element={<AdministrativeFinesPage />} />
-          <Route path="qr" element={<AccountsQrPage />} />
-          <Route path="manual-payment" element={<ManualBankPaymentPage />} />
-        </Route>
+              {/* Library Dashboard */}
+              <Route path="/library" element={<LibraryLayout />}>
+                <Route index element={<LibraryHomePage />} />
+                <Route path="lookup" element={<StudentLookupPage />} />
+                <Route path="fines/assign" element={<FineImpositionPage />} />
+                <Route path="fines/waive" element={<FineWaiverPage />} />
+                <Route path="clearance" element={<ClearanceStatusPage />} />
+                <Route path="disputes" element={<LibraryDisputesPage />} />
+                <Route path="disputes/detail" element={<LibraryDisputeDetailPage />} />
+                <Route path="notifications" element={<LibraryNotificationsPage />} />
+                <Route path="qr" element={<LibraryQrPage />} />
+                <Route path="profile" element={<LibraryProfilePage />} />
+              </Route>
 
-        {/* Shop first-login onboarding — standalone, outside ShopLayout (no nav chrome, mandatory) */}
-        <Route path="/shop/change-password" element={<ShopChangeTempPasswordPage />} />
-        <Route path="/shop/verify-email" element={<ShopVerifyEmailPage />} />
+              {/* Accounts first-login onboarding — standalone, outside AccountsLayout (no nav chrome, mandatory) */}
+              <Route path="/accounts/change-password" element={<AccountsChangeTempPasswordPage />} />
+              <Route path="/accounts/verify-email" element={<AccountsVerifyEmailPage />} />
 
-        {/* Shop Dashboard */}
-        <Route path="/shop" element={<ShopLayout />}>
-          <Route index element={<ShopHomePage />} />
-          <Route path="qr" element={<ShopQrPage />} />
-          <Route path="notifications" element={<ShopNotificationsPage />} />
-          <Route path="ledger" element={<ShopSalesLedgerPage />} />
-          <Route path="disputes" element={<ShopDisputesPage />} />
-          <Route path="disputes/detail" element={<ShopDisputeDetailPage />} />
-          <Route path="profile" element={<ShopProfilePage />} />
-        </Route>
+              {/* Accounts Office Dashboard */}
+              <Route path="/accounts" element={<AccountsLayout />}>
+                <Route index element={<AccountsHomePage />} />
+                <Route path="settlements" element={<SettlementProcessingPage />} />
+                <Route path="fee-push" element={<SemesterFeePushPage />} />
+                <Route path="fee-wizard" element={<FeeWizardPage />} />
+                <Route path="ledger" element={<AccountsLedgerPage />} />
+                <Route path="adjustments" element={<FeeAdjustmentsPage />} />
+                <Route path="analytics" element={<CollectionAnalyticsPage />} />
+                <Route path="disputes" element={<DisputesDashboardPage />} />
+                <Route path="disputes/detail" element={<DisputeCaseDetailPage />} />
+                <Route path="disputes/reports" element={<DisputeReportsPage />} />
+                <Route path="notifications" element={<AccountsNotificationsPage />} />
+                <Route path="admin-fines" element={<AdministrativeFinesPage />} />
+                <Route path="qr" element={<AccountsQrPage />} />
+                <Route path="manual-payment" element={<ManualBankPaymentPage />} />
+                <Route path="profile" element={<AccountsProfilePage />} />
+                <Route path="wallet" element={<AccountsWalletPage />} />
+              </Route>
 
-        <Route path="/terms" element={<TermsPage />} />
-        <Route path="/privacy" element={<PrivacyPage />} />
+              {/* Shop first-login onboarding — standalone, outside ShopLayout (no nav chrome, mandatory) */}
+              <Route path="/shop/change-password" element={<ShopChangeTempPasswordPage />} />
+              <Route path="/shop/verify-email" element={<ShopVerifyEmailPage />} />
 
-        <Route path="*" element={<Navigate to="/" replace />} />
-      </Routes>
-      </Suspense>
-      <Toaster />
-    </BrowserRouter>
-    </AuthProvider>
+              {/* Shop Dashboard */}
+              <Route path="/shop" element={<ShopLayout />}>
+                <Route index element={<ShopHomePage />} />
+                <Route path="settlements" element={<ShopSettlementsPage />} />
+                <Route path="qr" element={<ShopQrPage />} />
+                <Route path="notifications" element={<ShopNotificationsPage />} />
+                <Route path="ledger" element={<ShopSalesLedgerPage />} />
+                <Route path="disputes" element={<ShopDisputesPage />} />
+                <Route path="disputes/detail" element={<ShopDisputeDetailPage />} />
+                <Route path="profile" element={<ShopProfilePage />} />
+              </Route>
+
+              <Route path="/terms" element={<TermsPage />} />
+              <Route path="/privacy" element={<PrivacyPage />} />
+
+              <Route path="*" element={<Navigate to="/" replace />} />
+            </Routes>
+          </Suspense>
+          <Toaster />
+        </BrowserRouter>
+      </AuthProvider>
     </GoogleOAuthProvider>
   );
 }

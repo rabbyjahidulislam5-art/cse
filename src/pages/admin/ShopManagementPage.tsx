@@ -41,15 +41,49 @@ export default function ShopManagementPage() {
   const [settleNotes, setSettleNotes] = useState('');
   const [settling, setSettling] = useState(false);
 
+  // Settlement Request Approval State
+  const [settlementRequests, setSettlementRequests] = useState<any[]>([]);
+  const [selectedRequest, setSelectedRequest] = useState<any | null>(null);
+  const [reviewAction, setReviewAction] = useState<'approve' | 'under_verification' | 'reject'>('approve');
+  const [adminRemarks, setAdminRemarks] = useState('');
+  const [reviewing, setReviewing] = useState(false);
+
   const loadShops = () => {
     setLoading(true);
-    getAdminShops({ search: '' })
-      .then(d => setShops(d.shops))
-      .catch(() => toast.error('Failed to load shops'))
+    Promise.all([
+      getAdminShops({ search: '' }),
+      import('@/lib/api').then(m => m.getAdminSettlementRequests({ status: 'all' })),
+    ])
+      .then(([shopRes, reqRes]) => {
+        setShops(shopRes.shops);
+        setSettlementRequests(reqRes.requests || []);
+      })
+      .catch(() => toast.error('Failed to load shop data'))
       .finally(() => setLoading(false));
   };
 
   useEffect(() => { loadShops(); }, []);
+
+  const handleReviewSettlement = async () => {
+    if (!selectedRequest) return;
+    setReviewing(true);
+    try {
+      const { reviewAdminSettlementRequest } = await import('@/lib/api');
+      const res = await reviewAdminSettlementRequest({
+        requestId: selectedRequest.id,
+        action: reviewAction,
+        remarks: adminRemarks,
+      });
+      toast.success(res.message);
+      setSelectedRequest(null);
+      setAdminRemarks('');
+      loadShops();
+    } catch (e: any) {
+      toast.error(e.message || 'Failed to review settlement request');
+    } finally {
+      setReviewing(false);
+    }
+  };
 
   const filtered = useMemo(() => {
     let list = shops;
@@ -151,14 +185,71 @@ export default function ShopManagementPage() {
       <FadeIn>
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-6">
           <div>
-            <h1 className="text-xl font-bold text-foreground">Shop Management</h1>
-            <p className="text-sm text-muted-foreground mt-0.5">{shops.length} shops registered</p>
+            <h1 className="text-xl font-bold text-foreground">Shop Management & Settlement Oversight</h1>
+            <p className="text-sm text-muted-foreground mt-0.5">{shops.length} shops registered · {settlementRequests.filter(r => ['PendingReview', 'UnderVerification'].includes(r.status)).length} pending settlement approvals</p>
           </div>
           <Button onClick={openCreate} size="sm" className="shadow-lg shadow-primary/20 shrink-0 self-start sm:self-auto">
             <Plus className="w-4 h-4 mr-1.5" /> Add Shop
           </Button>
         </div>
       </FadeIn>
+
+      {/* Pending Settlement Requests Panel */}
+      {settlementRequests.filter(r => ['PendingReview', 'UnderVerification'].includes(r.status)).length > 0 && (
+        <FadeIn delay={0.03}>
+          <div className="mb-6 rounded-2xl border border-amber-500/30 bg-amber-500/5 p-5 space-y-3">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2 text-amber-500">
+                <Landmark className="w-5 h-5" />
+                <h2 className="text-sm font-bold uppercase tracking-wider">Settlement Requests Awaiting Admin Approval</h2>
+              </div>
+              <span className="px-2.5 py-0.5 rounded-full text-xs font-bold bg-amber-500/20 text-amber-500">
+                {settlementRequests.filter(r => ['PendingReview', 'UnderVerification'].includes(r.status)).length} Pending
+              </span>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              {settlementRequests
+                .filter(r => ['PendingReview', 'UnderVerification'].includes(r.status))
+                .map(r => (
+                  <div
+                    key={r.id}
+                    className="p-4 rounded-xl bg-card border border-border/60 flex flex-col justify-between gap-3"
+                  >
+                    <div className="flex items-start justify-between gap-2">
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <span className="font-bold text-foreground text-sm">{r.shop?.name || 'Shop'}</span>
+                          <StatusBadge status={r.status} />
+                        </div>
+                        <p className="text-xs text-muted-foreground font-mono mt-0.5">{r.reference}</p>
+                      </div>
+                      <span className="text-base font-extrabold text-foreground tabular">৳{r.requestedAmount.toLocaleString()}</span>
+                    </div>
+
+                    <div className="text-xs text-muted-foreground space-y-0.5 bg-accent/30 p-2.5 rounded-lg">
+                      <p>Bank: <strong className="text-foreground">{r.bankName || 'Not specified'}</strong> ({r.bankAccountNumber || 'N/A'})</p>
+                      <p>Holder: {r.bankAccountName || 'N/A'}</p>
+                      {r.notes && <p className="italic text-foreground mt-1">"{r.notes}"</p>}
+                    </div>
+
+                    <Button
+                      onClick={() => {
+                        setSelectedRequest(r);
+                        setReviewAction('approve');
+                        setAdminRemarks('');
+                      }}
+                      size="sm"
+                      className="w-full shadow-md"
+                    >
+                      Review & Process Approval
+                    </Button>
+                  </div>
+                ))}
+            </div>
+          </div>
+        </FadeIn>
+      )}
 
       <FadeIn delay={0.05}>
         <div className="flex flex-col sm:flex-row gap-3 mb-5">
@@ -311,8 +402,8 @@ export default function ShopManagementPage() {
               {confirmAction?.action === 'remove'
                 ? `"${confirmAction?.shop.name}" will be permanently removed from the directory.`
                 : confirmAction?.action === 'suspend'
-                ? `"${confirmAction?.shop.name}" will be temporarily suspended.`
-                : `"${confirmAction?.shop.name}" will be reactivated.`}
+                  ? `"${confirmAction?.shop.name}" will be temporarily suspended.`
+                  : `"${confirmAction?.shop.name}" will be reactivated.`}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
@@ -354,6 +445,118 @@ export default function ShopManagementPage() {
               Record Settlement
             </Button>
           </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Review Settlement Request Dialog */}
+      <Dialog open={!!selectedRequest} onOpenChange={(o) => !o && setSelectedRequest(null)}>
+        <DialogContent className="max-w-md bg-card border-border/60">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 font-mono">
+              Review Settlement: {selectedRequest?.reference}
+            </DialogTitle>
+            <DialogDescription>
+              Review details submitted by {selectedRequest?.shop?.name || 'Shop'} and take administrative action.
+            </DialogDescription>
+          </DialogHeader>
+
+          {selectedRequest && (
+            <div className="space-y-4 py-2 text-xs">
+              <div className="p-4 rounded-xl bg-accent/30 border border-border/40 space-y-2">
+                <div className="flex justify-between items-center">
+                  <span className="text-muted-foreground">Requested Amount:</span>
+                  <span className="text-base font-extrabold text-foreground tabular">৳{selectedRequest.requestedAmount?.toLocaleString()}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">Shop:</span>
+                  <span className="font-semibold text-foreground">{selectedRequest.shop?.name}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">Requested By:</span>
+                  <span className="font-semibold text-foreground">{selectedRequest.requestedBy?.fullName} ({selectedRequest.requestedBy?.email})</span>
+                </div>
+                <div className="flex justify-between border-t border-border/40 pt-2">
+                  <span className="text-muted-foreground">Bank Name:</span>
+                  <span className="font-medium text-foreground">{selectedRequest.bankName || 'Not specified'}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">Account Number:</span>
+                  <span className="font-mono text-foreground">{selectedRequest.bankAccountNumber || 'N/A'}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">Account Holder:</span>
+                  <span className="font-medium text-foreground">{selectedRequest.bankAccountName || 'N/A'}</span>
+                </div>
+                {selectedRequest.notes && (
+                  <div className="pt-2 border-t border-border/40">
+                    <span className="text-muted-foreground block mb-0.5">Shop Note:</span>
+                    <p className="italic text-foreground">{selectedRequest.notes}</p>
+                  </div>
+                )}
+              </div>
+
+              <div className="space-y-1.5">
+                <Label className="text-xs font-semibold">Administrative Decision</Label>
+                <div className="grid grid-cols-3 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setReviewAction('approve')}
+                    className={`p-2.5 rounded-xl border text-center font-semibold transition-all ${
+                      reviewAction === 'approve'
+                        ? 'bg-emerald-500/10 border-emerald-500 text-emerald-500 shadow-sm'
+                        : 'bg-accent/40 border-border/60 text-muted-foreground hover:text-foreground'
+                    }`}
+                  >
+                    Approve
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setReviewAction('under_verification')}
+                    className={`p-2.5 rounded-xl border text-center font-semibold transition-all ${
+                      reviewAction === 'under_verification'
+                        ? 'bg-amber-500/10 border-amber-500 text-amber-500 shadow-sm'
+                        : 'bg-accent/40 border-border/60 text-muted-foreground hover:text-foreground'
+                    }`}
+                  >
+                    Verify
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setReviewAction('reject')}
+                    className={`p-2.5 rounded-xl border text-center font-semibold transition-all ${
+                      reviewAction === 'reject'
+                        ? 'bg-destructive/10 border-destructive text-destructive shadow-sm'
+                        : 'bg-accent/40 border-border/60 text-muted-foreground hover:text-foreground'
+                    }`}
+                  >
+                    Reject
+                  </button>
+                </div>
+              </div>
+
+              <div className="space-y-1.5">
+                <Label className="text-xs">Admin Remarks / Instructions</Label>
+                <Textarea
+                  value={adminRemarks}
+                  onChange={e => setAdminRemarks(e.target.value)}
+                  placeholder={reviewAction === 'approve' ? 'Optional instructions for Accounts Office...' : 'Reason for rejection or verification request...'}
+                  className="bg-accent/50 border-border/60 resize-none h-20 text-xs"
+                />
+              </div>
+
+              <DialogFooter className="pt-2">
+                <Button variant="outline" onClick={() => setSelectedRequest(null)} disabled={reviewing}>Cancel</Button>
+                <Button
+                  onClick={handleReviewSettlement}
+                  disabled={reviewing}
+                  className={reviewAction === 'reject' ? 'bg-destructive text-destructive-foreground hover:bg-destructive/90' : ''}
+                >
+                  {reviewing ? <Loader2 className="w-4 h-4 mr-1.5 animate-spin" /> : <CheckCircle className="w-4 h-4 mr-1.5" />}
+                  Confirm {reviewAction === 'approve' ? 'Approval' : reviewAction === 'reject' ? 'Rejection' : 'Verification'}
+                </Button>
+              </DialogFooter>
+            </div>
+          )}
         </DialogContent>
       </Dialog>
     </div>

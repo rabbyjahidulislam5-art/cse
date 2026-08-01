@@ -79,19 +79,24 @@ export default function ShopHomePage() {
         </motion.button>
       </div>
 
-      <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.08 }} className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-6">
-        <div className="rounded-xl border border-border/60 bg-card p-4">
-          <div className="flex items-center gap-1.5 mb-1"><Wallet className="w-3.5 h-3.5 text-primary" /><p className="text-xs text-muted-foreground">Wallet Balance</p></div>
-          <p className="text-lg font-bold text-primary tabular">৳{(data?.wallet?.balance || 0).toLocaleString()}</p>
-        </div>
+      <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.08 }} className="grid grid-cols-2 sm:grid-cols-3 gap-3 mb-6">
         <div className="rounded-xl border border-border/60 bg-card p-4">
           <div className="flex items-center gap-1.5 mb-1"><span className="text-sm font-bold text-muted-foreground leading-none">৳</span><p className="text-xs text-muted-foreground">Total Received</p></div>
           <p className="text-lg font-bold text-foreground tabular">৳{(data?.totalRevenue || 0).toLocaleString()}</p>
         </div>
-        <div className="rounded-xl border border-border/60 bg-card p-4">
-          <div className="flex items-center gap-1.5 mb-1"><Clock className="w-3.5 h-3.5 text-[hsl(var(--chart-4))]" /><p className="text-xs text-muted-foreground">Pending Settlement</p></div>
+        <button
+          onClick={() => navigate('/shop/settlements')}
+          className="rounded-xl border border-border/60 bg-card p-4 text-left hover:border-primary/40 transition-all group"
+        >
+          <div className="flex items-center justify-between gap-1 mb-1">
+            <div className="flex items-center gap-1.5">
+              <Clock className="w-3.5 h-3.5 text-[hsl(var(--chart-4))]" />
+              <p className="text-xs text-muted-foreground">Pending Settlement</p>
+            </div>
+            <span className="text-[10px] text-primary font-semibold group-hover:underline">Request →</span>
+          </div>
           <p className="text-lg font-bold text-[hsl(var(--chart-4))] tabular">৳{(data?.pendingSettlement || 0).toLocaleString()}</p>
-        </div>
+        </button>
         <div className="rounded-xl border border-border/60 bg-card p-4">
           <div className="flex items-center gap-1.5 mb-1"><Landmark className="w-3.5 h-3.5 text-[hsl(var(--chart-3))]" /><p className="text-xs text-muted-foreground">Settled</p></div>
           <p className="text-lg font-bold text-[hsl(var(--chart-3))] tabular">৳{(data?.totalSettled || 0).toLocaleString()}</p>

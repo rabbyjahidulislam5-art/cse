@@ -21,7 +21,8 @@ const prisma = new PrismaClient();
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } });
 const requireAccounts = requireRole('Accounts Office', 'Admin Office');
 
-router.use(authMiddleware, requireAccounts);
+router.use('/advising', authMiddleware, requireAccounts);
+router.use('/accounts', authMiddleware, requireAccounts);
 
 function getAuthUser(req: AuthRequest) {
   return req.user!;

@@ -233,7 +233,7 @@ export default function AddMoneyModal({ open, onOpenChange }: AddMoneyModalProps
       <OtpDialog
         open={otpOpen}
         onOpenChange={setOtpOpen}
-        purpose="Payment"
+        purpose="Large Payment"
         onSuccess={onOtpVerified}
       />
     </>

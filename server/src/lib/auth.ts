@@ -67,6 +67,7 @@ export async function authMiddleware(req: AuthRequest, res: Response, next: Next
 export function requireRole(...roles: string[]) {
   return (req: AuthRequest, res: Response, next: NextFunction) => {
     if (!req.user || !roles.includes(req.user.role || '')) {
+      console.log('Role mismatch: req.user.role =', req.user?.role, ', expected =', roles);
       return res.status(403).json({ message: 'You do not have permission to perform this action.' });
     }
     next();

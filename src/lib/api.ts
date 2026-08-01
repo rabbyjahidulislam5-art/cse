@@ -268,7 +268,7 @@ export const markNotificationRead = (input: { id?: string; source?: 'general' | 
   apiCall<{ success: boolean }>('/notifications/mark-read', input);
 
 export const getReceipt = (input: { transactionId: string }) =>
-  apiCall<{ url: string; [key: string]: any }>('/receipt', input);
+  apiCall<{ url: string;[key: string]: any }>('/receipt', input);
 
 export const lookupTransferRecipient = (input: { recipientIdentifier: string }) =>
   apiCall<{ found: boolean; recipient: { id: string; fullName: string; email: string; studentId: string; department: string; batch: string } }>('/transfer/lookup', input);
@@ -669,3 +669,159 @@ export const validateLibraryQr = (input: { qrData: string }) =>
 
 export const createLibraryQrPayment = (input: { amount: number }) =>
   apiCall<{ success: boolean; fineId: string }>('/library/qr/create-payment', input);
+
+// ─── Settlement Workflow & Accounts Office Endpoints ───
+
+export type SettlementRequestItem = {
+  id: string;
+  reference: string;
+  requestedAmount: number;
+  status: 'PendingReview' | 'UnderVerification' | 'Approved' | 'Rejected' | 'ProcessingPayment' | 'Paid' | 'Failed';
+  notes: string;
+  adminRemarks: string;
+  failureReason: string;
+  createdAt: string;
+  paidAt: string | null;
+  bankAccountName?: string;
+  bankAccountNumber?: string;
+  bankName?: string;
+  bankBranch?: string;
+  bankRoutingNumber?: string;
+  adminReviewer?: string | null;
+  accountsProcessor?: string | null;
+  shop?: { id: string; name: string; category: string; merchantId?: string; logoUrl?: string };
+  requestedBy?: { id: string; fullName: string; email: string; phone?: string };
+};
+
+export type SettlementTimelineItem = {
+  id: string;
+  fromStatus: string;
+  toStatus: string;
+  reason: string | null;
+  createdAt: string;
+  changedBy: { id: string; fullName: string; email: string; role: string };
+};
+
+export type GetShopSettlementsOutputType = {
+  requests: SettlementRequestItem[];
+  pendingBalance: number;
+  statusCounts: Record<string, number>;
+};
+
+export type GetAdminSettlementRequestsOutputType = {
+  requests: SettlementRequestItem[];
+  statusCounts: Record<string, number>;
+};
+
+export type GetAccountsProfileOutputType = {
+  user: {
+    id: string;
+    fullName: string;
+    email: string;
+    phone: string;
+    department: string;
+    role: string;
+    employeeId: string;
+    designation: string;
+    joiningDate: string;
+    status: string;
+    profilePicture: string;
+    bio: string;
+    lastLogin: string | null;
+    pinSet: boolean;
+    pinLength: number;
+    mustChangePassword: boolean;
+    emailVerified: boolean;
+  };
+  wallet: {
+    id: string;
+    walletId: string;
+    balance: number;
+  };
+};
+
+export type GetAccountsWalletOutputType = {
+  wallet: {
+    id: string;
+    walletId: string;
+    balance: number;
+    dailyTransferLimit: number;
+    dailyTransferred: number;
+    frozen: boolean;
+  };
+  recentTransactions: Array<{
+    id: string;
+    reference: string;
+    type: string;
+    direction: string;
+    amount: number;
+    status: string;
+    description: string;
+    createdAt: string;
+  }>;
+};
+
+// Shop Settlement APIs
+export const createShopSettlementRequest = (input: {
+  requestedAmount: number;
+  bankAccountName?: string;
+  bankAccountNumber?: string;
+  bankName?: string;
+  bankBranch?: string;
+  bankRoutingNumber?: string;
+  notes?: string;
+}) => apiCall<{ success: boolean; message: string; request: SettlementRequestItem }>('/shop/settlement/request', input);
+
+export const getShopSettlements = (input: { status?: string } = {}) =>
+  apiCall<GetShopSettlementsOutputType>('/shop/settlement/list', input);
+
+export const getShopSettlementDetail = (input: { requestId: string }) =>
+  apiCall<{ request: SettlementRequestItem; timeline: SettlementTimelineItem[] }>('/shop/settlement/detail', input);
+
+export const updateShopBankInfo = (input: {
+  bankAccountName?: string;
+  bankAccountNumber?: string;
+  bankName?: string;
+  bankBranch?: string;
+  bankRoutingNumber?: string;
+}) => apiCall<{ success: boolean; message: string }>('/shop/bank-info/update', input);
+
+// Admin Settlement APIs
+export const getAdminSettlementRequests = (input: { status?: string; search?: string } = {}) =>
+  apiCall<GetAdminSettlementRequestsOutputType>('/admin/settlement-requests', input);
+
+export const reviewAdminSettlementRequest = (input: {
+  requestId: string;
+  action: 'under_verification' | 'approve' | 'reject';
+  remarks?: string;
+}) => apiCall<{ success: boolean; message: string; request: SettlementRequestItem }>('/admin/settlement-requests/review', input);
+
+export const getAdminSettlementDetail = (input: { requestId: string }) =>
+  apiCall<{ request: SettlementRequestItem; timeline: SettlementTimelineItem[]; previousSettlements: Array<{ id: string; amount: number; notes: string; settledAt: string }> }>('/admin/settlement-requests/detail', input);
+
+// Accounts Settlement APIs
+export const getAccountsSettlements = (input: { status?: string; search?: string } = {}) =>
+  apiCall<GetAdminSettlementRequestsOutputType>('/accounts/settlements', input);
+
+export const getAccountsSettlementDetail = (input: { requestId: string }) =>
+  apiCall<{ request: SettlementRequestItem; timeline: SettlementTimelineItem[]; previousSettlements: Array<{ id: string; amount: number; notes: string; settledAt: string }> }>('/accounts/settlements/detail', input);
+
+export const processAccountsSettlementOtp = (input: Record<string, unknown> = {}) =>
+  apiCall<{ success: boolean; message: string; otpId: string }>('/accounts/settlements/process-otp', input);
+
+export const verifyAccountsSettlementOtp = (input: { otpId: string; code: string }) =>
+  apiCall<{ success: boolean; message: string }>('/accounts/settlements/verify-otp', input);
+
+export const executeAccountsSettlementPayment = (input: { requestId: string; otpVerified: boolean; referenceNotes?: string }) =>
+  apiCall<{ success: boolean; message: string; request: SettlementRequestItem; paymentReference: string; sslcommerzTranId: string }>('/accounts/settlements/execute-payment', input);
+
+// Accounts Profile & Wallet APIs
+export const getAccountsProfile = (input: Record<string, unknown> = {}) =>
+  apiCall<GetAccountsProfileOutputType>('/accounts/profile', input);
+
+export const updateAccountsProfile = (input: { fullName?: string; phone?: string; bio?: string; profilePicture?: string; designation?: string; employeeId?: string }) =>
+  apiCall<{ success: boolean; message: string }>('/accounts/profile/update', input);
+
+export const getAccountsWallet = (input: Record<string, unknown> = {}) =>
+  apiCall<GetAccountsWalletOutputType>('/accounts/wallet', input);
+

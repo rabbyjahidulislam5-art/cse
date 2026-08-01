@@ -1,5 +1,5 @@
 import { Outlet, NavLink, useNavigate } from 'react-router-dom';
-import { Home, Users, BookOpen, FileText, ScrollText, LogOut, Landmark, Receipt, BarChart3, ShieldAlert, QrCode, Banknote } from 'lucide-react';
+import { Home, Users, BookOpen, FileText, ScrollText, LogOut, Landmark, Receipt, BarChart3, ShieldAlert, QrCode, Banknote, UserCheck, Wallet, ArrowUpRight } from 'lucide-react';
 import { useAuth } from '@/lib/auth-context';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger, DropdownMenuSeparator } from '@/components/ui/dropdown-menu';
 import { motion } from 'framer-motion';
@@ -11,8 +11,8 @@ import { MoreMenuDesktop, MoreMenuMobile, type MoreMenuItem } from '@/components
 
 const primaryNavItems = [
   { to: '/accounts', icon: Home, label: 'Home', end: true },
+  { to: '/accounts/settlements', icon: ArrowUpRight, label: 'Settlement' },
   { to: '/accounts/fee-wizard', icon: Users, label: 'Fee Push' },
-  { to: '/accounts/qr', icon: QrCode, label: 'QR' },
   { to: '/accounts/disputes', icon: ScrollText, label: 'Disputes' },
 ];
 
@@ -29,7 +29,14 @@ export default function AccountsLayout() {
     if (user && (user as any).role !== 'Accounts Office') navigate('/', { replace: true });
   }, [user, navigate]);
 
-  const fetchBadge = () => getDisputeBadgeCounts().then(r => setPendingCases(r.pendingCases)).catch(() => {});
+  // Mandatory first-login onboarding — password change + email verification
+  useEffect(() => {
+    if (!user || (user as any).role !== 'Accounts Office') return;
+    if (user.mustChangePassword) { navigate('/accounts/change-password', { replace: true }); return; }
+    if (!user.emailVerified) { navigate('/accounts/verify-email', { replace: true }); return; }
+  }, [user, navigate]);
+
+  const fetchBadge = () => getDisputeBadgeCounts().then(r => setPendingCases(r.pendingCases)).catch(() => { });
   useEffect(() => {
     if (!user) return;
     fetchBadge();
@@ -40,11 +47,13 @@ export default function AccountsLayout() {
   useDisputeSocket(() => fetchBadge());
 
   const overflowItems: MoreMenuItem[] = [
+    { to: '/accounts/qr', icon: QrCode, label: 'Payment QR' },
     { to: '/accounts/adjustments', icon: Receipt, label: 'Adjust' },
     { to: '/accounts/analytics', icon: BarChart3, label: 'Analytics' },
     { to: '/accounts/ledger', icon: BookOpen, label: 'Ledger' },
     { to: '/accounts/admin-fines', icon: ShieldAlert, label: 'Admin Fines' },
     { to: '/accounts/manual-payment', icon: Banknote, label: 'Bank Payment' },
+    { to: '/accounts/profile', icon: UserCheck, label: 'Profile' },
   ];
 
   if (isLoading || !user || (user as any).role !== 'Accounts Office') return null;
@@ -84,25 +93,29 @@ export default function AccountsLayout() {
           </div>
 
           <div className="flex items-center gap-2">
-          <NotificationBell to="/accounts/notifications" />
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <button className="w-9 h-9 rounded-xl bg-gradient-to-br from-[hsl(var(--chart-4))]/20 to-[hsl(var(--chart-4))]/10 flex items-center justify-center text-sm font-bold text-[hsl(var(--chart-4))] hover:from-[hsl(var(--chart-4))]/30 hover:to-[hsl(var(--chart-4))]/20 transition-all ring-1 ring-[hsl(var(--chart-4))]/20">
-                {user?.firstName?.charAt(0) || 'A'}
-              </button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" className="w-56 glass-strong rounded-xl p-1.5">
-              <div className="px-3 py-2.5">
-                <p className="text-sm font-semibold text-foreground">{user?.fullName || 'Accounts'}</p>
-                <p className="text-xs text-muted-foreground truncate mt-0.5">{user?.email}</p>
-                <p className="text-[10px] text-[hsl(var(--chart-4))] font-medium mt-1">Accounts Office</p>
-              </div>
-              <DropdownMenuSeparator className="bg-border/50" />
-              <DropdownMenuItem onClick={() => logout({ returnTo: window.location.origin })} className="text-destructive focus:text-destructive rounded-lg">
-                <LogOut className="w-4 h-4 mr-2" /> Sign Out
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
+            <NotificationBell to="/accounts/notifications" />
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <button className="w-9 h-9 rounded-xl bg-gradient-to-br from-[hsl(var(--chart-4))]/20 to-[hsl(var(--chart-4))]/10 flex items-center justify-center text-sm font-bold text-[hsl(var(--chart-4))] hover:from-[hsl(var(--chart-4))]/30 hover:to-[hsl(var(--chart-4))]/20 transition-all ring-1 ring-[hsl(var(--chart-4))]/20">
+                  {user?.firstName?.charAt(0) || 'A'}
+                </button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="w-56 glass-strong rounded-xl p-1.5">
+                <div className="px-3 py-2.5">
+                  <p className="text-sm font-semibold text-foreground">{user?.fullName || 'Accounts'}</p>
+                  <p className="text-xs text-muted-foreground truncate mt-0.5">{user?.email}</p>
+                  <p className="text-[10px] text-[hsl(var(--chart-4))] font-medium mt-1">Accounts Office</p>
+                </div>
+                <DropdownMenuSeparator className="bg-border/50" />
+                <DropdownMenuItem onClick={() => navigate('/accounts/profile')} className="rounded-lg">
+                  <UserCheck className="w-4 h-4 mr-2" /> Profile
+                </DropdownMenuItem>
+                <DropdownMenuSeparator className="bg-border/50" />
+                <DropdownMenuItem onClick={() => logout({ returnTo: window.location.origin })} className="text-destructive focus:text-destructive rounded-lg">
+                  <LogOut className="w-4 h-4 mr-2" /> Sign Out
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
           </div>
         </div>
       </nav>

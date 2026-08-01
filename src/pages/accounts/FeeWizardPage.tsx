@@ -284,12 +284,13 @@ export default function FeeWizardPage() {
 
             <div>
               <Label className="text-xs font-semibold text-muted-foreground">Academic Year *</Label>
-              <Select value={academicYear} onValueChange={setAcademicYear}>
-                <SelectTrigger className="mt-1.5 bg-accent/40"><SelectValue /></SelectTrigger>
-                <SelectContent className="glass-strong">
-                  {ACADEMIC_YEARS.map(y => <SelectItem key={y} value={y}>{y}</SelectItem>)}
-                </SelectContent>
-              </Select>
+              <Input
+                type="text"
+                placeholder="e.g. 2026"
+                value={academicYear}
+                onChange={e => setAcademicYear(e.target.value)}
+                className="mt-1.5 bg-accent/40 border-border/60 focus:border-primary"
+              />
             </div>
           </div>
 

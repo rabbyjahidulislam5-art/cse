@@ -61,17 +61,17 @@ export default function AccountsHomePage() {
         </motion.button>
       </div>
 
-      <div className="grid grid-cols-3 gap-3">
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
         {[
           { label: 'Total Assigned', value: `৳${(data?.totalAssigned || 0).toLocaleString()}`, icon: TrendingUp, color: 'text-primary' },
-          { label: 'Total Paid', value: `৳${(data?.totalPaid || 0).toLocaleString()}`, icon: TakaIcon, color: 'text-[hsl(var(--chart-3))]' },
+          { label: 'Total Received', value: `৳${(data?.totalPaid || 0).toLocaleString()}`, icon: TakaIcon, color: 'text-[hsl(var(--chart-3))]' },
           { label: 'Total Students', value: String(data?.totalStudents || 0), icon: Users, color: 'text-[hsl(var(--chart-4))]' },
         ].map((s, i) => (
           <motion.div key={s.label} initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.1 + i * 0.05 }}
-            className="p-4 rounded-xl border border-border/60 bg-card text-center">
-            <s.icon className={`w-5 h-5 mx-auto mb-2 ${s.color}`} />
-            <p className="text-lg font-bold text-foreground tabular">{s.value}</p>
-            <p className="text-[10px] text-muted-foreground">{s.label}</p>
+            className="p-4 sm:p-6 rounded-2xl border border-border/60 bg-card flex flex-col sm:block items-center justify-center sm:text-center gap-1 sm:gap-0">
+            <s.icon className={`w-6 h-6 sm:w-5 sm:h-5 sm:mx-auto sm:mb-2 ${s.color}`} />
+            <p className="text-2xl sm:text-lg font-bold text-foreground tabular">{s.value}</p>
+            <p className="text-xs sm:text-[10px] text-muted-foreground">{s.label}</p>
           </motion.div>
         ))}
       </div>

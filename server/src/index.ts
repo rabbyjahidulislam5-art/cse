@@ -30,6 +30,7 @@ import libraryDisputeRouter from './routes/disputes/library';
 import shopDisputeRouter from './routes/disputes/shop';
 import { disputeNotificationsRouter } from './routes/disputes/shared';
 import feeRouter from './routes/fees.js';
+import settlementRouter from './routes/settlements.js';
 import { attachRealtime } from './lib/realtime';
 
 // Abuse backstops for the two payment-confirmation entry points. Render's free tier runs a
@@ -199,7 +200,7 @@ router.post('/auth/register-otp', async (req, res) => {
       emailPromise.then(r => {
         if (!r.ok) {
           console.error(`[register-otp] Background email send ultimately FAILED for ${lowerEmail}:`, r.err.message);
-          prisma.otpCode.delete({ where: { id: otp.id } }).catch(() => {});
+          prisma.otpCode.delete({ where: { id: otp.id } }).catch(() => { });
         } else {
           console.log(`[register-otp] Background email send for ${lowerEmail} succeeded after the response was already sent.`);
         }
@@ -207,7 +208,7 @@ router.post('/auth/register-otp', async (req, res) => {
     } else {
       mark('emailSend');
       if (!result.ok) {
-        await prisma.otpCode.delete({ where: { id: otp.id } }).catch(() => {});
+        await prisma.otpCode.delete({ where: { id: otp.id } }).catch(() => { });
         timings.total = Date.now() - requestStart;
         console.log(`[register-otp] TIMINGS (failed) for ${lowerEmail}:`, timings);
         return res.status(502).json({ message: `Could not send the verification email: ${result.err.message} Please check the server's email configuration.` });
@@ -541,7 +542,7 @@ router.post('/auth/forgot-password/otp', async (req, res) => {
       emailPromise.then(r => {
         if (!r.ok) {
           console.error(`[forgot-password/otp] Background email send ultimately FAILED for ${user.email}:`, r.err.message);
-          prisma.otpCode.delete({ where: { id: otp.id } }).catch(() => {});
+          prisma.otpCode.delete({ where: { id: otp.id } }).catch(() => { });
         } else {
           console.log(`[forgot-password/otp] Background email send for ${user.email} succeeded after the response was already sent.`);
         }
@@ -549,7 +550,7 @@ router.post('/auth/forgot-password/otp', async (req, res) => {
     } else {
       mark('emailSend');
       if (!result.ok) {
-        await prisma.otpCode.delete({ where: { id: otp.id } }).catch(() => {});
+        await prisma.otpCode.delete({ where: { id: otp.id } }).catch(() => { });
         timings.total = Date.now() - requestStart;
         console.log(`[forgot-password/otp] TIMINGS (failed) for ${user.email}:`, timings);
         return res.status(502).json({ message: `Could not send the reset email: ${result.err.message} Please check the server's email configuration.` });
@@ -652,7 +653,7 @@ router.post('/auth/change-password', authMiddleware, passwordChangeLimiter, asyn
 // /auth/register-otp and /auth/forgot-password/reset above, `purpose: 'ShopEmailVerify'`. Route
 // path/purpose string kept as-is for backward compatibility with the Shop frontend; widened to
 // also cover Library Staff's own onboarding gate rather than duplicating this logic per role.
-router.post('/auth/shop/send-verification-otp', authMiddleware, requireRole('Shop Staff', 'Library'), passwordChangeLimiter, async (req: AuthRequest, res) => {
+router.post('/auth/shop/send-verification-otp', authMiddleware, requireRole('Shop Staff', 'Library', 'Accounts Office'), passwordChangeLimiter, async (req: AuthRequest, res) => {
   try {
     const user = await prisma.user.findUnique({ where: { id: req.user!.id } });
     if (!user || !user.email) return res.status(404).json({ message: 'User not found.' });
@@ -671,7 +672,7 @@ router.post('/auth/shop/send-verification-otp', authMiddleware, requireRole('Sho
         { type: 'text', content: '🎓 East West University — Smart Campus Digital Wallet' },
       ]);
     } catch (err: any) {
-      await prisma.otpCode.delete({ where: { id: otp.id } }).catch(() => {});
+      await prisma.otpCode.delete({ where: { id: otp.id } }).catch(() => { });
       return res.status(502).json({ message: `Could not send the verification email: ${err.message}` });
     }
 
@@ -681,7 +682,7 @@ router.post('/auth/shop/send-verification-otp', authMiddleware, requireRole('Sho
   }
 });
 
-router.post('/auth/shop/verify-email', authMiddleware, requireRole('Shop Staff', 'Library'), async (req: AuthRequest, res) => {
+router.post('/auth/shop/verify-email', authMiddleware, requireRole('Shop Staff', 'Library', 'Accounts Office'), async (req: AuthRequest, res) => {
   try {
     const { otpId, code } = req.body;
     if (!otpId || !code) return res.status(400).json({ message: 'OTP is required.' });
@@ -1085,7 +1086,7 @@ async function generateReceiptPdf(tx: {
 
   // Overwrite existing cached file if needed to fix previously corrupted PDF builds
   if (fs.existsSync(filepath)) {
-    try { fs.unlinkSync(filepath); } catch {}
+    try { fs.unlinkSync(filepath); } catch { }
   }
 
   await new Promise<void>((resolve, reject) => {
@@ -1507,7 +1508,7 @@ router.post('/otp/send', authMiddleware, async (req: AuthRequest, res) => {
       emailPromise.then(r => {
         if (!r.ok) {
           console.error(`[otp/send] Background email send ultimately FAILED for ${userEmail}:`, r.err.message);
-          prisma.otpCode.delete({ where: { id: otp.id } }).catch(() => {});
+          prisma.otpCode.delete({ where: { id: otp.id } }).catch(() => { });
         } else {
           console.log(`[otp/send] Background email send for ${userEmail} succeeded after the response was already sent.`);
         }
@@ -1515,7 +1516,7 @@ router.post('/otp/send', authMiddleware, async (req: AuthRequest, res) => {
     } else {
       mark('emailSend');
       if (!result.ok) {
-        await prisma.otpCode.delete({ where: { id: otp.id } }).catch(() => {});
+        await prisma.otpCode.delete({ where: { id: otp.id } }).catch(() => { });
         timings.total = Date.now() - requestStart;
         console.log(`[otp/send] TIMINGS (failed) for ${userEmail}:`, timings);
         return res.status(502).json({ message: `Could not send the verification email: ${result.err.message} Please check the server's email configuration.` });
@@ -1649,16 +1650,16 @@ function sslValidationUrl() {
 async function confirmSslPayment(reference: string, source: 'ipn' | 'browser-validate', rawPayload: unknown, ip?: string, deviceInfo?: string) {
   const tx = await prisma.transaction.findFirst({ where: { reference } });
   if (!tx) {
-    await prisma.paymentCallback.create({ data: { reference, source, rawPayload: JSON.stringify(rawPayload), verified: false, ipAddress: ip } }).catch(() => {});
+    await prisma.paymentCallback.create({ data: { reference, source, rawPayload: JSON.stringify(rawPayload), verified: false, ipAddress: ip } }).catch(() => { });
     return { status: 'failed' as const, message: 'Transaction not found' };
   }
 
   if (tx.status === 'Success') {
-    await prisma.paymentCallback.create({ data: { transactionId: tx.id, reference, source, rawPayload: JSON.stringify(rawPayload), sslStatus: 'ALREADY_CONFIRMED', verified: true, ipAddress: ip } }).catch(() => {});
+    await prisma.paymentCallback.create({ data: { transactionId: tx.id, reference, source, rawPayload: JSON.stringify(rawPayload), sslStatus: 'ALREADY_CONFIRMED', verified: true, ipAddress: ip } }).catch(() => { });
     return { status: 'valid' as const, message: 'Payment already confirmed' };
   }
   if (tx.status === 'Failed' || tx.status === 'Cancelled') {
-    await prisma.paymentCallback.create({ data: { transactionId: tx.id, reference, source, rawPayload: JSON.stringify(rawPayload), sslStatus: tx.status, verified: false, ipAddress: ip } }).catch(() => {});
+    await prisma.paymentCallback.create({ data: { transactionId: tx.id, reference, source, rawPayload: JSON.stringify(rawPayload), sslStatus: tx.status, verified: false, ipAddress: ip } }).catch(() => { });
     return { status: 'failed' as const, message: `Payment ${tx.status.toLowerCase()}` };
   }
 
@@ -1669,9 +1670,9 @@ async function confirmSslPayment(reference: string, source: 'ipn' | 'browser-val
     data = await response.json() as Record<string, unknown>;
   } catch (err: any) {
     console.error(`[confirmSslPayment] Validator call failed for ${reference} (source=${source}):`, err.message || err);
-    await prisma.paymentCallback.create({ data: { transactionId: tx.id, reference, source, rawPayload: JSON.stringify(rawPayload), sslStatus: 'VALIDATION_UNREACHABLE', verified: false, ipAddress: ip } }).catch(() => {});
+    await prisma.paymentCallback.create({ data: { transactionId: tx.id, reference, source, rawPayload: JSON.stringify(rawPayload), sslStatus: 'VALIDATION_UNREACHABLE', verified: false, ipAddress: ip } }).catch(() => { });
     if (Date.now() - tx.createdAt.getTime() > PENDING_TXN_TTL_MS) {
-      await prisma.transaction.update({ where: { id: tx.id }, data: { status: 'Cancelled' } }).catch(() => {});
+      await prisma.transaction.update({ where: { id: tx.id }, data: { status: 'Cancelled' } }).catch(() => { });
       return { status: 'failed' as const, message: 'Payment session expired. Please try again.' };
     }
     return { status: 'pending' as const, message: 'Could not reach the payment gateway validator. Please check again shortly.' };
@@ -1685,7 +1686,7 @@ async function confirmSslPayment(reference: string, source: 'ipn' | 'browser-val
 
   await prisma.paymentCallback.create({
     data: { transactionId: tx.id, reference, source, rawPayload: JSON.stringify({ callback: rawPayload, validation: data }), sslStatus: sslStatus || 'UNKNOWN', verified: false, ipAddress: ip },
-  }).catch(() => {});
+  }).catch(() => { });
 
   if (sslStatus === 'VALID' || sslStatus === 'VALIDATED') {
     if (Math.abs(amount - (tx.amount || 0)) > 1) {
@@ -1701,8 +1702,21 @@ async function confirmSslPayment(reference: string, source: 'ipn' | 'browser-val
     const cardType = (element?.card_type as string) || '';
     const payMethod = cardType.includes('bkash') ? 'bKash' : cardType.includes('nagad') ? 'Nagad' : cardType.includes('rocket') ? 'Rocket' : cardType.includes('visa') || cardType.includes('master') ? 'Card' : (cardType || 'Online');
 
+    let didProcess = false;
     // Step 8 Requirement: Wrap all verification writes inside one atomic database transaction
     await prisma.$transaction(async (txClient) => {
+      // ATOMIC CONCURRENCY GUARD: Only the single request that flips status from Pending -> Success claims ownership.
+      // Any concurrent IPN or browser-validate request arriving simultaneously receives count === 0 and exits immediately.
+      const claim = await txClient.transaction.updateMany({
+        where: { id: tx.id, status: 'Pending' },
+        data: { status: 'Success', gatewayTxnId: validId, bankTxnId: bankTranId, paymentMethod: payMethod, ipAddress: ip, deviceInfo: source === 'browser-validate' ? (deviceInfo || null) : null },
+      });
+
+      if (claim.count === 0) {
+        return; // Already processed by a concurrent IPN or browser-validate request!
+      }
+      didProcess = true;
+
       let items: PayItem[] = [];
       try { items = tx.itemsJson ? JSON.parse(tx.itemsJson) : []; } catch { items = []; }
       for (const item of items) await markItemPaid(item, reference, tx.userId, txClient);
@@ -1717,7 +1731,7 @@ async function confirmSslPayment(reference: string, source: 'ipn' | 'browser-val
         }
         await txClient.transaction.update({
           where: { id: tx.id },
-          data: { status: 'Success', gatewayTxnId: validId, bankTxnId: bankTranId, paymentMethod: payMethod, ipAddress: ip, deviceInfo: source === 'browser-validate' ? (deviceInfo || null) : null, balanceBefore, balanceAfter: balanceBefore + amount },
+          data: { balanceBefore, balanceAfter: balanceBefore + amount },
         });
       } else {
         const wallet = await txClient.wallet.findFirst({ where: { ownerId: tx.userId } });
@@ -1729,12 +1743,16 @@ async function confirmSslPayment(reference: string, source: 'ipn' | 'browser-val
         }
         await txClient.transaction.update({
           where: { id: tx.id },
-          data: { status: 'Success', gatewayTxnId: validId, bankTxnId: bankTranId, paymentMethod: payMethod, ipAddress: ip, deviceInfo: source === 'browser-validate' ? (deviceInfo || null) : null, balanceBefore, balanceAfter },
+          data: { balanceBefore, balanceAfter },
         });
       }
 
       await txClient.auditLog.create({ data: { action: 'SSLCommerz Payment Verified', actorId: tx.userId, entityType: 'Transaction', entityId: tx.id, details: `Amount: ৳${amount}, Purpose: ${tx.purpose}, Val ID: ${validId}, Source: ${source}`, ipAddress: ip } });
     }, { timeout: 30000, maxWait: 15000 });
+
+    if (!didProcess) {
+      return { status: 'valid' as const, message: 'Payment already confirmed' };
+    }
 
     try {
       const user = await prisma.user.findUnique({ where: { id: tx.userId } });
@@ -1766,7 +1784,7 @@ async function confirmSslPayment(reference: string, source: 'ipn' | 'browser-val
           link: '/shop/ledger',
           emailSubject: `Payment Received — ৳${amount.toLocaleString()} — Smart Campus`,
         });
-      })().catch(() => {});
+      })().catch(() => { });
     }
 
     // Library-side: Library has no per-payment owner (shared singleton, see Library model), so
@@ -1779,12 +1797,12 @@ async function confirmSslPayment(reference: string, source: 'ipn' | 'browser-val
         category: 'payment', type: 'library_fine.payment_received',
         title: 'Library Fine Paid', body: `A library fine payment of ৳${amount.toLocaleString()} was received. Reference: ${reference}.`,
         link: '/library',
-      }).catch(() => {});
+      }).catch(() => { });
       void notifyRole('Admin Office', {
         category: 'payment', type: 'library_fine.payment_received',
         title: 'Library Fine Paid', body: `A library fine payment of ৳${amount.toLocaleString()} was received. Reference: ${reference}.`,
         link: '/admin/fines',
-      }).catch(() => {});
+      }).catch(() => { });
     }
 
     // Accounts Office is the sole financial authority that collects/reconciles administrative
@@ -1797,12 +1815,12 @@ async function confirmSslPayment(reference: string, source: 'ipn' | 'browser-val
         category: 'payment', type: 'admin_fine.payment_received',
         title: 'Administrative Fine Paid', body: `An administrative fine payment of ৳${amount.toLocaleString()} was received. Reference: ${reference}.`,
         link: '/accounts/admin-fines',
-      }).catch(() => {});
+      }).catch(() => { });
       void notifyRole('Admin Office', {
         category: 'payment', type: 'admin_fine.payment_received',
         title: 'Fine Paid (Collected by Accounts Office)', body: `A fine you issued was paid — ৳${amount.toLocaleString()}. Reference: ${reference}.`,
         link: '/admin/fines',
-      }).catch(() => {});
+      }).catch(() => { });
     }
 
     return { status: 'valid' as const, message: 'Payment successful' };
@@ -1820,7 +1838,7 @@ async function confirmSslPayment(reference: string, source: 'ipn' | 'browser-val
   }
 
   if (Date.now() - tx.createdAt.getTime() > PENDING_TXN_TTL_MS) {
-    await prisma.transaction.update({ where: { id: tx.id }, data: { status: 'Cancelled' } }).catch(() => {});
+    await prisma.transaction.update({ where: { id: tx.id }, data: { status: 'Cancelled' } }).catch(() => { });
     return { status: 'failed' as const, message: 'Payment session expired. Please try again.' };
   }
 
@@ -1872,12 +1890,12 @@ async function initiateSslCheckout(params: {
     data = await response.json() as Record<string, unknown>;
   } catch (err: any) {
     console.error(`[initiateSslCheckout] Gateway unreachable for ${params.reference}:`, err.message || err);
-    await prisma.transaction.update({ where: { id: params.txId }, data: { status: 'Failed' } }).catch(() => {});
+    await prisma.transaction.update({ where: { id: params.txId }, data: { status: 'Failed' } }).catch(() => { });
     return { ok: false, status: 502, message: 'Could not reach the payment gateway. Please try again.' };
   }
 
   if (data.status !== 'SUCCESS') {
-    await prisma.transaction.update({ where: { id: params.txId }, data: { status: 'Failed' } }).catch(() => {});
+    await prisma.transaction.update({ where: { id: params.txId }, data: { status: 'Failed' } }).catch(() => { });
     const reason = (data.failedreason as string) || '';
     let userMessage = reason || 'Payment gateway unavailable.';
     if (reason.toLowerCase().includes('store credential')) userMessage = 'Payment gateway configuration error. Contact admin.';
@@ -1886,7 +1904,7 @@ async function initiateSslCheckout(params: {
 
   const gatewayUrl = data.GatewayPageURL as string | undefined;
   if (!gatewayUrl) {
-    await prisma.transaction.update({ where: { id: params.txId }, data: { status: 'Failed' } }).catch(() => {});
+    await prisma.transaction.update({ where: { id: params.txId }, data: { status: 'Failed' } }).catch(() => { });
     return { ok: false, status: 502, message: 'Payment gateway returned an invalid session. Please try again.' };
   }
 
@@ -1985,7 +2003,7 @@ router.post('/payment/init', authMiddleware, paymentInitLimiter, async (req: Aut
 
       if (amount >= OTP_REQUIRED_THRESHOLD) {
         const otp = otpId ? await prisma.otpCode.findUnique({ where: { id: otpId } }) : null;
-        const otpFresh = otp && otp.userId === userId && otp.status === 'Used' && otp.purpose === 'Large Payment' && (Date.now() - new Date(otp.updatedAt).getTime()) < AUTH_FRESHNESS_WINDOW_MS;
+        const otpFresh = otp && otp.userId === userId && otp.status === 'Used' && (otp.purpose === 'Large Payment' || otp.purpose === 'Payment') && (Date.now() - new Date(otp.updatedAt).getTime()) < AUTH_FRESHNESS_WINDOW_MS;
         if (!otpFresh) return res.status(403).json({ message: 'OTP verification required for this payment.', requiresOtp: true });
       }
     }
@@ -2727,6 +2745,12 @@ router.post('/admin/staff/manage', authMiddleware, requireAdmin, async (req: Aut
           mustChangePassword: true, emailVerified: false,
         },
       });
+
+      if (role === 'Accounts Office' || role === 'Shop Staff') {
+        await prisma.wallet.create({
+          data: { walletId: `W-${staff.id.slice(0, 8)}`, ownerId: staff.id, balance: 0, dailyTransferLimit: 10000, dailyTransferred: 0 },
+        }).catch(() => {});
+      }
 
       const loginUrl = `${process.env.FRONTEND_URL || ''}/`;
       let emailDelivered = true;
@@ -3821,6 +3845,8 @@ app.use('/api', disputeNotificationsRouter);
 app.use('/', disputeNotificationsRouter);
 app.use('/api', feeRouter);
 app.use('/', feeRouter);
+app.use('/api', settlementRouter);
+app.use('/', settlementRouter);
 
 // Fallback JSON 404 handler (ensures HTML is NEVER returned)
 app.use((_req, res) => {

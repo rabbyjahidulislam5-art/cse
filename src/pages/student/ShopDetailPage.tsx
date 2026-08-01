@@ -95,17 +95,17 @@ export default function ShopDetailPage() {
   };
 
   // Confirm step complete — Pay Later never touches money, so it skips PIN/OTP entirely.
-  // Online payment is gated by amount before a gateway session is ever created.
+  // Online payment requires 2-step verification (PIN + Email OTP) before a gateway session is ever created.
   const onConfirmed = () => {
     setConfirmOpen(false);
     if (payMode === 'later') { proceedToPay(); return; }
-    if (amt >= PIN_REQUIRED_THRESHOLD) { setPinOpen(true); return; }
-    proceedToPay();
+    // Always require PIN for Shop online payment
+    setPinOpen(true);
   };
 
   const onPinVerified = () => {
-    if (amt >= OTP_REQUIRED_THRESHOLD) { setOtpOpen(true); return; }
-    proceedToPay();
+    // Always require Email OTP after successful PIN verification
+    setOtpOpen(true);
   };
 
   const onOtpVerified = (otpId: string) => proceedToPay(otpId);
