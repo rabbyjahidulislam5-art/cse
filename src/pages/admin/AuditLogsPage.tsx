@@ -36,9 +36,10 @@ export default function AuditLogsPage() {
         <div className="flex items-center justify-between mb-6">
           <div>
             <h1 className="text-xl font-bold text-foreground">System Audit Logs</h1>
-            <p className="text-sm text-muted-foreground mt-0.5">Read-only activity history across the entire system</p>
+
           </div>
           <ExportButton
+            formats={['csv', 'excel']}
             supportRoute="/admin/disputes"
             onExport={(format) => generateAuditLogReport({ format })}
           />

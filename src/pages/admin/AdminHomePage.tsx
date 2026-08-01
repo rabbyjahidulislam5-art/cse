@@ -80,7 +80,7 @@ export default function AdminHomePage() {
       <FadeIn delay={0.05}>
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
           <StatCard icon={Store} label="Total Shops" value={data?.totalShops || 0} subtitle={`${data?.activeShops || 0} active · ${data?.suspendedShops || 0} suspended`} color="--chart-2" onClick={() => navigate('/admin/shops')} />
-          <StatCard icon={ShieldAlert} label="Fines Awaiting Payment" value={data?.finesPendingCount || 0} subtitle="Monitoring only — Accounts Office collects payment" color="--chart-5" onClick={() => navigate('/admin/fines')} />
+          <StatCard icon={ShieldAlert} label="Fines Awaiting Payment" value={data?.finesPendingCount || 0} color="--chart-5" onClick={() => navigate('/admin/fines')} />
           <StatCard icon={Activity} label="System Status" value="Operational" color="--chart-3" />
         </div>
       </FadeIn>

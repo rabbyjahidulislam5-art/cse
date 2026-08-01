@@ -185,7 +185,7 @@ export default function StaffAccountsPage() {
             <div>
               <Label className="text-xs text-muted-foreground">Email *</Label>
               <Input type="email" value={formEmail} onChange={e => setFormEmail(e.target.value)} placeholder="name@gmail.com" className="mt-1.5 bg-accent/50" disabled={!!editStaff} />
-              <p className="text-[10px] text-muted-foreground mt-1">Use a real inbox — login credentials are emailed here automatically.</p>
+
             </div>
             <div>
               <Label className="text-xs text-muted-foreground">Role *</Label>
@@ -195,7 +195,7 @@ export default function StaffAccountsPage() {
                   <SelectItem value="Admin Office">Admin Office</SelectItem>
                   <SelectItem value="Library">Library</SelectItem>
                   <SelectItem value="Accounts Office">Accounts Office</SelectItem>
-                  <SelectItem value="Shop Staff">Shop Staff</SelectItem>
+
                 </SelectContent>
               </Select>
             </div>

@@ -57,13 +57,12 @@ export default function DisputeOversightPage() {
     <div className="container mx-auto px-4 sm:px-6 py-6 max-w-6xl">
       <div className="flex items-center justify-between mb-6">
         <div>
-          <h1 className="text-xl font-bold text-foreground">Financial Dispute — Case Oversight</h1>
-          <p className="text-sm text-muted-foreground mt-0.5">Platform-wide dispute statistics, staff performance, fraud signals</p>
+          <h1 className="text-xl font-bold text-foreground">Audit dispute</h1>
         </div>
         <div className="flex gap-1.5">
           <Button variant="outline" size="sm" disabled={!!exporting} onClick={() => handleExport('csv')}>{exporting === 'csv' ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : 'CSV'}</Button>
           <Button variant="outline" size="sm" disabled={!!exporting} onClick={() => handleExport('excel')}>{exporting === 'excel' ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : 'Excel'}</Button>
-          <Button variant="outline" size="sm" disabled={!!exporting} onClick={() => handleExport('pdf')}>{exporting === 'pdf' ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : 'PDF'}</Button>
+
         </div>
       </div>
 
@@ -90,60 +89,7 @@ export default function DisputeOversightPage() {
         </div>
       )}
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-6">
-        {/* Staff performance */}
-        <div className="rounded-xl border border-border/60 bg-card p-4">
-          <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-3 flex items-center gap-1.5"><Users className="w-3.5 h-3.5" /> Staff Performance</p>
-          {staff.length === 0 ? <p className="text-xs text-muted-foreground">No Accounts Office staff found.</p> : (
-            <div className="space-y-2">
-              {staff.map(s => (
-                <div key={s.id} className="flex items-center justify-between text-xs py-1.5 border-b border-border/30 last:border-0">
-                  <span className="font-medium text-foreground">{s.name}</span>
-                  <span className="text-muted-foreground">{s.assigned} assigned · {s.resolved} resolved · {s.avgResolutionHours}h avg</span>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
 
-        {/* Fraud detection */}
-        <div className="rounded-xl border border-border/60 bg-card p-4">
-          <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-3 flex items-center gap-1.5"><ShieldAlert className="w-3.5 h-3.5" /> Fraud Detection</p>
-          {!fraud ? <Skeleton className="h-20" /> : (
-            <div className="space-y-3">
-              <div className="flex gap-4 text-xs">
-                <span><strong className="text-foreground">{fraud.repeatedFailures}</strong> <span className="text-muted-foreground">rejected cases</span></span>
-                <span><strong className="text-foreground">{fraud.fraudCategoryCount}</strong> <span className="text-muted-foreground">fraud-category cases</span></span>
-              </div>
-              {fraud.repeatedDisputers.length > 0 && (
-                <div>
-                  <p className="text-[10px] font-semibold text-muted-foreground uppercase mb-1">Repeat Disputers (≥3 cases)</p>
-                  {fraud.repeatedDisputers.slice(0, 5).map(d => (
-                    <div key={d.userId} className="flex items-center justify-between text-xs py-0.5">
-                      <span className="flex items-center gap-1">{d.name} {d.flagged && <Flag className="w-3 h-3 text-destructive" />}</span>
-                      <span className="text-muted-foreground">{d.disputeCount} cases</span>
-                    </div>
-                  ))}
-                </div>
-              )}
-              {fraud.repeatedShops.length > 0 && (
-                <div>
-                  <p className="text-[10px] font-semibold text-muted-foreground uppercase mb-1 flex items-center gap-1"><Store className="w-3 h-3" /> Repeat Shops (≥3 cases)</p>
-                  {fraud.repeatedShops.slice(0, 5).map(s => (
-                    <div key={s.shopId} className="flex items-center justify-between text-xs py-0.5">
-                      <span className="flex items-center gap-1">{s.name} {s.flagged && <Flag className="w-3 h-3 text-destructive" />}</span>
-                      <span className="text-muted-foreground">{s.disputeCount} cases</span>
-                    </div>
-                  ))}
-                </div>
-              )}
-              {fraud.repeatedDisputers.length === 0 && fraud.repeatedShops.length === 0 && (
-                <p className="text-xs text-muted-foreground">No repeat-offender patterns detected yet.</p>
-              )}
-            </div>
-          )}
-        </div>
-      </div>
 
       <div className="flex flex-col sm:flex-row gap-3 mb-4">
         <div className="relative flex-1">

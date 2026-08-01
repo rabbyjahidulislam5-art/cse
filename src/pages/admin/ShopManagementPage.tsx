@@ -421,7 +421,7 @@ export default function ShopManagementPage() {
         <DialogContent className="glass-strong rounded-2xl w-[calc(100vw-2rem)] sm:max-w-md max-h-[90vh] overflow-y-auto p-4 sm:p-6">
           <DialogHeader>
             <DialogTitle>Record Settlement — {settleShop?.name}</DialogTitle>
-            <DialogDescription>Confirm this shop has been paid the collected amount outside the app.</DialogDescription>
+            <DialogDescription></DialogDescription>
           </DialogHeader>
           <div className="space-y-4 mt-2">
             <div className="rounded-xl border border-border/60 bg-accent/30 p-3 space-y-1.5 text-sm">

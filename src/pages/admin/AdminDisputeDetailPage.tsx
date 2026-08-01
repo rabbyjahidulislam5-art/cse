@@ -88,15 +88,7 @@ export default function AdminDisputeDetailPage() {
           <Button size="sm" variant="outline" className="text-xs gap-1.5" onClick={() => setAction('forward')} disabled={isTerminal}><ForwardIcon className="w-3.5 h-3.5" /> Forward</Button>
           <Button size="sm" variant="outline" className="text-xs gap-1.5 border-[hsl(var(--chart-3))]/40 text-[hsl(var(--chart-3))]" onClick={() => setAction('refund')} disabled={isTerminal || hasActiveRefund}><Banknote className="w-3.5 h-3.5" /> Refund</Button>
           <Button size="sm" variant="outline" className="text-xs gap-1.5 border-destructive/40 text-destructive" onClick={() => setAction('reject')} disabled={isTerminal}><XCircle className="w-3.5 h-3.5" /> Reject</Button>
-          <Button size="sm" variant="outline" className="text-xs gap-1.5" onClick={() => navigate('/admin/shops')}><Store className="w-3.5 h-3.5" /> Manage Shop <ExternalLink className="w-3 h-3" /></Button>
-          <Button size="sm" variant="outline" className="text-xs gap-1.5" disabled={busy} onClick={() => run(() => freezeWallet({ userId: student.id, freeze: true, disputeId }), 'Wallet frozen')}><Snowflake className="w-3.5 h-3.5" /> Freeze Wallet</Button>
-          <Button size="sm" variant="outline" className="text-xs gap-1.5" disabled={busy} onClick={() => run(() => lockAccount({ userId: student.id, lock: student.status !== 'Locked', disputeId }), student.status === 'Locked' ? 'Account unlocked' : 'Account locked')}>
-            <Lock className="w-3.5 h-3.5" /> {student.status === 'Locked' ? 'Unlock Account' : 'Lock Account'}
-          </Button>
-          <Button size="sm" variant="outline" className={`text-xs gap-1.5 ${student.flagged ? 'border-destructive/40 text-destructive' : ''}`} disabled={busy}
-            onClick={() => run(() => flagUser({ userId: student.id, flag: !student.flagged, reason: student.flagged ? undefined : 'Flagged from dispute case review', disputeId }), student.flagged ? 'User unflagged' : 'User flagged')}>
-            <Flag className="w-3.5 h-3.5" /> {student.flagged ? 'Unflag User' : 'Flag User'}
-          </Button>
+
           {transaction?.receiver?.kind === 'shop' && (
             <Button size="sm" variant="outline" className="text-xs gap-1.5" disabled={busy}
               onClick={() => run(() => flagMerchant({ shopId: transaction.receiver!.id, flag: true, disputeId }), 'Merchant flagged')}>

@@ -379,7 +379,7 @@ export default function FinesPage() {
     <div className="container mx-auto px-4 sm:px-6 py-6 max-w-3xl">
       <FadeIn>
         <h1 className="text-xl font-bold text-foreground mb-1">Disciplinary Fines</h1>
-        <p className="text-sm text-muted-foreground mb-6">Assign fines and manage student appeals</p>
+
       </FadeIn>
 
       <FadeIn delay={0.05}>
