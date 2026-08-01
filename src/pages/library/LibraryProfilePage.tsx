@@ -151,7 +151,7 @@ export default function LibraryProfilePage() {
           <ReadOnlyField icon={BookOpen} label="Library Name" value={library.name} />
           <ReadOnlyField icon={Mail} label="Login Email" value={staff?.email || ''} />
         </div>
-        <p className="text-[11px] text-muted-foreground -mt-6 mb-8">Library name and login email are admin-managed — contact the Admin Office to change them.</p>
+
       </FadeIn>
 
       <FadeIn delay={0.1}>
@@ -229,19 +229,7 @@ export default function LibraryProfilePage() {
           </Button>
         </div>
 
-        <button
-          onClick={() => { setPinMode(staff?.pinSet ? 'change' : 'set'); setPinOpen(true); }}
-          className="w-full rounded-xl border border-border/60 bg-card p-4 flex items-center gap-4 hover:border-primary/20 transition-colors mb-6"
-        >
-          <div className={`w-12 h-12 rounded-xl flex items-center justify-center ${staff?.pinSet ? 'bg-[hsl(var(--chart-3))]/10' : 'bg-[hsl(var(--chart-4))]/10'}`}>
-            {staff?.pinSet ? <ShieldCheck className="w-6 h-6 text-[hsl(var(--chart-3))]" /> : <Lock className="w-6 h-6 text-[hsl(var(--chart-4))]" />}
-          </div>
-          <div className="flex-1 text-left">
-            <p className="text-sm font-semibold text-foreground">Wallet PIN</p>
-            <p className="text-xs text-muted-foreground">{staff?.pinSet ? 'PIN is active. Tap to change.' : 'Set a PIN to secure your wallet.'}</p>
-          </div>
-          <ChevronRight className="w-4 h-4 text-muted-foreground" />
-        </button>
+
       </FadeIn>
 
       <FadeIn delay={0.25}>

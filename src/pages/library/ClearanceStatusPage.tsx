@@ -38,17 +38,9 @@ export default function ClearanceStatusPage() {
       <div className="flex items-center justify-between mb-6 flex-wrap gap-3">
         <h1 className="text-xl font-bold text-foreground">Clearance Status</h1>
         <div className="flex items-center gap-3 flex-wrap">
-          <div className="flex items-center gap-2">
-            <Filter className="w-4 h-4 text-muted-foreground" />
-            <Select value={dept} onValueChange={handleDeptChange}>
-              <SelectTrigger className="w-48 bg-accent/50 border-border/60"><SelectValue placeholder="All Departments" /></SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All Departments</SelectItem>
-                {(data?.departments || []).map(d => <SelectItem key={d} value={d}>{d}</SelectItem>)}
-              </SelectContent>
-            </Select>
-          </div>
+
           <ExportButton
+            formats={['csv', 'excel']}
             supportRoute="/library/disputes"
             onExport={(format) => generateClearanceReport({ format, department: dept && dept !== 'all' ? dept : undefined })}
           />

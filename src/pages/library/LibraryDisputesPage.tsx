@@ -20,7 +20,7 @@ export default function LibraryDisputesPage() {
       <FadeIn>
         <div className="mb-6">
           <h1 className="text-xl font-bold text-foreground">Library Dispute Inbox</h1>
-          <p className="text-sm text-muted-foreground mt-0.5">Cases forwarded to Library for review</p>
+
         </div>
       </FadeIn>
 
