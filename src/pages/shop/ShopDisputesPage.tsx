@@ -26,20 +26,10 @@ export default function ShopDisputesPage() {
         <div className="flex items-center justify-between mb-6">
           <div>
             <h1 className="text-xl font-bold text-foreground">Disputes on Your Payments</h1>
-            <p className="text-sm text-muted-foreground mt-0.5">Customer disputes on transactions at your shop</p>
+
           </div>
         </div>
-        <Select value={status} onValueChange={setStatus}>
-          <SelectTrigger className="w-full sm:w-56 bg-accent/50 border-border/60 mb-6"><SelectValue /></SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">All Cases</SelectItem>
-            <SelectItem value="WaitingForShop">Needs Your Response</SelectItem>
-            <SelectItem value="Investigating">Investigating</SelectItem>
-            <SelectItem value="Resolved">Resolved</SelectItem>
-            <SelectItem value="Refunded">Refunded</SelectItem>
-            <SelectItem value="Rejected">Rejected</SelectItem>
-          </SelectContent>
-        </Select>
+
       </FadeIn>
 
       {loading ? (
