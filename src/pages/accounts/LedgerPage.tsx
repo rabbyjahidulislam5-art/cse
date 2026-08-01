@@ -35,9 +35,8 @@ export default function LedgerPage() {
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
           <h1 className="text-2xl font-bold tracking-tight text-foreground flex items-center gap-2">
-            <BookOpen className="w-6 h-6 text-primary" /> Accounts Double-Entry Ledger
+            <BookOpen className="w-6 h-6 text-primary" /> account ledger
           </h1>
-          <p className="text-sm text-muted-foreground mt-0.5">Real-time audit log of student fee debits, payments, waivers, and refunds</p>
         </div>
 
         <div className="flex items-center gap-2">

@@ -97,9 +97,7 @@ export default function AdministrativeFinesPage() {
       <FadeIn>
         <div className="mb-6">
           <h1 className="text-xl font-bold text-foreground">Administrative Fines</h1>
-          <p className="text-sm text-muted-foreground mt-1">
-            Every fine issued by Admin Office — Accounts Office is the sole authority for collecting and reconciling payment.
-          </p>
+
         </div>
       </FadeIn>
 

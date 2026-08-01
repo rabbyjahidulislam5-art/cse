@@ -120,9 +120,7 @@ export default function DisputeCaseDetailPage() {
       <FadeIn>
         {/* Action toolbar */}
         <div className="flex flex-wrap gap-1.5 mb-4">
-          <Button size="sm" variant="outline" className="text-xs gap-1.5" disabled={pdfLoading} onClick={handlePdf}>
-            {pdfLoading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Download className="w-3.5 h-3.5" />} Download PDF
-          </Button>
+
 
           <Button size="sm" variant="outline" className="text-xs gap-1.5" onClick={() => setAction('reply')} disabled={isTerminal}><Send className="w-3.5 h-3.5" /> Reply</Button>
           <Button size="sm" variant="outline" className="text-xs gap-1.5" onClick={() => setAction('forward')} disabled={isTerminal}><ForwardIcon className="w-3.5 h-3.5" /> Forward</Button>

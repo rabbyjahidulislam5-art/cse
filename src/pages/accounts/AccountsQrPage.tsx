@@ -69,7 +69,7 @@ export default function AccountsQrPage() {
         {!kiosk && (
           <motion.div initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }} className="mb-6">
             <h1 className="text-xl font-bold text-foreground">Accounts Office Payment QR</h1>
-            <p className="text-xs text-muted-foreground mt-1">Students scan this to choose which due to pay — semester fee, admin fine, library fine, or shop due</p>
+
           </motion.div>
         )}
 

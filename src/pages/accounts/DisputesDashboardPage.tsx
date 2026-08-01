@@ -94,14 +94,7 @@ export default function DisputesDashboardPage() {
             onChange={(e) => { setSearch(e.target.value); debouncedLoad(e.target.value); }}
             className="pl-9 bg-accent/50 border-border/60" />
         </div>
-        <Select value={status} onValueChange={setStatus}>
-          <SelectTrigger className="w-full sm:w-48 bg-accent/50 border-border/60"><SelectValue /></SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">All Statuses</SelectItem>
-            {KANBAN_STATUSES.map(s => <SelectItem key={s} value={s}>{s.replace(/([A-Z])/g, ' $1').trim()}</SelectItem>)}
-            <SelectItem value="Closed">Closed</SelectItem>
-          </SelectContent>
-        </Select>
+
 
         <Button variant="outline" size="icon" onClick={() => load(status, search, assignedToMe)}><RefreshCw className="w-4 h-4" /></Button>
       </div>

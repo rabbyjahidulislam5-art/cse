@@ -202,7 +202,7 @@ export default function FeeWizardPage() {
       {/* Header */}
       <div className="mb-8 text-center sm:text-left">
         <h1 className="text-2xl font-bold tracking-tight text-foreground">Semester Fee Management</h1>
-        <p className="text-sm text-muted-foreground mt-0.5">Automated File Validation & Direct Fee Push</p>
+
       </div>
 
       {/* Step Wizard Progress Bar */}
@@ -326,8 +326,7 @@ export default function FeeWizardPage() {
                 <button onClick={() => handleExportAdvising('excel')} type="button" className="text-xs text-muted-foreground hover:text-foreground">Excel</button>
                 <span>·</span>
                 <button onClick={() => handleExportAdvising('csv')} type="button" className="text-xs text-muted-foreground hover:text-foreground">CSV</button>
-                <span>·</span>
-                <button onClick={() => handleExportAdvising('pdf')} type="button" className="text-xs text-muted-foreground hover:text-foreground">PDF</button>
+
               </div>
             </div>
           </div>

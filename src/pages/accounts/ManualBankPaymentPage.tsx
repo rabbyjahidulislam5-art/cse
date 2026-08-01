@@ -93,7 +93,7 @@ export default function ManualBankPaymentPage() {
           </div>
           <div>
             <h1 className="text-xl font-bold text-foreground">Offline Bank Payment</h1>
-            <p className="text-sm text-muted-foreground mt-0.5">Record a manual bank payment and settle every outstanding due at once.</p>
+
           </div>
         </div>
       </FadeIn>
@@ -172,7 +172,7 @@ export default function ManualBankPaymentPage() {
               <div>
                 <Label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-1.5 block">Amount Received (৳)</Label>
                 <Input type="number" value={amountReceived} onChange={(e) => setAmountReceived(e.target.value)} min={result.total} className="h-11 rounded-xl bg-accent/30 border-border/60" disabled={recording} />
-                <p className="text-[11px] text-muted-foreground mt-1">Must be at least the total outstanding — this records a full settlement, not a partial payment.</p>
+
               </div>
               <div>
                 <Label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-1.5 block">Note (optional)</Label>
