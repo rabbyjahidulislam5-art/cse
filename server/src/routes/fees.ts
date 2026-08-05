@@ -808,4 +808,127 @@ router.post('/accounts/ledger', async (req: AuthRequest, res: Response): Promise
   }
 });
 
+// POST /accounts/push-records/search — Search and filter fee pushes and scholarship allocations
+router.post('/accounts/push-records/search', async (req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    const { category = 'fee', department, program, semester, academicYear, search } = req.body;
+
+    if (category === 'scholarship') {
+      const where: any = {
+        type: 'Scholarship Credit',
+      };
+
+      if (search && String(search).trim()) {
+        const q = String(search).trim();
+        where.OR = [
+          { reference: { contains: q, mode: 'insensitive' } },
+          { description: { contains: q, mode: 'insensitive' } },
+          { user: { studentId: { contains: q, mode: 'insensitive' } } },
+          { user: { fullName: { contains: q, mode: 'insensitive' } } },
+          { user: { email: { contains: q, mode: 'insensitive' } } },
+        ];
+      }
+
+      if (department && department !== 'All' && department !== 'all') {
+        where.user = { ...where.user, department: { equals: department, mode: 'insensitive' } };
+      }
+
+      if (program && program !== 'All' && program !== 'all') {
+        where.user = { ...where.user, batch: { contains: program, mode: 'insensitive' } };
+      }
+
+      const txs = await prisma.transaction.findMany({
+        where,
+        include: {
+          user: {
+            select: { studentId: true, fullName: true, email: true, department: true, batch: true }
+          }
+        },
+        orderBy: { createdAt: 'desc' },
+        take: 200,
+      });
+
+      let records = txs.map(c => ({
+        id: c.id,
+        type: 'Scholarship Push',
+        studentId: c.user?.studentId || 'N/A',
+        studentName: c.user?.fullName || 'Student',
+        studentEmail: c.user?.email || '',
+        department: c.user?.department || 'Computer Science',
+        program: c.user?.batch || 'Undergraduate',
+        label: c.description || 'Scholarship Credit',
+        amount: c.amount,
+        status: 'Credited',
+        createdAt: c.createdAt,
+      }));
+
+      if (semester && semester !== 'All' && semester !== 'all') {
+        records = records.filter(r => r.label.toLowerCase().includes(semester.toLowerCase()));
+      }
+      if (academicYear && academicYear !== 'All' && academicYear !== 'all') {
+        records = records.filter(r => r.label.toLowerCase().includes(String(academicYear).toLowerCase()));
+      }
+
+      res.status(200).json({ category: 'scholarship', records });
+      return;
+    }
+
+    // Default: category === 'fee'
+    const where: any = {};
+
+    if (search && String(search).trim()) {
+      const q = String(search).trim();
+      where.OR = [
+        { studentId: { contains: q, mode: 'insensitive' } },
+        { studentName: { contains: q, mode: 'insensitive' } },
+        { studentEmail: { contains: q, mode: 'insensitive' } },
+        { feeLabel: { contains: q, mode: 'insensitive' } },
+      ];
+    }
+
+    if (department && department !== 'All' && department !== 'all') {
+      where.department = { contains: department, mode: 'insensitive' };
+    }
+
+    if (program && program !== 'All' && program !== 'all') {
+      where.program = { contains: program, mode: 'insensitive' };
+    }
+
+    const items = await prisma.semesterFeeItem.findMany({
+      where,
+      include: {
+        batch: { select: { label: true, semester: true, academicYear: true, status: true } },
+      },
+      orderBy: { createdAt: 'desc' },
+      take: 200,
+    });
+
+    let records = items.map(item => ({
+      id: item.id,
+      type: 'Fee Push',
+      studentId: item.studentId,
+      studentName: item.studentName || 'Student',
+      studentEmail: item.studentEmail || '',
+      department: item.department || 'Computer Science',
+      program: item.program || 'Undergraduate',
+      label: item.feeLabel || item.batch?.label || 'Semester Fee',
+      amount: item.finalAmount,
+      status: item.status,
+      createdAt: item.createdAt,
+    }));
+
+    if (semester && semester !== 'All' && semester !== 'all') {
+      records = records.filter(r => r.label.toLowerCase().includes(semester.toLowerCase()));
+    }
+    if (academicYear && academicYear !== 'All' && academicYear !== 'all') {
+      records = records.filter(r => r.label.toLowerCase().includes(String(academicYear).toLowerCase()));
+    }
+
+    res.status(200).json({ category: 'fee', records });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 export default router;
+

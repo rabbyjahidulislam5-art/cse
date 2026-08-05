@@ -737,6 +737,29 @@ export const getAccountsLedger = (input?: { studentId?: string; type?: string } 
 };
 
 
+export interface PushRecordItem {
+  id: string;
+  type: string;
+  studentId: string;
+  studentName: string;
+  studentEmail: string;
+  department: string;
+  program: string;
+  label: string;
+  amount: number;
+  status: string;
+  createdAt: string;
+}
+
+export const searchPushRecords = (input: {
+  category?: 'fee' | 'scholarship';
+  department?: string;
+  program?: string;
+  semester?: string;
+  academicYear?: string;
+  search?: string;
+}) => apiCall<{ category: string; records: PushRecordItem[] }>('/accounts/push-records/search', input);
+
 // Shop endpoints
 export const getShopDashboard = (input: Record<string, unknown> = {}) =>
   apiCall<GetShopDashboardOutputType>('/shop/dashboard', input);

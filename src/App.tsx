@@ -86,6 +86,7 @@ const AccountsVerifyEmailPage = lazy(() => import('./pages/accounts/AccountsVeri
 const AccountsProfilePage = lazy(() => import('./pages/accounts/AccountsProfilePage'));
 const AccountsWalletPage = lazy(() => import('./pages/accounts/AccountsWalletPage'));
 const SettlementProcessingPage = lazy(() => import('./pages/accounts/SettlementProcessingPage'));
+const PushRecordsPage = lazy(() => import('./pages/accounts/PushRecordsPage'));
 
 // Shop pages
 const ShopHomePage = lazy(() => import('./pages/shop/ShopHomePage'));
@@ -148,6 +149,7 @@ export default function App() {
                 <Route path="disputes/detail" element={<AdminDisputeDetailPage />} />
                 <Route path="notifications" element={<AdminNotificationsPage />} />
                 <Route path="profile" element={<AdminProfilePage />} />
+                <Route path="push-records" element={<PushRecordsPage />} />
               </Route>
 
               {/* Library first-login onboarding — standalone, outside LibraryLayout (no nav chrome, mandatory) */}
@@ -189,6 +191,7 @@ export default function App() {
                 <Route path="library-fines" element={<LibraryFinesPage />} />
                 <Route path="student-profile" element={<StudentFinancialProfilePage />} />
                 <Route path="scholarship-push" element={<ScholarshipPushPage />} />
+                <Route path="push-records" element={<PushRecordsPage />} />
                 <Route path="qr" element={<AccountsQrPage />} />
                 <Route path="manual-payment" element={<ManualBankPaymentPage />} />
                 <Route path="profile" element={<AccountsProfilePage />} />

@@ -44,6 +44,7 @@ export default function AccountsHomePage() {
     { label: 'Library Fines', icon: BookMarked, onClick: () => navigate('/accounts/library-fines'), color: 'from-[hsl(var(--chart-3))]/15 to-[hsl(var(--chart-3))]/5', iconColor: 'text-[hsl(var(--chart-3))]' },
     { label: 'Student Profile', icon: UserSearch, onClick: () => navigate('/accounts/student-profile'), color: 'from-[hsl(var(--chart-2))]/15 to-[hsl(var(--chart-2))]/5', iconColor: 'text-[hsl(var(--chart-2))]' },
     { label: 'Scholarship Push', icon: GraduationCap, onClick: () => navigate('/accounts/scholarship-push'), color: 'from-secondary/15 to-secondary/5', iconColor: 'text-secondary' },
+    { label: 'Push Records', icon: UserSearch, onClick: () => navigate('/accounts/push-records'), color: 'from-primary/15 to-primary/5', iconColor: 'text-primary' },
     { label: 'Bank Payment', icon: Banknote, onClick: () => navigate('/accounts/manual-payment'), color: 'from-[hsl(var(--chart-4))]/15 to-[hsl(var(--chart-4))]/5', iconColor: 'text-[hsl(var(--chart-4))]' },
     { label: 'Profile', icon: UserCheck, onClick: () => navigate('/accounts/profile'), color: 'from-primary/15 to-primary/5', iconColor: 'text-primary' },
   ];

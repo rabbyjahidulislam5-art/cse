@@ -56,6 +56,7 @@ export default function AdminHomePage() {
     { label: 'Staff', icon: UserCog, onClick: () => navigate('/admin/staff'), color: 'from-[hsl(var(--chart-4))]/15 to-[hsl(var(--chart-4))]/5', iconColor: 'text-[hsl(var(--chart-4))]' },
     { label: 'Profile', icon: UserCircle, onClick: () => navigate('/admin/profile'), color: 'from-primary/15 to-primary/5', iconColor: 'text-primary' },
     { label: 'Disputes', icon: ScrollText, onClick: () => navigate('/admin/disputes'), color: 'from-destructive/15 to-destructive/5', iconColor: 'text-destructive', badge: pendingCases },
+    { label: 'Push Records', icon: FileText, onClick: () => navigate('/admin/push-records'), color: 'from-[hsl(var(--chart-4))]/15 to-[hsl(var(--chart-4))]/5', iconColor: 'text-[hsl(var(--chart-4))]' },
     { label: 'Audit', icon: FileText, onClick: () => navigate('/admin/audit'), color: 'from-[hsl(var(--chart-3))]/15 to-[hsl(var(--chart-3))]/5', iconColor: 'text-[hsl(var(--chart-3))]' },
   ];
 
