@@ -12,6 +12,7 @@ import {
 } from '@/lib/api';
 import { formatCurrency } from '@/lib/mock-data';
 import { FadeIn } from '@/components/PageTransition';
+import BackButton from '@/components/BackButton';
 
 const SOURCE_TAGS: Record<string, string> = {
   semester: 'Semester Fee', library: 'Library Fine', admin: 'Admin Fine', payLater: 'Shop Due',
@@ -87,6 +88,7 @@ export default function ManualBankPaymentPage() {
   return (
     <div className="container mx-auto px-4 sm:px-6 py-6 max-w-2xl">
       <FadeIn>
+        <BackButton fallback="/accounts" />
         <div className="flex items-center gap-2.5 mb-6">
           <div className="w-9 h-9 rounded-xl bg-[hsl(var(--chart-4))]/15 border border-[hsl(var(--chart-4))]/20 flex items-center justify-center text-[hsl(var(--chart-4))]">
             <Banknote className="w-5 h-5" />

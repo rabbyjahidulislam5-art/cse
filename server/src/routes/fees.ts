@@ -15,6 +15,8 @@ import {
   generateAdvisingPdfBuffer,
   ImportRowData,
 } from '../lib/feeManagementService.js';
+import { matchStudent, matchStudentInDb } from '../lib/studentMatcher.js';
+import { notifyUser } from '../lib/notify.js';
 
 const router = Router();
 const prisma = new PrismaClient();
@@ -205,7 +207,8 @@ router.post('/accounts/fee-import/validate', upload.single('file'), async (req: 
     const warnings: string[] = [];
 
     const validatedItems = parsedRows.map((row) => {
-      const dbStudent = existingStudents.find(s => s.studentId === row.studentId);
+      const rowMatch = matchStudent({ studentId: row.studentId, email: row.email }, existingStudents);
+      const dbStudent = rowMatch.matched ? rowMatch.user : undefined;
       const valRes = validateImportRow(row, existingStudents, existingPushedStudentIds, fileStudentIdsSeen, context);
 
       let status = 'Valid';
@@ -511,27 +514,67 @@ router.post('/accounts/fee-import/push', async (req: AuthRequest, res: Response)
       res.status(400).json({ error: 'Batch has already been pushed.' });
       return;
     }
+    // A third concurrent request arriving while another is already mid-push (status already
+    // flipped to the transient 'Pushing' claim below) must be rejected here directly — otherwise
+    // its own claim attempt below would match { status: 'Pushing' } against itself and incorrectly
+    // "succeed" a second time.
+    if (batch.status === 'Pushing') {
+      res.status(409).json({ error: 'This batch is already being pushed by another request.' });
+      return;
+    }
+
+    // Atomically claim the batch before starting the expensive per-item transaction below.
+    // Without this, two near-simultaneous push requests (double-click, or two staff acting on the
+    // same batch) both read the same pre-push status, both pass the check above, and both start
+    // their own $transaction against the same rows — observed live to cause Neon connection
+    // contention that fails BOTH attempts with a raw transaction-timeout/"transaction closed"
+    // error instead of one succeeding cleanly and the other getting a clean rejection. Conditional
+    // updateMany guarded on the exact status just read (same pattern already used elsewhere in
+    // this codebase, e.g. settlement.ts's markItemPaid) — reverted back on failure below so a
+    // genuinely failed push never leaves the batch stuck.
+    const originalStatus = batch.status;
+    const claim = await prisma.semesterFeeBatch.updateMany({
+      where: { id: batchId, status: originalStatus },
+      data: { status: 'Pushing' },
+    });
+    if (claim.count === 0) {
+      res.status(409).json({ error: 'This batch is already being pushed by another request.' });
+      return;
+    }
 
     const pushJob = await prisma.feePushJob.create({
       data: { batchId, status: 'Processing', totalCount: batch.items.length, startedAt: new Date() },
     });
 
     const skippedReasons: string[] = [];
+    const pushedNotifications: { studentId: string; amount: number; feeLabel: string; dueDate: string }[] = [];
 
     try {
-      // Every invoice/ledger/notification for the whole batch commits together or not at all —
-      // a mid-loop failure (e.g. a Neon connection drop) can never leave partial fee records.
+      // Every invoice/ledger record for the whole batch commits together or not at all — a
+      // mid-loop failure (e.g. a Neon connection drop) can never leave partial fee records.
+      // Notifications are queued here but only sent after a successful commit (see below).
+      // Explicit generous timeout — this loops every item in the batch (several sequential
+      // round-trips each) over Neon's serverless connection, which has real cold-start latency;
+      // the default 5s interactive-transaction timeout was observed to be too tight for even a
+      // 2-item batch during Scholarship Push integration testing (the same batch-loop pattern).
+      // Bumped from 30s to 60s after live QA testing found even 30s wasn't enough for a full
+      // 20-item batch (the exact size of this app's own sample import file) — a solo, uncontended
+      // push of 20 items took ~36s end to end and hit the old 30s ceiling mid-loop, aborting with
+      // a raw "transaction closed" error despite no concurrency at all.
       const pushedCount = await prisma.$transaction(async (txClient) => {
         let count = 0;
         for (const item of batch.items) {
-          const studentUser = await txClient.user.findFirst({
-            where: { OR: [{ studentId: item.studentId }, { email: item.studentEmail.toLowerCase() }] },
-          });
+          const matchResult = await matchStudentInDb({ studentId: item.studentId, email: item.studentEmail }, txClient);
 
-          if (!studentUser) {
-            skippedReasons.push(`${item.studentId}: student record not found`);
+          if (!matchResult.matched) {
+            skippedReasons.push(
+              matchResult.reason === 'ambiguous'
+                ? `${item.studentId}: ambiguous match — multiple accounts matched this row`
+                : `${item.studentId}: student record not found`
+            );
             continue;
           }
+          const studentUser = matchResult.user;
 
           const invoiceNumber = `INV-${batch.academicYear}-${Date.now().toString().slice(-6)}-${count + 1}`;
           const refNumber = `REF-FEE-${Date.now()}-${count + 1}`;
@@ -606,16 +649,17 @@ router.post('/accounts/fee-import/push', async (req: AuthRequest, res: Response)
             },
           });
 
-          // 6. Create Student Notification
-          await txClient.notification.create({
-            data: {
-              recipientId: studentUser.id,
-              category: 'Fee',
-              type: 'SemesterFeePushed',
-              title: 'Semester Fee Imposed',
-              body: `Your ${item.feeLabel || batch.label} of ৳${item.finalAmount.toLocaleString()} has been published. Due date: ${item.dueDate || 'N/A'}.`,
-              link: '/student/dues',
-            },
+          // 6. Queue student notification — sent via notifyUser() after the transaction commits
+          // (in-app + realtime + best-effort email, mirroring Scholarship Push's identical
+          // post-commit pattern) rather than a bare in-tx row, so a semester fee push reaches the
+          // student the same way a scholarship push already does. Kept out of the transaction
+          // itself so an email round-trip can never hold this connection open (the same timeout
+          // risk this transaction's own comment above already documents).
+          pushedNotifications.push({
+            studentId: studentUser.id,
+            amount: item.finalAmount,
+            feeLabel: item.feeLabel || batch.label,
+            dueDate: item.dueDate || 'N/A',
           });
 
           // Update item status
@@ -634,7 +678,20 @@ router.post('/accounts/fee-import/push', async (req: AuthRequest, res: Response)
         });
 
         return count;
-      });
+      }, { timeout: 60000, maxWait: 15000 });
+
+      // Every pushed student is notified in-app + realtime + email — mirrors Scholarship Push's
+      // identical post-commit notifyUser() loop, so Fee Push no longer silently relies on the 30s
+      // notification poll the way it did before (Scholarship Push already did this correctly).
+      for (const n of pushedNotifications) {
+        void notifyUser({
+          recipientId: n.studentId, category: 'Fee', type: 'SemesterFeePushed',
+          title: 'Semester Fee Imposed',
+          body: `Your ${n.feeLabel} of ৳${n.amount.toLocaleString()} has been published. Due date: ${n.dueDate}.`,
+          link: '/student/dues',
+          emailSubject: 'Semester Fee Imposed — Smart Campus',
+        });
+      }
 
       await prisma.feePushJob.update({
         where: { id: pushJob.id },
@@ -667,6 +724,9 @@ router.post('/accounts/fee-import/push', async (req: AuthRequest, res: Response)
         completedAt: new Date(),
       });
     } catch (pushErr: any) {
+      // Release the claim taken above — a failed push must not leave the batch stuck at
+      // 'Pushing' forever (it was never actually pushed, so staff need to be able to retry it).
+      await prisma.semesterFeeBatch.update({ where: { id: batchId }, data: { status: originalStatus } }).catch(() => {});
       await prisma.feePushJob.update({
         where: { id: pushJob.id },
         data: { status: 'Failed', completedAt: new Date(), errorLog: pushErr.message || 'Unknown error during fee push' },

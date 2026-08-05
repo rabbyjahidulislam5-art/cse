@@ -11,6 +11,7 @@ import { useAuth } from '@/lib/auth-context';
 import { getShopDashboard, updateProfile, updateShopProfile, uploadFile, type GetShopDashboardOutputType } from '@/lib/api';
 import { formatCurrency } from '@/lib/mock-data';
 import { FadeIn } from '@/components/PageTransition';
+import BackButton from '@/components/BackButton';
 
 function ReadOnlyField({ icon: Icon, label, value }: { icon: typeof User; label: string; value: string }) {
   return (
@@ -101,6 +102,7 @@ export default function ShopProfilePage() {
   return (
     <div className="container mx-auto px-4 sm:px-6 py-6 max-w-2xl">
       <FadeIn>
+        <BackButton fallback="/shop" />
         <h1 className="text-xl font-bold text-foreground mb-6">Merchant Profile</h1>
 
         <div className="flex items-center gap-5 mb-6">

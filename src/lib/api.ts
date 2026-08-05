@@ -120,6 +120,15 @@ export type GetAdminOverviewOutputType = {
   }>;
 };
 
+export type GetAdminProfileOutputType = {
+  user: {
+    id: string; fullName: string; email: string; role: string; employeeId: string;
+    phone: string; emergencyContact: string; address: string; bloodGroup: string;
+    gender: string; dateOfBirth: string; bio: string; profilePicture: string;
+    pinSet: boolean; pinLength: number;
+  };
+};
+
 export type GetAdminShopsOutputType = {
   shops: Array<{
     id: string; name: string; category: string; rating: number;
@@ -225,7 +234,7 @@ export type GetShopDashboardOutputType = {
   }>;
   pendingPayLater?: Array<{
     id: string; reference: string; amount: number; status: string;
-    studentName: string; dueDate: string; description: string;
+    studentName: string; studentId: string; dueDate: string; description: string; createdAt: string;
   }>;
   recentSettlements?: Array<{ id: string; amount: number; notes: string; settledAt: string }>;
 };
@@ -406,6 +415,9 @@ export const getAdminOverview = (input: Record<string, unknown> = {}) =>
 export const seedData = (input: Record<string, unknown> = {}) =>
   apiCall<{ success: boolean; message: string }>('/admin/seed', input);
 
+export const getAdminProfile = (input: Record<string, unknown> = {}) =>
+  apiCall<GetAdminProfileOutputType>('/admin/profile', input);
+
 export const getAdminShops = (input: Record<string, unknown> = {}) =>
   apiCall<GetAdminShopsOutputType>('/admin/shops', input);
 
@@ -435,6 +447,13 @@ export const getWaivers = (input: Record<string, unknown> = {}) =>
 
 export const updateWaiver = (input: Record<string, unknown>) =>
   apiCall<{ success: boolean; message: string }>('/admin/waivers/update', input);
+
+export type WaiverHistoryOutputType = {
+  history: Array<{ id: string; action: string; details: string; actorName: string; studentName: string; studentId: string; createdAt: string }>;
+};
+
+export const getWaiverHistory = (input: Record<string, unknown> = {}) =>
+  apiCall<WaiverHistoryOutputType>('/admin/waivers/history', input);
 
 // Admin's own issued-fines list — status monitoring only, Cancel/Edit (Pending fines only). Admin
 // Office never touches payment/reconciliation state; that lives on the Accounts side below.
@@ -485,6 +504,73 @@ export const getAccountsAdminFineDetail = (input: { fineId: string }) =>
 export const reconcileAdminFine = (input: { fineId: string }) =>
   apiCall<{ success: boolean; message: string }>('/accounts/admin-fines/reconcile', input);
 
+// Library Fines — Accounts Office receivable view. Mirrors AdminFineRow/list/detail/reconcile
+// exactly, so Library Fines get the same centralized Accounts-facing financial visibility as
+// Administrative Fines instead of remaining isolated in the library module.
+export type LibraryFineRow = {
+  id: string; label: string; fineType: string; amount: number; reference: string; status: string;
+  dueDate: string; createdAt: string; updatedAt: string;
+  student: { id: string; fullName: string; studentId: string; email: string };
+  issuedBy: { id: string; fullName: string; email: string } | null;
+  cancelledAt: string | null; reconciledAt: string | null;
+};
+
+export type ListAccountsLibraryFinesOutputType = {
+  fines: LibraryFineRow[]; total: number; page: number; pageSize: number; statusCounts: Record<string, number>;
+};
+
+export const listAccountsLibraryFines = (input: { status?: string; search?: string; dateFrom?: string; dateTo?: string; page?: number; pageSize?: number } = {}) =>
+  apiCall<ListAccountsLibraryFinesOutputType>('/accounts/library-fines', input);
+
+export type AccountsLibraryFineDetailOutputType = {
+  fine: LibraryFineRow;
+  transaction: { id: string; reference: string; status: string; amount: number; paymentMethod: string; updatedAt: string } | null;
+  ledgerEntries: Array<{ id: string; entryNumber: string; type: string; debitAmount: number; creditAmount: number; balanceAfter: number; createdAt: string }>;
+  auditTrail: Array<{ id: string; action: string; actorName: string; details: string; createdAt: string }>;
+};
+
+export const getAccountsLibraryFineDetail = (input: { fineId: string }) =>
+  apiCall<AccountsLibraryFineDetailOutputType>('/accounts/library-fines/detail', input);
+
+export const reconcileLibraryFine = (input: { fineId: string }) =>
+  apiCall<{ success: boolean; message: string }>('/accounts/library-fines/reconcile', input);
+
+// Accounts unified Student Financial Profile — search any student by ID/Name/Email, then view a
+// consolidated balance + dues + fines + payment history + ledger profile. Purely additive; does
+// not change /accounts/student-outstanding-dues, /accounts/ledger, or any existing report.
+export type AccountsStudentSearchResult = {
+  id: string; fullName: string; studentId: string; email: string; department: string; batch: string; status: string;
+};
+
+export const searchAccountsStudents = (input: { query: string }) =>
+  apiCall<{ students: AccountsStudentSearchResult[] }>('/accounts/student-search', input);
+
+export type StudentFinancialProfileOutputType = {
+  found: boolean;
+  student: { id: string; fullName: string; studentId: string; email: string; department: string; batch: string; status: string };
+  walletBalance: number;
+  outstanding: { items: Array<SettlementItem & { id: string }>; total: number; breakdown: SettlementBreakdown };
+  restriction: { restricted: boolean; reason: string | null };
+  transactions: {
+    rows: Array<{
+      id: string; reference: string; type: string; direction: string; amount: number; status: string;
+      purpose: string; description: string; paymentMethod: string; gateway: string;
+      balanceBefore: number | null; balanceAfter: number | null; createdAt: string;
+    }>;
+    total: number; page: number; pageSize: number;
+  };
+  history: {
+    semesterFee: Array<{ id: string; label: string; amount: number; status: string; reference: string; updatedAt: string }>;
+    libraryFine: Array<{ id: string; label: string; amount: number; status: string; reference: string; updatedAt: string }>;
+    adminFine: Array<{ id: string; label: string; amount: number; status: string; reference: string; updatedAt: string }>;
+    payLaterDue: Array<{ id: string; label: string; amount: number; status: string; reference: string; updatedAt: string }>;
+  };
+  scholarshipCredits: Array<{ id: string; reference: string; amount: number; description: string; createdAt: string }>;
+};
+
+export const getAccountsStudentProfile = (input: { studentDbId: string; txPage?: number; txPageSize?: number }) =>
+  apiCall<StudentFinancialProfileOutputType>('/accounts/student-profile', input);
+
 // Accounts Office QR — singleton (mirrors Library). Scanning it opens the payment-category
 // chooser rather than one flat payment, since Accounts collects many payment categories.
 export const getAccountsQr = (input: Record<string, unknown> = {}) =>
@@ -508,6 +594,27 @@ export const assignLibraryFine = (input: Record<string, unknown>) =>
 
 export const waiveLibraryFine = (input: { fineId: string; reason?: string; action?: string; newAmount?: number }) =>
   apiCall<{ success: boolean; message: string }>('/library/fines/waive', input);
+
+// Library's own issued-fines list — status monitoring only, mirrors ListAdminFinesOutputType.
+export type ListLibraryFinesOutputType = {
+  fines: Array<{
+    id: string; label: string; fineType: string; amount: number; reference: string; status: string;
+    dueDate: string; createdAt: string; studentName: string; studentId: string;
+  }>;
+};
+
+export const listLibraryFines = (input: { status?: string; search?: string } = {}) =>
+  apiCall<ListLibraryFinesOutputType>('/library/fines/list', input);
+
+export const cancelLibraryFine = (input: { fineId: string; reason?: string }) =>
+  apiCall<{ success: boolean; message: string }>('/library/fines/cancel', input);
+
+export type LibraryFineHistoryOutputType = {
+  history: Array<{ id: string; action: string; details: string; actorName: string; studentName: string; studentId: string; createdAt: string }>;
+};
+
+export const getLibraryFineHistory = (input: Record<string, unknown> = {}) =>
+  apiCall<LibraryFineHistoryOutputType>('/library/fines/history', input);
 
 export const getLibraryClearance = (input: Record<string, unknown> = {}) =>
   apiCall<GetLibraryClearanceOutputType>('/library/clearance', input);
@@ -590,6 +697,40 @@ export const processFeeBatchApproval = (input: Record<string, unknown>) =>
 export const executeFeePushBatch = (batchId: string) =>
   apiCall<{ success: boolean; message: string; pushedCount: number }>('/accounts/fee-import/push', { batchId });
 
+// Scholarship Push — Excel upload -> validate -> push, mirroring the Fee Push client functions
+// above but for the simpler (no Maker/Checker/Approver) Accounts Office scholarship-credit flow.
+export const downloadScholarshipTemplate = async () => {
+  const token = getToken();
+  const res = await fetch(`${API_URL}/accounts/scholarship-push/template`, {
+    headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+  });
+  if (!res.ok) throw new Error('Template download failed');
+  const blob = await res.blob();
+  const url = window.URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = 'scholarship_push_template.xlsx';
+  a.click();
+};
+
+export const validateScholarshipImport = async (formData: FormData) => {
+  const token = getToken();
+  const res = await fetch(`${API_URL}/accounts/scholarship-push/validate`, {
+    method: 'POST',
+    headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+    body: formData,
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || data.message || 'Validation failed');
+  return data;
+};
+
+export const submitScholarshipBatch = (input: Record<string, unknown>) =>
+  apiCall<{ success: boolean; message: string; batch: any }>('/accounts/scholarship-push/submit', input);
+
+export const executeScholarshipPush = (batchId: string) =>
+  apiCall<{ success: boolean; message: string; pushedCount: number; batchNumber: string; skippedReasons: string[] }>('/accounts/scholarship-push/push', { batchId });
+
 export const getAccountsLedger = (input?: { studentId?: string; type?: string } | string) => {
   if (typeof input === 'string') return apiCall<{ entries: any[] }>('/accounts/ledger', { studentId: input });
   return apiCall<{ entries: any[] }>('/accounts/ledger', input || {});
@@ -602,6 +743,22 @@ export const getShopDashboard = (input: Record<string, unknown> = {}) =>
 
 export const generateSalesLedgerReport = (input: { format: 'csv' | 'excel' | 'pdf'; period?: 'today' | 'week' | 'month' | 'all' }) =>
   apiCall<{ url: string }>('/shop/sales-ledger/report', input);
+
+// Completed (Settled) Payments — real server-side filtering (Student ID/Name, date range,
+// Transaction ID), unlike the dashboard's today/week/month toggle over a max-20-row array.
+export type ShopTransactionSearchResult = {
+  transactions: Array<{
+    id: string; reference: string; amount: number; status: string; description: string;
+    paymentMethod: string; studentName: string; studentId: string; createdAt: string;
+  }>;
+  total: number; page: number; pageSize: number;
+};
+
+export const searchShopTransactions = (input: {
+  studentId?: string; studentName?: string; dateFrom?: string; dateTo?: string; transactionId?: string;
+  page?: number; pageSize?: number;
+} = {}) =>
+  apiCall<ShopTransactionSearchResult>('/shop/transactions/search', input);
 
 export const regenerateShopQr = (input: Record<string, unknown> = {}) =>
   apiCall<{ success: boolean; qrToken: string; message: string }>('/shop/regenerate-qr', input);

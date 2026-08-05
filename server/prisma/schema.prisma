@@ -49,6 +49,7 @@ model User {
   transactions     Transaction[]
   semesterFees     SemesterFee[]
   libraryFines     LibraryFine[]
+  libraryFinesIssued LibraryFine[] @relation("LibraryFineIssuedBy")
   adminFines       AdminFine[]
   adminFinesIssued AdminFine[]   @relation("AdminFineIssuedBy")
   payLaterDues     PayLaterDue[]
@@ -86,6 +87,9 @@ model User {
   settlementRequestsAdminReview SettlementRequest[]        @relation("SettlementAdminReviewed")
   settlementRequestsAccounts    SettlementRequest[]        @relation("SettlementAccountsProcessed")
   settlementStatusChanges       SettlementStatusHistory[]  @relation("SettlementStatusChangedBy")
+
+  // Scholarship Push Module
+  scholarshipBatchesUploaded ScholarshipPushBatch[] @relation("ScholarshipBatchUploadedBy")
 }
 
 model Wallet {
@@ -340,6 +344,21 @@ model LibraryFine {
   dueDate   String?
   status    String   @default("Pending")
   reference String?
+  // Accounts Office visibility — mirrors AdminFine's issued/cancelled/reconciled fields so Library
+  // Fines get the same Accounts-facing receivable/reconciliation treatment as Administrative Fines.
+  issuedBy       User?     @relation("LibraryFineIssuedBy", fields: [issuedById], references: [id])
+  issuedById     String?
+  cancelledAt    DateTime?
+  cancelledById  String?
+  reconciledAt   DateTime?
+  reconciledById String?
+  // Outstanding-Due Reminder/Auto-Deduction/Late-Fine automation tracking (idempotency stamps for
+  // the daily cron in server/src/lib/reminderAutoDeduct.ts) — see PayLaterDue/AdminFine for the
+  // same columns.
+  firstReminderSentAt       DateTime?
+  insufficientFundsNoticeAt DateTime?
+  autoDeductedAt            DateTime?
+  lateFeeAppliedAt          DateTime?
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -364,6 +383,11 @@ model AdminFine {
   cancelledById  String?
   reconciledAt   DateTime?
   reconciledById String?
+  // Outstanding-Due Reminder/Auto-Deduction/Late-Fine automation tracking — see LibraryFine above.
+  firstReminderSentAt       DateTime?
+  insufficientFundsNoticeAt DateTime?
+  autoDeductedAt            DateTime?
+  lateFeeAppliedAt          DateTime?
   createdAt      DateTime  @default(now())
   updatedAt      DateTime  @updatedAt
 
@@ -382,10 +406,60 @@ model PayLaterDue {
   dueDate          String?
   description      String?
   paymentReference String?
+  // Outstanding-Due Reminder/Auto-Deduction/Late-Fine automation tracking — see LibraryFine above.
+  firstReminderSentAt       DateTime?
+  insufficientFundsNoticeAt DateTime?
+  autoDeductedAt            DateTime?
+  lateFeeAppliedAt          DateTime?
   createdAt        DateTime @default(now())
   updatedAt        DateTime @updatedAt
 
   @@index([studentId, status])
+}
+
+// ─── SCHOLARSHIP PUSH MODULE ───
+//
+// Parallel, simpler sibling of SemesterFeeBatch/SemesterFeeItem — deliberately NOT reusing those,
+// since they're tightly coupled to Fee Push's Maker/Checker/Approver workflow fields. Scholarship
+// Push is a direct Admin-Office-only upload -> validate -> push flow (no approval chain), and unlike
+// Fee Push (which only creates a due/DEBIT_DUE), it actually credits the student's Wallet.
+model ScholarshipPushBatch {
+  id            String    @id @default(cuid())
+  batchNumber   String    @unique
+  label         String?
+  status        String    @default("Draft") // Draft, Validated, Pushed, Failed
+  totalRows     Int       @default(0)
+  validRows     Int       @default(0)
+  invalidRows   Int       @default(0)
+  totalAmount   Float     @default(0)
+  uploadedBy    User      @relation("ScholarshipBatchUploadedBy", fields: [uploadedById], references: [id])
+  uploadedById  String
+  pushedAt      DateTime?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  items ScholarshipPushItem[]
+
+  @@index([status])
+}
+
+model ScholarshipPushItem {
+  id                   String               @id @default(cuid())
+  batch                ScholarshipPushBatch @relation(fields: [batchId], references: [id], onDelete: Cascade)
+  batchId              String
+  studentId            String
+  studentName          String?
+  studentEmail         String?
+  amount               Float
+  remark               String?
+  status               String   @default("Valid") // Valid, Invalid, Duplicate, Pushed, Error
+  validationErrorsJson String?
+  matchedUserId        String?
+  transactionReference String?
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+
+  @@index([batchId, status])
 }
 
 model OtpCode {

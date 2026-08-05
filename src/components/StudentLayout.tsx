@@ -1,15 +1,12 @@
 import { useEffect, useState } from 'react';
 import { Outlet, NavLink, useNavigate, useLocation } from 'react-router-dom';
-import { GraduationCap, Home, Store, FileWarning, ScanLine, LogOut, Settings, ScrollText, CreditCard, History, UserCircle, ShieldAlert } from 'lucide-react';
+import { GraduationCap, Home, Store, FileWarning, ScanLine, LogOut, Settings, UserCircle, ShieldAlert } from 'lucide-react';
 import { useAuth } from '@/lib/auth-context';
 import { UserProvider, useUser } from '@/lib/user-context';
 import { Skeleton } from '@/components/ui/skeleton';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger, DropdownMenuSeparator } from '@/components/ui/dropdown-menu';
 import { motion } from 'framer-motion';
-import { getDisputeBadgeCounts } from '@/lib/disputeApi';
-import { useDisputeSocket } from '@/lib/socket';
 import NotificationBell from '@/components/NotificationBell';
-import { MoreMenuDesktop, MoreMenuMobile, type MoreMenuItem } from '@/components/MoreMenu';
 import { getFinancialStatus, type FinancialStatusOutputType } from '@/lib/api';
 import { formatCurrency } from '@/lib/mock-data';
 
@@ -17,11 +14,15 @@ import { formatCurrency } from '@/lib/mock-data';
 // Everything else redirects to /student/dues, where the consolidated settlement lives.
 const RESTRICTION_ALLOWED_PREFIXES = ['/student/dues', '/student/profile', '/student/settings'];
 
+// Exactly 5 primary tabs — Payments/Ledger/Disputes/Settings (formerly a "More" dropdown) now live
+// as icon tiles on the Home dashboard instead, matching the Scan & Pay / Add Money tile style.
+// Profile/Settings remain additionally reachable from anywhere via the avatar menu below.
 const primaryNavItems = [
   { to: '/student', icon: Home, label: 'Home', end: true },
   { to: '/student/shops', icon: Store, label: 'Shops' },
   { to: '/student/scan', icon: ScanLine, label: 'Scan' },
   { to: '/student/dues', icon: FileWarning, label: 'Dues' },
+  { to: '/student/profile', icon: UserCircle, label: 'Profile' },
 ];
 
 function LayoutInner() {
@@ -29,25 +30,12 @@ function LayoutInner() {
   const location = useLocation();
   const { user, loading } = useUser();
   const { logout } = useAuth();
-  const [pendingCases, setPendingCases] = useState(0);
   const [financialStatus, setFinancialStatus] = useState<FinancialStatusOutputType | null>(null);
-
-  useEffect(() => {
-    if (!user) return;
-    const fetchBadge = () => getDisputeBadgeCounts().then(r => setPendingCases(r.pendingCases)).catch(() => {});
-    fetchBadge();
-    // Poll as a fallback (socket disconnects, tab was backgrounded, etc.) — the socket below is
-    // what makes the badge update instantly in the common case.
-    const interval = setInterval(fetchBadge, 30000);
-    return () => clearInterval(interval);
-  }, [user]);
-
-  useDisputeSocket(() => setPendingCases(c => c + 1));
 
   // Financial restriction is derived live server-side, never cached on the login-time user
   // object — a Semester Fee can go overdue, or get cleared by a settlement, at any point during
-  // a long-lived session. Polled the same way the dispute badge above is, so it self-heals
-  // shortly after either happens without requiring a re-login.
+  // a long-lived session. Polled every 30s so it self-heals shortly after either happens without
+  // requiring a re-login.
   useEffect(() => {
     if (!user) return;
     const fetchStatus = () => getFinancialStatus().then(setFinancialStatus).catch(() => {});
@@ -62,19 +50,6 @@ function LayoutInner() {
     const onAllowedRoute = RESTRICTION_ALLOWED_PREFIXES.some(p => location.pathname.startsWith(p));
     if (!onAllowedRoute) navigate('/student/dues', { replace: true });
   }, [restricted, location.pathname, navigate]);
-
-  const overflowItems: MoreMenuItem[] = [
-    { to: '/student/payments', icon: CreditCard, label: 'Payments' },
-    { to: '/student/ledger', icon: History, label: 'Ledger' },
-    {
-      to: '/student/disputes', icon: ScrollText, label: 'Disputes',
-      badge: pendingCases > 0 ? (
-        <span className="min-w-[16px] h-4 px-1 rounded-full bg-destructive text-[9px] font-bold text-white flex items-center justify-center">{pendingCases > 99 ? '99+' : pendingCases}</span>
-      ) : undefined,
-    },
-    { to: '/student/profile', icon: UserCircle, label: 'Profile' },
-    { to: '/student/settings', icon: Settings, label: 'Settings' },
-  ];
 
   return (
     <div className="min-h-screen bg-background flex flex-col">
@@ -113,7 +88,6 @@ function LayoutInner() {
                 )}
               </NavLink>
             ))}
-            <MoreMenuDesktop items={overflowItems} layoutPrefix="student" />
           </div>
 
           {/* Right controls */}
@@ -185,7 +159,6 @@ function LayoutInner() {
               )}
             </NavLink>
           ))}
-          <MoreMenuMobile items={overflowItems} layoutPrefix="student-mobile" />
         </div>
       </nav>
     </div>

@@ -12,6 +12,7 @@ import StatusBadge from '@/components/StatusBadge';
 import { toast } from 'sonner';
 import { getStaff, manageStaff, type GetStaffOutputType } from '@/lib/api';
 import { FadeIn } from '@/components/PageTransition';
+import BackButton from '@/components/BackButton';
 
 type Staff = GetStaffOutputType['staff'][0];
 
@@ -109,6 +110,7 @@ export default function StaffAccountsPage() {
   return (
     <div className="container mx-auto px-4 sm:px-6 py-6 max-w-6xl">
       <FadeIn>
+        <BackButton fallback="/admin" />
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-6">
           <div>
             <h1 className="text-xl font-bold text-foreground">Staff Accounts</h1>

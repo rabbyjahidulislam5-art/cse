@@ -4,6 +4,7 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { getShopDashboard, generateSalesLedgerReport, type GetShopDashboardOutputType } from '@/lib/api';
 import { motion } from 'framer-motion';
 import ExportButton from '@/components/ExportButton';
+import BackButton from '@/components/BackButton';
 
 export default function ShopSalesLedgerPage() {
   const [data, setData] = useState<GetShopDashboardOutputType | null>(null);
@@ -21,6 +22,7 @@ export default function ShopSalesLedgerPage() {
 
   return (
     <div className="container mx-auto px-4 sm:px-6 py-6 max-w-3xl">
+      <BackButton fallback="/shop" />
       <div className="flex items-center justify-between mb-6 flex-wrap gap-3">
         <h1 className="text-xl font-bold text-foreground">Sales Ledger</h1>
         <ExportButton

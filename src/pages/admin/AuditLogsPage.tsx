@@ -7,6 +7,7 @@ import { toast } from 'sonner';
 import { getAuditLogs, generateAuditLogReport, type GetAuditLogsOutputType } from '@/lib/api';
 import { FadeIn } from '@/components/PageTransition';
 import ExportButton from '@/components/ExportButton';
+import BackButton from '@/components/BackButton';
 
 type Log = GetAuditLogsOutputType['logs'][0];
 
@@ -33,6 +34,7 @@ export default function AuditLogsPage() {
   return (
     <div className="container mx-auto px-4 sm:px-6 py-6 max-w-6xl">
       <FadeIn>
+        <BackButton fallback="/admin" />
         <div className="flex items-center justify-between mb-6">
           <div>
             <h1 className="text-xl font-bold text-foreground">System Audit Logs</h1>

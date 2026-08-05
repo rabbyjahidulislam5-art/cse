@@ -7,6 +7,7 @@ import { Label } from '@/components/ui/label';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog';
 import { toast } from 'sonner';
 import { searchStudents, getDues, adjustSemesterFee, type GetDuesOutputType } from '@/lib/api';
+import BackButton from '@/components/BackButton';
 
 type Fee = GetDuesOutputType['semester'][0];
 
@@ -60,6 +61,7 @@ export default function FeeAdjustmentsPage() {
 
   return (
     <div className="container mx-auto px-4 sm:px-6 py-6 max-w-4xl">
+      <BackButton fallback="/accounts" />
       <h1 className="text-xl font-bold text-foreground mb-6">Fee Adjustments</h1>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">

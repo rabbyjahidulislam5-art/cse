@@ -1,10 +1,12 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
-import { Store, ShieldAlert, Activity, Database, Loader2, CheckCircle2, XCircle } from 'lucide-react';
+import { Store, ShieldAlert, Activity, Database, Loader2, CheckCircle2, XCircle, UserCog, UserCircle, ScrollText, FileText } from 'lucide-react';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Button } from '@/components/ui/button';
 import { getAdminOverview, seedData, type GetAdminOverviewOutputType } from '@/lib/api';
+import { getDisputeBadgeCounts } from '@/lib/disputeApi';
+import { useDisputeSocket } from '@/lib/socket';
 import { toast } from 'sonner';
 import { FadeIn } from '@/components/PageTransition';
 
@@ -35,6 +37,27 @@ export default function AdminHomePage() {
   const [data, setData] = useState<OverviewData | null>(null);
   const [loading, setLoading] = useState(true);
   const [seeding, setSeeding] = useState(false);
+  const [pendingCases, setPendingCases] = useState(0);
+
+  // Disputes/Audit moved here from the nav bar's old "More" dropdown — that dropdown's badge was
+  // only ever visible once opened, so this tile now carries the same live pending-disputes count
+  // (polled + socket-updated) with strictly better at-a-glance visibility.
+  useEffect(() => {
+    const fetchBadge = () => getDisputeBadgeCounts().then(r => setPendingCases(r.pendingCases)).catch(() => {});
+    fetchBadge();
+    const interval = setInterval(fetchBadge, 30000);
+    return () => clearInterval(interval);
+  }, []);
+  useDisputeSocket(() => setPendingCases(c => c + 1));
+
+  const quickActions = [
+    { label: 'Shops', icon: Store, onClick: () => navigate('/admin/shops'), color: 'from-[hsl(var(--chart-2))]/15 to-[hsl(var(--chart-2))]/5', iconColor: 'text-[hsl(var(--chart-2))]' },
+    { label: 'Fines', icon: ShieldAlert, onClick: () => navigate('/admin/fines'), color: 'from-[hsl(var(--chart-5))]/15 to-[hsl(var(--chart-5))]/5', iconColor: 'text-[hsl(var(--chart-5))]' },
+    { label: 'Staff', icon: UserCog, onClick: () => navigate('/admin/staff'), color: 'from-[hsl(var(--chart-4))]/15 to-[hsl(var(--chart-4))]/5', iconColor: 'text-[hsl(var(--chart-4))]' },
+    { label: 'Profile', icon: UserCircle, onClick: () => navigate('/admin/profile'), color: 'from-primary/15 to-primary/5', iconColor: 'text-primary' },
+    { label: 'Disputes', icon: ScrollText, onClick: () => navigate('/admin/disputes'), color: 'from-destructive/15 to-destructive/5', iconColor: 'text-destructive', badge: pendingCases },
+    { label: 'Audit', icon: FileText, onClick: () => navigate('/admin/audit'), color: 'from-[hsl(var(--chart-3))]/15 to-[hsl(var(--chart-3))]/5', iconColor: 'text-[hsl(var(--chart-3))]' },
+  ];
 
   const handleSeed = async () => {
     setSeeding(true);
@@ -82,6 +105,31 @@ export default function AdminHomePage() {
           <StatCard icon={Store} label="Total Shops" value={data?.totalShops || 0} subtitle={`${data?.activeShops || 0} active · ${data?.suspendedShops || 0} suspended`} color="--chart-2" onClick={() => navigate('/admin/shops')} />
           <StatCard icon={ShieldAlert} label="Fines Awaiting Payment" value={data?.finesPendingCount || 0} color="--chart-5" onClick={() => navigate('/admin/fines')} />
           <StatCard icon={Activity} label="System Status" value="Operational" color="--chart-3" />
+        </div>
+      </FadeIn>
+
+      <FadeIn delay={0.08}>
+        <div className="grid grid-cols-3 sm:grid-cols-6 gap-3 mb-8">
+          {quickActions.map((qa, i) => (
+            <motion.button
+              key={qa.label}
+              initial={{ opacity: 0, y: 16 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: 0.1 + i * 0.06 }}
+              onClick={qa.onClick}
+              className="relative flex flex-col items-center justify-center gap-3 p-4 sm:p-5 rounded-2xl border border-border/60 bg-card hover:border-primary/20 transition-all group active:scale-[0.97]"
+            >
+              {!!qa.badge && qa.badge > 0 && (
+                <span className="absolute top-2.5 right-2.5 min-w-[16px] h-4 px-1 rounded-full bg-destructive text-[9px] font-bold text-white flex items-center justify-center">
+                  {qa.badge > 99 ? '99+' : qa.badge}
+                </span>
+              )}
+              <div className={`w-11 h-11 rounded-xl bg-gradient-to-br ${qa.color} flex items-center justify-center group-hover:scale-105 transition-transform`}>
+                <qa.icon className={`w-5 h-5 ${qa.iconColor}`} />
+              </div>
+              <span className="text-xs font-semibold text-foreground">{qa.label}</span>
+            </motion.button>
+          ))}
         </div>
       </FadeIn>
 

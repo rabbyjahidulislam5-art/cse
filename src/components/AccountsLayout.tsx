@@ -1,5 +1,5 @@
 import { Outlet, NavLink, useNavigate } from 'react-router-dom';
-import { Home, Users, BookOpen, FileText, ScrollText, LogOut, Landmark, Receipt, BarChart3, ShieldAlert, QrCode, Banknote, UserCheck, Wallet, ArrowUpRight } from 'lucide-react';
+import { Home, Users, ScrollText, LogOut, Landmark, ArrowUpRight, UserCheck } from 'lucide-react';
 import { useAuth } from '@/lib/auth-context';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger, DropdownMenuSeparator } from '@/components/ui/dropdown-menu';
 import { motion } from 'framer-motion';
@@ -7,13 +7,17 @@ import { useEffect, useState } from 'react';
 import { getDisputeBadgeCounts } from '@/lib/disputeApi';
 import { useDisputeSocket } from '@/lib/socket';
 import NotificationBell from '@/components/NotificationBell';
-import { MoreMenuDesktop, MoreMenuMobile, type MoreMenuItem } from '@/components/MoreMenu';
 
+// Exactly 5 primary tabs, matching the Student/Library/Admin nav pattern — the remaining items
+// that lived in the old "More" dropdown (Payment QR, Adjust, Analytics, Ledger, Admin Fines,
+// Library Fines, Student Profile, Scholarship Push, Bank Payment) now live as icon tiles on the
+// Home dashboard instead.
 const primaryNavItems = [
   { to: '/accounts', icon: Home, label: 'Home', end: true },
   { to: '/accounts/settlements', icon: ArrowUpRight, label: 'Settlement' },
   { to: '/accounts/fee-wizard', icon: Users, label: 'Fee Push' },
   { to: '/accounts/disputes', icon: ScrollText, label: 'Disputes' },
+  { to: '/accounts/profile', icon: UserCheck, label: 'Profile' },
 ];
 
 export default function AccountsLayout() {
@@ -45,16 +49,6 @@ export default function AccountsLayout() {
   }, [user]);
 
   useDisputeSocket(() => fetchBadge());
-
-  const overflowItems: MoreMenuItem[] = [
-    { to: '/accounts/qr', icon: QrCode, label: 'Payment QR' },
-    { to: '/accounts/adjustments', icon: Receipt, label: 'Adjust' },
-    { to: '/accounts/analytics', icon: BarChart3, label: 'Analytics' },
-    { to: '/accounts/ledger', icon: BookOpen, label: 'Ledger' },
-    { to: '/accounts/admin-fines', icon: ShieldAlert, label: 'Admin Fines' },
-    { to: '/accounts/manual-payment', icon: Banknote, label: 'Bank Payment' },
-    { to: '/accounts/profile', icon: UserCheck, label: 'Profile' },
-  ];
 
   if (isLoading || !user || (user as any).role !== 'Accounts Office') return null;
 
@@ -89,7 +83,6 @@ export default function AccountsLayout() {
                 )}
               </NavLink>
             ))}
-            <MoreMenuDesktop items={overflowItems} layoutPrefix="accounts" />
           </div>
 
           <div className="flex items-center gap-2">
@@ -140,7 +133,6 @@ export default function AccountsLayout() {
               )}
             </NavLink>
           ))}
-          <MoreMenuMobile items={overflowItems} layoutPrefix="acc-mobile" />
         </div>
       </nav>
     </div>

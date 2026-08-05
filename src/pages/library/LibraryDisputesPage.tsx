@@ -5,6 +5,7 @@ import { ScrollText, ChevronRight } from 'lucide-react';
 import { Skeleton } from '@/components/ui/skeleton';
 import StatusBadge from '@/components/StatusBadge';
 import { FadeIn } from '@/components/PageTransition';
+import BackButton from '@/components/BackButton';
 import { getLibraryDisputeList, type RoleDisputeSummary } from '@/lib/disputeApi';
 import { formatCurrency } from '@/lib/mock-data';
 
@@ -18,6 +19,7 @@ export default function LibraryDisputesPage() {
   return (
     <div className="container mx-auto px-4 sm:px-6 py-6 max-w-3xl">
       <FadeIn>
+        <BackButton fallback="/library" />
         <div className="mb-6">
           <h1 className="text-xl font-bold text-foreground">Library Dispute Inbox</h1>
 

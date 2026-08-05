@@ -371,9 +371,9 @@ export async function assembleDisputeDetail(disputeId: string) {
     transaction: transactionDetail,
     messages: dispute.messages.map(m => ({
       id: m.id, body: m.body, isInternal: m.isInternal, authorName: m.author.fullName || 'Unknown', authorRole: m.author.role, createdAt: m.createdAt,
-      attachments: m.attachments.map(a => ({ id: a.id, originalName: a.originalName, mimeType: a.mimeType, sizeBytes: a.sizeBytes, scanStatus: a.scanStatus })),
+      attachments: m.attachments.map(a => ({ id: a.id, originalName: a.originalName, mimeType: a.mimeType, sizeBytes: a.sizeBytes, scanStatus: a.scanStatus, url: disputeAttachmentUrl(a.disputeId, a.storedName) })),
     })),
-    attachments: dispute.attachments.map(a => ({ id: a.id, originalName: a.originalName, mimeType: a.mimeType, sizeBytes: a.sizeBytes, scanStatus: a.scanStatus, createdAt: a.createdAt })),
+    attachments: dispute.attachments.map(a => ({ id: a.id, originalName: a.originalName, mimeType: a.mimeType, sizeBytes: a.sizeBytes, scanStatus: a.scanStatus, createdAt: a.createdAt, url: disputeAttachmentUrl(a.disputeId, a.storedName) })),
     timeline: dispute.timeline.map(t => ({ id: t.id, eventType: t.eventType, summary: t.summary, createdAt: t.createdAt })),
     statusHistory: dispute.statusHistory.map(s => ({ id: s.id, fromStatus: s.fromStatus, toStatus: s.toStatus, reason: s.reason, changedByName: s.changedBy.fullName, createdAt: s.createdAt })),
     refunds: dispute.refunds.map(r => ({ id: r.id, method: r.method, amountType: r.amountType, amount: r.amount, status: r.status, reversalTransactionId: r.reversalTransactionId, notes: r.notes, createdAt: r.createdAt, processedAt: r.processedAt, approvals: r.approvals })),

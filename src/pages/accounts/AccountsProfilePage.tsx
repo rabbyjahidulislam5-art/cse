@@ -10,6 +10,7 @@ import { Loader2, LogOut, Save, User, Lock, ShieldCheck, Mail, Phone, Landmark, 
 import { useAuth } from '@/lib/auth-context';
 import { getAccountsProfile, updateAccountsProfile, uploadFile, type GetAccountsProfileOutputType } from '@/lib/api';
 import { FadeIn } from '@/components/PageTransition';
+import BackButton from '@/components/BackButton';
 
 function ReadOnlyField({ icon: Icon, label, value }: { icon: typeof User; label: string; value: string }) {
   return (
@@ -97,6 +98,7 @@ export default function AccountsProfilePage() {
 
   return (
     <div className="container mx-auto px-4 sm:px-6 py-6 max-w-3xl space-y-6">
+      <BackButton fallback="/accounts" />
       {/* Header Banner */}
       <FadeIn>
         <div className="relative rounded-2xl border border-border/60 bg-card p-6 overflow-hidden">

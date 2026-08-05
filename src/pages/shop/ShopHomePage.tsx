@@ -1,9 +1,11 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ShoppingBag, Bell, QrCode, Loader2, Landmark, Clock, Wallet } from 'lucide-react';
+import { ShoppingBag, Bell, QrCode, Loader2, Landmark, Clock, History, BellRing, Wallet2, ScrollText } from 'lucide-react';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Button } from '@/components/ui/button';
 import { getShopDashboard, type GetShopDashboardOutputType } from '@/lib/api';
+import { getDisputeBadgeCounts } from '@/lib/disputeApi';
+import { useDisputeSocket } from '@/lib/socket';
 import { motion } from 'framer-motion';
 
 export default function ShopHomePage() {
@@ -11,6 +13,7 @@ export default function ShopHomePage() {
   const [data, setData] = useState<GetShopDashboardOutputType | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const [pendingCases, setPendingCases] = useState(0);
 
   useEffect(() => {
     getShopDashboard({})
@@ -18,6 +21,25 @@ export default function ShopHomePage() {
       .catch(e => setError(e.message || 'Failed to load'))
       .finally(() => setLoading(false));
   }, []);
+
+  // Payments/Disputes moved here from the nav bar's old "More" dropdown — that dropdown's badge
+  // was only ever visible once opened, so this tile now carries the same live pending-disputes
+  // count (polled + socket-updated) with strictly better at-a-glance visibility.
+  useEffect(() => {
+    const fetchBadge = () => getDisputeBadgeCounts().then(r => setPendingCases(r.pendingCases)).catch(() => {});
+    fetchBadge();
+    const interval = setInterval(fetchBadge, 30000);
+    return () => clearInterval(interval);
+  }, []);
+  useDisputeSocket(() => setPendingCases(c => c + 1));
+
+  const quickActions = [
+    { label: 'Sales', icon: History, onClick: () => navigate('/shop/ledger'), color: 'from-primary/15 to-primary/5', iconColor: 'text-primary' },
+    { label: 'QR Code', icon: QrCode, onClick: () => navigate('/shop/qr'), color: 'from-secondary/15 to-secondary/5', iconColor: 'text-secondary' },
+    { label: 'Notification', icon: BellRing, onClick: () => navigate('/shop/notifications'), color: 'from-[hsl(var(--chart-2))]/15 to-[hsl(var(--chart-2))]/5', iconColor: 'text-[hsl(var(--chart-2))]' },
+    { label: 'Payments', icon: Wallet2, onClick: () => navigate('/shop/payments'), color: 'from-[hsl(var(--chart-3))]/15 to-[hsl(var(--chart-3))]/5', iconColor: 'text-[hsl(var(--chart-3))]' },
+    { label: 'Disputes', icon: ScrollText, onClick: () => navigate('/shop/disputes'), color: 'from-destructive/15 to-destructive/5', iconColor: 'text-destructive', badge: pendingCases },
+  ];
 
   if (loading) return (
     <div className="container mx-auto px-4 sm:px-6 py-6 max-w-4xl space-y-6">
@@ -42,6 +64,29 @@ export default function ShopHomePage() {
         <h1 className="text-xl font-bold text-foreground">{data?.shop.name || 'Shop Dashboard'}</h1>
         <p className="text-xs text-muted-foreground mt-0.5">{data?.shop.category} · {data?.shop.status}</p>
       </motion.div>
+
+      <div className="grid grid-cols-3 sm:grid-cols-5 gap-3 mb-6">
+        {quickActions.map((qa, i) => (
+          <motion.button
+            key={qa.label}
+            initial={{ opacity: 0, y: 16 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: i * 0.05 }}
+            onClick={qa.onClick}
+            className="relative flex flex-col items-center justify-center gap-3 p-4 sm:p-5 rounded-2xl border border-border/60 bg-card hover:border-primary/20 transition-all group active:scale-[0.97]"
+          >
+            {!!qa.badge && qa.badge > 0 && (
+              <span className="absolute top-2.5 right-2.5 min-w-[16px] h-4 px-1 rounded-full bg-destructive text-[9px] font-bold text-white flex items-center justify-center">
+                {qa.badge > 99 ? '99+' : qa.badge}
+              </span>
+            )}
+            <div className={`w-11 h-11 rounded-xl bg-gradient-to-br ${qa.color} flex items-center justify-center group-hover:scale-105 transition-transform`}>
+              <qa.icon className={`w-5 h-5 ${qa.iconColor}`} />
+            </div>
+            <span className="text-xs font-semibold text-foreground text-center">{qa.label}</span>
+          </motion.button>
+        ))}
+      </div>
 
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-6">
         <motion.button initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} onClick={() => navigate('/shop/ledger')}

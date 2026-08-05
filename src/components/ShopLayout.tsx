@@ -1,19 +1,20 @@
 import { Outlet, NavLink, useNavigate } from 'react-router-dom';
-import { Home, QrCode, BellRing, History, LogOut, Store, ScrollText, UserCircle } from 'lucide-react';
+import { Home, QrCode, BellRing, History, LogOut, Store, UserCircle } from 'lucide-react';
 import { useAuth } from '@/lib/auth-context';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger, DropdownMenuSeparator } from '@/components/ui/dropdown-menu';
 import { motion } from 'framer-motion';
 import { useEffect, useState, useRef } from 'react';
-import { getDisputeBadgeCounts } from '@/lib/disputeApi';
 import { useDisputeSocket, useNotificationSocket } from '@/lib/socket';
 import { getUnreadNotificationCount } from '@/lib/api';
-import { MoreMenuDesktop, MoreMenuMobile, type MoreMenuItem } from '@/components/MoreMenu';
 
+// Exactly 5 primary tabs, matching the Student/Library/Admin/Accounts nav pattern — Payments/
+// Disputes (formerly a "More" dropdown) now live as icon tiles on the Home dashboard instead.
 const primaryNavItems = [
   { to: '/shop', icon: Home, label: 'Home', end: true },
   { to: '/shop/ledger', icon: History, label: 'Sales' },
   { to: '/shop/qr', icon: QrCode, label: 'QR Code' },
   { to: '/shop/notifications', icon: BellRing, label: 'Notification' },
+  { to: '/shop/profile', icon: UserCircle, label: 'Profile' },
 ];
 
 // A short synthesized beep via the Web Audio API — no external audio asset needed, so there's
@@ -39,7 +40,6 @@ function playAlertSound() {
 export default function ShopLayout() {
   const navigate = useNavigate();
   const { user, isLoading, loginWithRedirect, logout } = useAuth();
-  const [pendingCases, setPendingCases] = useState(0);
   const [unreadNotifs, setUnreadNotifs] = useState(0);
   const mounted = useRef(false);
 
@@ -60,17 +60,14 @@ export default function ShopLayout() {
     if (!user.emailVerified) { navigate('/shop/verify-email', { replace: true }); return; }
   }, [user, navigate]);
 
-  const fetchBadge = () => getDisputeBadgeCounts().then(r => setPendingCases(r.pendingCases)).catch(() => {});
   useEffect(() => {
     if (!user) return;
-    fetchBadge();
     mounted.current = true;
-    const interval = setInterval(fetchBadge, 30000);
-    return () => clearInterval(interval);
   }, [user]);
 
+  // Dispute badge count now lives on the Home dashboard's Disputes tile instead — this socket
+  // subscription stays here only to fire the audible alert regardless of which page is open.
   useDisputeSocket(() => {
-    fetchBadge();
     if (mounted.current) playAlertSound();
   });
 
@@ -82,15 +79,6 @@ export default function ShopLayout() {
     return () => clearInterval(interval);
   }, [user]);
   useNotificationSocket(() => setUnreadNotifs(c => c + 1));
-
-  const overflowItems: MoreMenuItem[] = [
-    {
-      to: '/shop/disputes', icon: ScrollText, label: 'Disputes',
-      badge: pendingCases > 0 ? (
-        <span className="min-w-[16px] h-4 px-1 rounded-full bg-destructive text-[9px] font-bold text-white flex items-center justify-center">{pendingCases > 99 ? '99+' : pendingCases}</span>
-      ) : undefined,
-    },
-  ];
 
   if (isLoading || !user || (user as any).role !== 'Shop Staff') return null;
   if (user.mustChangePassword || !user.emailVerified) return null;
@@ -126,7 +114,6 @@ export default function ShopLayout() {
                 )}
               </NavLink>
             ))}
-            <MoreMenuDesktop items={overflowItems} layoutPrefix="shop" />
           </div>
 
           <DropdownMenu>
@@ -174,7 +161,6 @@ export default function ShopLayout() {
               )}
             </NavLink>
           ))}
-          <MoreMenuMobile items={overflowItems} layoutPrefix="shop-mobile" />
         </div>
       </nav>
     </div>

@@ -14,6 +14,7 @@ import {
 } from '@/lib/api';
 import { useNotificationSocket } from '@/lib/socket';
 import { FadeIn } from '@/components/PageTransition';
+import BackButton from '@/components/BackButton';
 
 const STATUS_TABS = ['All', 'Pending', 'Paid', 'Waived', 'Cancelled', 'Disputed'];
 
@@ -95,6 +96,7 @@ export default function AdministrativeFinesPage() {
   return (
     <div className="container mx-auto px-4 sm:px-6 py-6 max-w-5xl">
       <FadeIn>
+        <BackButton fallback="/accounts" />
         <div className="mb-6">
           <h1 className="text-xl font-bold text-foreground">Administrative Fines</h1>
 

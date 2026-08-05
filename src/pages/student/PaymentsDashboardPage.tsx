@@ -10,6 +10,7 @@ import { formatCurrency } from '@/lib/mock-data';
 import { FadeIn } from '@/components/PageTransition';
 import TransactionDetailCard from '@/components/disputes/TransactionDetailCard';
 import DisputeWizard from '@/components/disputes/DisputeWizard';
+import BackButton from '@/components/BackButton';
 import type { TransactionDetail } from '@/lib/disputeApi';
 
 type TxType = GetTransactionsOutputType['transactions'][0];
@@ -68,6 +69,7 @@ export default function PaymentsDashboardPage() {
   return (
     <div className="container mx-auto px-4 sm:px-6 py-6 max-w-5xl">
       <FadeIn>
+        <BackButton fallback="/student" />
         <div className="mb-6">
           <h1 className="text-xl font-bold text-foreground">Payments Dashboard</h1>
 

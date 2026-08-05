@@ -23,6 +23,7 @@ import {
 } from '@/lib/api';
 import { useAuth } from '@/lib/auth-context';
 import { FadeIn } from '@/components/PageTransition';
+import BackButton from '@/components/BackButton';
 
 export default function SettlementProcessingPage() {
   const { user } = useAuth();
@@ -158,6 +159,7 @@ export default function SettlementProcessingPage() {
 
   return (
     <div className="container mx-auto px-4 sm:px-6 py-6 max-w-5xl space-y-6">
+      <BackButton fallback="/accounts" />
       {/* Top Banner */}
       <FadeIn>
         <div className="relative rounded-2xl border border-border/60 bg-gradient-to-br from-card via-card to-primary/5 p-6 overflow-hidden">

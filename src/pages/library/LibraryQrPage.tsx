@@ -6,6 +6,7 @@ import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, 
 import { toast } from 'sonner';
 import { getLibraryDetails, regenerateLibraryQr } from '@/lib/api';
 import { motion } from 'framer-motion';
+import BackButton from '@/components/BackButton';
 
 // Mirrors ShopQrPage.tsx — this is the singleton Library's permanent QR, shared by every Library
 // Staff account (no per-staff ownership, unlike Shop).
@@ -67,6 +68,7 @@ export default function LibraryQrPage() {
       <div className="text-center w-full">
         {!kiosk && (
           <motion.div initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }} className="mb-6">
+            <BackButton fallback="/library" />
             <h1 className="text-xl font-bold text-foreground">Library Payment QR Code</h1>
             <p className="text-xs text-muted-foreground mt-1">Students scan this to pay a library fine or fee</p>
           </motion.div>

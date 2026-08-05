@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
-import { ShieldAlert, Search, Plus, Check, X, Minus, Loader2, User, Pencil, Ban, ListChecks } from 'lucide-react';
+import { ShieldAlert, Search, Plus, Check, X, Minus, Loader2, User, Pencil, Ban, ListChecks, History } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -12,15 +12,18 @@ import { Skeleton } from '@/components/ui/skeleton';
 import StatusBadge from '@/components/StatusBadge';
 import { toast } from 'sonner';
 import {
-  searchStudents, assignFine, getWaivers, updateWaiver,
+  searchStudents, assignFine, getWaivers, updateWaiver, getWaiverHistory,
   listAdminFines, cancelAdminFine, updateAdminFine,
-  type SearchStudentsOutputType, type GetWaiversOutputType, type ListAdminFinesOutputType,
+  type SearchStudentsOutputType, type GetWaiversOutputType, type ListAdminFinesOutputType, type WaiverHistoryOutputType,
 } from '@/lib/api';
 import { FadeIn } from '@/components/PageTransition';
+import BackButton from '@/components/BackButton';
+import { useDebouncedCallback } from 'use-debounce';
 
 type Student = SearchStudentsOutputType['students'][0];
 type Waiver = GetWaiversOutputType['waivers'][0];
 type IssuedFine = ListAdminFinesOutputType['fines'][0];
+type WaiverHistoryEntry = WaiverHistoryOutputType['history'][0];
 
 function AssignFineTab() {
   const [query, setQuery] = useState('');
@@ -146,9 +149,12 @@ function AssignFineTab() {
 function WaiversTab() {
   const [waivers, setWaivers] = useState<Waiver[]>([]);
   const [loading, setLoading] = useState(true);
+  const [search, setSearch] = useState('');
   const [reduceId, setReduceId] = useState<string | null>(null);
   const [reduceAmount, setReduceAmount] = useState('');
   const [acting, setActing] = useState<string | null>(null);
+  const [history, setHistory] = useState<WaiverHistoryEntry[]>([]);
+  const [historyLoading, setHistoryLoading] = useState(true);
 
   const load = () => {
     setLoading(true);
@@ -158,43 +164,61 @@ function WaiversTab() {
       .finally(() => setLoading(false));
   };
 
-  useEffect(() => { load(); }, []);
+  const loadHistory = () => {
+    getWaiverHistory({})
+      .then(d => setHistory(d.history))
+      .catch(() => {})
+      .finally(() => setHistoryLoading(false));
+  };
 
+  useEffect(() => { load(); loadHistory(); }, []);
+
+  // "Reduce" asks staff how much to knock off the fine, not what the final amount should be — the
+  // API still wants the final amount, so that subtraction happens here before sending.
   const act = async (waiver: Waiver, action: 'approve' | 'reduce' | 'reject') => {
+    let finalAmount: number | undefined;
     if (action === 'reduce') {
-      const amt = parseFloat(reduceAmount);
-      if (!amt || amt <= 0 || amt >= waiver.amount) { toast.error('Enter a valid reduced amount'); return; }
+      const reduceBy = parseFloat(reduceAmount);
+      finalAmount = waiver.amount - reduceBy;
+      if (!reduceBy || reduceBy <= 0 || finalAmount <= 0) { toast.error('Enter a valid amount to reduce by'); return; }
     }
     setActing(waiver.id);
     try {
       await updateWaiver({
-        fineId: waiver.id,
+        waiverId: waiver.id,
+        type: waiver.type,
         action,
-        reducedAmount: action === 'reduce' ? parseFloat(reduceAmount) : undefined,
-        studentEmail: waiver.studentEmail,
-        studentName: waiver.studentName,
+        reducedAmount: action === 'reduce' ? finalAmount : undefined,
       });
       toast.success(`Waiver ${action === 'approve' ? 'approved' : action === 'reduce' ? 'reduced' : 'rejected'}`);
       setReduceId(null);
       load();
+      loadHistory();
     } catch (e: any) { toast.error(e.message || 'Failed'); }
     finally { setActing(null); }
   };
 
-  if (loading) return <div className="space-y-3">{[1,2,3].map(i => <Skeleton key={i} className="h-24 rounded-xl" />)}</div>;
-
-  if (waivers.length === 0) {
-    return (
-      <div className="rounded-2xl border border-border/60 bg-card p-10 text-center">
-        <Check className="w-8 h-8 text-[hsl(var(--chart-3))]/40 mx-auto mb-3" />
-        <p className="text-sm text-muted-foreground">No pending appeals</p>
-      </div>
-    );
-  }
+  const filteredWaivers = waivers.filter(w =>
+    !search.trim() || w.studentName.toLowerCase().includes(search.toLowerCase()) || (w.studentId || '').toLowerCase().includes(search.toLowerCase())
+  );
+  const filteredHistory = history.filter(h =>
+    !search.trim() || h.studentName.toLowerCase().includes(search.toLowerCase()) || h.studentId.toLowerCase().includes(search.toLowerCase())
+  );
 
   return (
+    <div className="space-y-8">
     <div className="space-y-3">
-      {waivers.map(w => (
+      <div className="relative">
+        <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+        <Input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search appeals and activity by student ID or name..." className="pl-9 bg-accent/50 border-border/60" />
+      </div>
+
+      {loading ? [1,2,3].map(i => <Skeleton key={i} className="h-24 rounded-xl" />) : filteredWaivers.length === 0 ? (
+        <div className="rounded-2xl border border-border/60 bg-card p-10 text-center">
+          <Check className="w-8 h-8 text-[hsl(var(--chart-3))]/40 mx-auto mb-3" />
+          <p className="text-sm text-muted-foreground">No pending appeals</p>
+        </div>
+      ) : filteredWaivers.map(w => (
         <motion.div key={w.id} layout className="rounded-xl border border-border/60 bg-card p-4">
           <div className="flex items-start justify-between gap-3 mb-3">
             <div>
@@ -211,12 +235,17 @@ function WaiversTab() {
           </div>
 
           {reduceId === w.id ? (
-            <div className="flex gap-2 mt-2">
-              <Input type="number" value={reduceAmount} onChange={e => setReduceAmount(e.target.value)} placeholder="New amount" className="bg-accent/50 tabular flex-1" />
-              <Button size="sm" onClick={() => act(w, 'reduce')} disabled={acting === w.id}>
-                {acting === w.id ? <Loader2 className="w-3 h-3 animate-spin" /> : 'Apply'}
-              </Button>
-              <Button size="sm" variant="ghost" onClick={() => setReduceId(null)}><X className="w-3 h-3" /></Button>
+            <div className="mt-2 space-y-1.5">
+              <div className="flex gap-2">
+                <Input type="number" value={reduceAmount} onChange={e => setReduceAmount(e.target.value)} placeholder="Amount to reduce by" className="bg-accent/50 tabular flex-1" />
+                <Button size="sm" onClick={() => act(w, 'reduce')} disabled={acting === w.id}>
+                  {acting === w.id ? <Loader2 className="w-3 h-3 animate-spin" /> : 'Apply'}
+                </Button>
+                <Button size="sm" variant="ghost" onClick={() => setReduceId(null)}><X className="w-3 h-3" /></Button>
+              </div>
+              {reduceAmount && (
+                <p className="text-xs text-muted-foreground">New fine amount: <span className="font-semibold text-foreground">৳{Math.max(0, w.amount - (parseFloat(reduceAmount) || 0)).toLocaleString()}</span></p>
+              )}
             </div>
           ) : (
             <div className="flex gap-2 mt-2">
@@ -234,6 +263,40 @@ function WaiversTab() {
         </motion.div>
       ))}
     </div>
+
+    <div>
+      <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider mb-3 flex items-center gap-1.5">
+        <History className="w-3.5 h-3.5" /> Recent Waiver Activity
+      </h2>
+      {historyLoading ? (
+        <div className="space-y-2">{[1, 2, 3].map(i => <Skeleton key={i} className="h-16 rounded-xl" />)}</div>
+      ) : filteredHistory.length === 0 ? (
+        <div className="rounded-2xl border border-border/60 bg-card p-8 text-center">
+          <History className="w-7 h-7 text-muted-foreground/30 mx-auto mb-2" />
+          <p className="text-sm text-muted-foreground">{search.trim() ? 'No activity matches this search' : 'No approve, reduce, or reject activity yet'}</p>
+        </div>
+      ) : (
+        <div className="space-y-2">
+          {filteredHistory.map(h => (
+            <div key={h.id} className="flex items-center justify-between gap-3 p-3.5 rounded-xl border border-border/60 bg-card">
+              <div className="min-w-0">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <p className="text-sm font-medium text-foreground">{h.action.replace('Waiver ', '')}</p>
+                  {h.studentName && <span className="text-xs text-muted-foreground">{h.studentName}</span>}
+                  {h.studentId && <span className="text-[10px] font-mono text-muted-foreground">{h.studentId}</span>}
+                </div>
+                {h.details && <p className="text-xs text-muted-foreground truncate mt-0.5">{h.details}</p>}
+              </div>
+              <div className="text-right shrink-0">
+                <p className="text-[10px] text-muted-foreground">{h.actorName}</p>
+                <p className="text-[10px] text-muted-foreground/70">{new Date(h.createdAt).toLocaleString()}</p>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+    </div>
   );
 }
 
@@ -243,6 +306,7 @@ function WaiversTab() {
 function IssuedFinesTab() {
   const [fines, setFines] = useState<IssuedFine[]>([]);
   const [loading, setLoading] = useState(true);
+  const [search, setSearch] = useState('');
   const [cancelTarget, setCancelTarget] = useState<IssuedFine | null>(null);
   const [cancelReason, setCancelReason] = useState('');
   const [editTarget, setEditTarget] = useState<IssuedFine | null>(null);
@@ -250,15 +314,16 @@ function IssuedFinesTab() {
   const [editAmount, setEditAmount] = useState('');
   const [acting, setActing] = useState<string | null>(null);
 
-  const load = () => {
+  const load = (q: string) => {
     setLoading(true);
-    listAdminFines({})
+    listAdminFines({ search: q || undefined })
       .then(d => setFines(d.fines))
       .catch(() => toast.error('Failed to load issued fines'))
       .finally(() => setLoading(false));
   };
 
-  useEffect(() => { load(); }, []);
+  const debouncedLoad = useDebouncedCallback(load, 350);
+  useEffect(() => { load(''); }, []);
 
   const doCancel = async () => {
     if (!cancelTarget) return;
@@ -266,7 +331,7 @@ function IssuedFinesTab() {
     try {
       await cancelAdminFine({ fineId: cancelTarget.id, reason: cancelReason });
       toast.success('Fine cancelled');
-      setCancelTarget(null); setCancelReason(''); load();
+      setCancelTarget(null); setCancelReason(''); load(search);
     } catch (e: any) { toast.error(e.message || 'Failed to cancel'); }
     finally { setActing(null); }
   };
@@ -282,24 +347,32 @@ function IssuedFinesTab() {
     try {
       await updateAdminFine({ fineId: editTarget.id, reason: editReason, amount: amt });
       toast.success('Fine updated');
-      setEditTarget(null); load();
+      setEditTarget(null); load(search);
     } catch (e: any) { toast.error(e.message || 'Failed to update'); }
     finally { setActing(null); }
   };
 
-  if (loading) return <div className="space-y-3">{[1, 2, 3].map(i => <Skeleton key={i} className="h-20 rounded-xl" />)}</div>;
-
-  if (fines.length === 0) {
-    return (
-      <div className="rounded-2xl border border-border/60 bg-card p-10 text-center">
-        <ListChecks className="w-8 h-8 text-muted-foreground/30 mx-auto mb-3" />
-        <p className="text-sm text-muted-foreground">No fines issued yet</p>
-      </div>
-    );
-  }
-
   return (
-    <div className="space-y-3">
+    <div className="space-y-4">
+      <div className="relative">
+        <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+        <Input
+          value={search}
+          onChange={e => { setSearch(e.target.value); debouncedLoad(e.target.value); }}
+          placeholder="Search by student ID, name, or reason..."
+          className="pl-9 bg-accent/50 border-border/60"
+        />
+      </div>
+
+      {loading ? (
+        <div className="space-y-3">{[1, 2, 3].map(i => <Skeleton key={i} className="h-20 rounded-xl" />)}</div>
+      ) : fines.length === 0 ? (
+        <div className="rounded-2xl border border-border/60 bg-card p-10 text-center">
+          <ListChecks className="w-8 h-8 text-muted-foreground/30 mx-auto mb-3" />
+          <p className="text-sm text-muted-foreground">No fines issued yet</p>
+        </div>
+      ) : (
+      <div className="space-y-3">
       {fines.map(f => {
         const canManage = f.status === 'Pending';
         return (
@@ -331,6 +404,8 @@ function IssuedFinesTab() {
           </motion.div>
         );
       })}
+      </div>
+      )}
 
       <AlertDialog open={!!cancelTarget} onOpenChange={(o) => !o && setCancelTarget(null)}>
         <AlertDialogContent className="glass-strong rounded-2xl">
@@ -378,6 +453,7 @@ export default function FinesPage() {
   return (
     <div className="container mx-auto px-4 sm:px-6 py-6 max-w-3xl">
       <FadeIn>
+        <BackButton fallback="/admin" />
         <h1 className="text-xl font-bold text-foreground mb-1">Disciplinary Fines</h1>
 
       </FadeIn>

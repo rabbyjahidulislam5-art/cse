@@ -1,7 +1,7 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
-import { ScanLine, FileWarning, ArrowRightLeft, Store, PlusCircle, GraduationCap, ShieldAlert, ArrowRight, RotateCcw, Lock, TrendingUp, TrendingDown, Receipt, ArrowUpRight, Wallet, ScrollText, CreditCard } from 'lucide-react';
+import { ScanLine, FileWarning, ArrowRightLeft, Store, PlusCircle, GraduationCap, ShieldAlert, ArrowRight, RotateCcw, Lock, TrendingUp, TrendingDown, Receipt, ArrowUpRight, Wallet, ScrollText, CreditCard, History, UserCircle, Settings as SettingsIcon } from 'lucide-react';
 import { Skeleton } from '@/components/ui/skeleton';
 import WalletCard from '@/components/WalletCard';
 import PinDialog from '@/components/PinDialog';
@@ -10,6 +10,8 @@ import SemesterFeeModal from '@/components/SemesterFeeModal';
 import PaymentCategoryModal from '@/components/PaymentCategoryModal';
 import { useUser } from '@/lib/user-context';
 import { type GetStudentDashboardOutputType } from '@/lib/api';
+import { getDisputeBadgeCounts } from '@/lib/disputeApi';
+import { useDisputeSocket } from '@/lib/socket';
 import { formatCurrency } from '@/lib/mock-data';
 import { FadeIn } from '@/components/PageTransition';
 
@@ -58,7 +60,20 @@ export default function HomePage() {
   const [addMoneyOpen, setAddMoneyOpen] = useState(false);
   const [semesterFeeOpen, setSemesterFeeOpen] = useState(false);
   const [payCategoryOpen, setPayCategoryOpen] = useState(false);
+  const [pendingCases, setPendingCases] = useState(0);
   const recentTx: TxType[] = recentTransactions;
+
+  // Ledger/Disputes/Profile/Settings moved here from the nav bar's old "More" dropdown — that
+  // dropdown's badge was only ever visible once opened, so this tile now carries the same live
+  // pending-disputes count (polled + socket-updated) with strictly better at-a-glance visibility.
+  useEffect(() => {
+    if (!user) return;
+    const fetchBadge = () => getDisputeBadgeCounts().then(r => setPendingCases(r.pendingCases)).catch(() => {});
+    fetchBadge();
+    const interval = setInterval(fetchBadge, 30000);
+    return () => clearInterval(interval);
+  }, [user]);
+  useDisputeSocket(() => setPendingCases(c => c + 1));
 
   const quickActions = [
     { label: 'Scan & Pay', icon: ScanLine, onClick: () => navigate('/student/scan'), color: 'from-secondary/15 to-secondary/5', iconColor: 'text-secondary' },
@@ -69,7 +84,10 @@ export default function HomePage() {
     { label: 'Administrative Dues', icon: ShieldAlert, onClick: () => setPayCategoryOpen(true), color: 'from-[hsl(var(--chart-5))]/15 to-[hsl(var(--chart-5))]/5', iconColor: 'text-[hsl(var(--chart-5))]' },
     { label: 'Semester Fee', icon: GraduationCap, onClick: () => setSemesterFeeOpen(true), color: 'from-secondary/15 to-secondary/5', iconColor: 'text-secondary' },
     { label: 'Payments', icon: CreditCard, onClick: () => navigate('/student/payments'), color: 'from-primary/15 to-primary/5', iconColor: 'text-primary' },
-    { label: 'Disputes', icon: ScrollText, onClick: () => navigate('/student/disputes'), color: 'from-destructive/15 to-destructive/5', iconColor: 'text-destructive' },
+    { label: 'Disputes', icon: ScrollText, onClick: () => navigate('/student/disputes'), color: 'from-destructive/15 to-destructive/5', iconColor: 'text-destructive', badge: pendingCases },
+    { label: 'Ledger', icon: History, onClick: () => navigate('/student/ledger'), color: 'from-[hsl(var(--chart-2))]/15 to-[hsl(var(--chart-2))]/5', iconColor: 'text-[hsl(var(--chart-2))]' },
+    { label: 'Profile', icon: UserCircle, onClick: () => navigate('/student/profile'), color: 'from-[hsl(var(--chart-4))]/15 to-[hsl(var(--chart-4))]/5', iconColor: 'text-[hsl(var(--chart-4))]' },
+    { label: 'Settings', icon: SettingsIcon, onClick: () => navigate('/student/settings'), color: 'from-muted to-muted', iconColor: 'text-muted-foreground' },
   ];
 
   if (loading) {
@@ -127,8 +145,13 @@ export default function HomePage() {
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ delay: 0.2 + i * 0.06 }}
                 onClick={qa.onClick}
-                className="flex flex-col items-center justify-center gap-3 p-4 sm:p-5 rounded-2xl border border-border/60 bg-card hover:border-primary/20 transition-all group active:scale-[0.97]"
+                className="relative flex flex-col items-center justify-center gap-3 p-4 sm:p-5 rounded-2xl border border-border/60 bg-card hover:border-primary/20 transition-all group active:scale-[0.97]"
               >
+                {!!qa.badge && qa.badge > 0 && (
+                  <span className="absolute top-2.5 right-2.5 min-w-[16px] h-4 px-1 rounded-full bg-destructive text-[9px] font-bold text-white flex items-center justify-center">
+                    {qa.badge > 99 ? '99+' : qa.badge}
+                  </span>
+                )}
                 <div className={`w-11 h-11 rounded-xl bg-gradient-to-br ${qa.color} flex items-center justify-center group-hover:scale-105 transition-transform`}>
                   <qa.icon className={`w-5 h-5 ${qa.iconColor}`} />
                 </div>

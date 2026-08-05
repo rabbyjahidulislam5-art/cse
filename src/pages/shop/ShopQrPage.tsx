@@ -6,6 +6,7 @@ import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, 
 import { toast } from 'sonner';
 import { getShopDashboard, regenerateShopQr } from '@/lib/api';
 import { motion } from 'framer-motion';
+import BackButton from '@/components/BackButton';
 
 export default function ShopQrPage() {
   const [shopId, setShopId] = useState('');
@@ -68,6 +69,7 @@ export default function ShopQrPage() {
       <div className="text-center w-full">
         {!kiosk && (
           <motion.div initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }} className="mb-6">
+            <BackButton fallback="/shop" />
             <h1 className="text-xl font-bold text-foreground">Payment QR Code</h1>
             <p className="text-xs text-muted-foreground mt-1">Students scan this to pay</p>
           </motion.div>

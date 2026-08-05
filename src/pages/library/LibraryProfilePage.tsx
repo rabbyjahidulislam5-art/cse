@@ -10,6 +10,7 @@ import { Loader2, LogOut, Save, User, Lock, ShieldCheck, Mail, Phone, BookOpen, 
 import { useAuth } from '@/lib/auth-context';
 import { getLibraryDetails, updateProfile, updateLibraryDetails, changePassword, uploadFile, type GetLibraryDetailsOutputType } from '@/lib/api';
 import { FadeIn } from '@/components/PageTransition';
+import BackButton from '@/components/BackButton';
 
 function ReadOnlyField({ icon: Icon, label, value }: { icon: typeof User; label: string; value: string }) {
   return (
@@ -118,6 +119,7 @@ export default function LibraryProfilePage() {
   return (
     <div className="container mx-auto px-4 sm:px-6 py-6 max-w-2xl">
       <FadeIn>
+        <BackButton fallback="/library" />
         <h1 className="text-xl font-bold text-foreground mb-6">Library Staff Profile</h1>
 
         <div className="flex items-center gap-5 mb-8">

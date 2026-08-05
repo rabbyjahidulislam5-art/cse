@@ -17,6 +17,7 @@ import {
   approveRefundAdmin, rejectRefundAdmin, freezeWallet, lockAccount, flagUser, flagMerchant,
   type AccountsDisputeDetail, type RefundMethod,
 } from '@/lib/disputeApi';
+import { useDisputeRoom } from '@/lib/socket';
 
 type Action = null | 'forward' | 'refund' | 'reject';
 const TERMINAL = ['Resolved', 'Rejected', 'Refunded', 'Closed'];
@@ -53,6 +54,7 @@ export default function AdminDisputeDetailPage() {
     getAdminDisputeDetail({ disputeId }).then(setDetail).catch((e: any) => toast.error(e.message)).finally(() => setLoading(false));
   };
   useEffect(load, [disputeId]);
+  useDisputeRoom(disputeId, () => load());
   useEffect(() => { getAdminShops().then(r => setShops(r.shops)); }, []);
 
   const resetAction = () => { setAction(null); setSelectValue(''); setShopValue(''); setText(''); setRefundAmount(''); };

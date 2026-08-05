@@ -14,6 +14,7 @@ import { toast } from 'sonner';
 import { getAdminShops, manageShop, type GetAdminShopsOutputType } from '@/lib/api';
 import { formatCurrency } from '@/lib/mock-data';
 import { FadeIn } from '@/components/PageTransition';
+import BackButton from '@/components/BackButton';
 
 type Shop = GetAdminShopsOutputType['shops'][0];
 
@@ -183,6 +184,7 @@ export default function ShopManagementPage() {
   return (
     <div className="container mx-auto px-4 sm:px-6 py-6 max-w-6xl">
       <FadeIn>
+        <BackButton fallback="/admin" />
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-6">
           <div>
             <h1 className="text-xl font-bold text-foreground">Shop Management & Settlement Oversight</h1>

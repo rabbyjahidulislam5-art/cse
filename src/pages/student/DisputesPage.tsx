@@ -6,6 +6,7 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import StatusBadge from '@/components/StatusBadge';
 import { FadeIn } from '@/components/PageTransition';
+import BackButton from '@/components/BackButton';
 import { getMyDisputes, type DisputeSummary, type DisputeStatus } from '@/lib/disputeApi';
 import { formatCurrency } from '@/lib/mock-data';
 import { useUser } from '@/lib/user-context';
@@ -47,6 +48,7 @@ export default function DisputesPage() {
   return (
     <div className="container mx-auto px-4 sm:px-6 py-6 max-w-3xl">
       <FadeIn>
+        <BackButton fallback="/student" />
         <div className="flex items-center justify-between mb-6">
           <div>
             <h1 className="text-xl font-bold text-foreground">Financial Disputes</h1>

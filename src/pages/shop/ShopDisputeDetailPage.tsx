@@ -9,6 +9,7 @@ import { FadeIn } from '@/components/PageTransition';
 import { formatCurrency } from '@/lib/mock-data';
 import { getShopDisputeDetail, replyToShopDispute, recommendShopDecision, getDisputePdf, type AccountsDisputeDetail } from '@/lib/disputeApi';
 import { triggerDownload } from '@/lib/download';
+import { useDisputeRoom } from '@/lib/socket';
 
 const MAX_FILES = 5;
 const TERMINAL = ['Resolved', 'Rejected', 'Refunded', 'Closed'];
@@ -29,6 +30,7 @@ export default function ShopDisputeDetailPage() {
 
   const load = () => { if (!disputeId) return; setLoading(true); getShopDisputeDetail({ disputeId }).then(setDetail).catch((e: any) => toast.error(e.message)).finally(() => setLoading(false)); };
   useEffect(load, [disputeId]);
+  useDisputeRoom(disputeId, () => load());
 
   const handlePdf = async () => {
     setPdfLoading(true);

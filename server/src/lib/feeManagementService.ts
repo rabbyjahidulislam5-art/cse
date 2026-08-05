@@ -1,6 +1,7 @@
 import { PrismaClient } from '@prisma/client';
 import ExcelJS from 'exceljs';
 import PDFDocument from 'pdfkit';
+import { matchStudent } from './studentMatcher.js';
 
 const prisma = new PrismaClient();
 
@@ -40,6 +41,18 @@ function isValidCalendarDate(value: string): boolean {
   if (month < 1 || month > 12) return false;
   const date = new Date(Date.UTC(year, month - 1, day));
   return date.getUTCFullYear() === year && date.getUTCMonth() === month - 1 && date.getUTCDate() === day;
+}
+
+// ExcelJS parses a date-formatted spreadsheet cell as a native JS Date object, not a string —
+// interpolating that directly via a bare String() produces a verbose, unreadable
+// "Sun Aug 30 2026 00:00:00 GMT+0000 ..." instead of a plain date, and that garbled text then
+// flows into FeeInvoice/SemesterFee/notification text untouched (Date.parse() still accepts it,
+// so validation never flags it). Format Date cells as YYYY-MM-DD, matching this codebase's own
+// due-date convention (e.g. `${academicYear}-08-30`).
+function formatDueDateCell(v: unknown): string | undefined {
+  if (v instanceof Date) return v.toISOString().slice(0, 10);
+  const s = String(v ?? '').trim();
+  return s || undefined;
 }
 
 export function generateFeeLabel(semester: string, academicYear: string): string {
@@ -88,8 +101,14 @@ export function validateImportRow(
     errors.push('Student ID is required');
   }
 
-  const student = existingStudents.find(s => s.studentId === studentId);
-  if (!student) {
+  // Student ID is matched case/whitespace-insensitively (primary), falling back to email when
+  // absent/unmatched — see studentMatcher.ts. A row whose normalized ID matches more than one
+  // account is flagged 'ambiguous' rather than silently resolved.
+  const matchResult = matchStudent({ studentId, email: row.email }, existingStudents);
+  const student = matchResult.matched ? matchResult.user : undefined;
+  if (matchResult.matched === false && matchResult.reason === 'ambiguous') {
+    errors.push('Ambiguous student match — multiple accounts found');
+  } else if (!student) {
     errors.push('Student ID does not exist');
   } else {
     if (student.status !== 'Active') {
@@ -149,12 +168,16 @@ export function validateImportRow(
 }
 
 export function validateApprovalWorkflowPermissions(
-  userRole: 'Maker' | 'Checker' | 'Approver' | 'Accounts Office' | 'Admin',
+  userRole: 'Maker' | 'Checker' | 'Approver' | 'Accounts Office' | 'Admin' | 'Admin Office',
   batchStatus: string,
   action: 'SUBMIT_FOR_REVIEW' | 'VERIFY_BATCH' | 'APPROVE_BATCH' | 'REJECT_BATCH' | 'EXECUTE_PUSH'
 ): { allowed: boolean; reason?: string } {
-  // Admin and Accounts Office with full access fallbacks
-  if (userRole === 'Admin') return { allowed: true };
+  // Admin and Accounts Office with full access fallbacks. The real caller (routes/fees.ts) always
+  // passes the actual User.role string, which is 'Admin Office' (never the bare 'Admin' this
+  // check originally only recognized) — without this, an Admin Office staff member could reach
+  // this endpoint (route-gated to allow both 'Accounts Office' and 'Admin Office') and successfully
+  // SUBMIT_FOR_REVIEW, only to be silently 403'd on APPROVE_BATCH/REJECT_BATCH.
+  if (userRole === 'Admin' || userRole === 'Admin Office') return { allowed: true };
 
   if (action === 'SUBMIT_FOR_REVIEW') {
     if (batchStatus !== 'Draft' && batchStatus !== 'Validated') {
@@ -234,8 +257,11 @@ export function parseImportRows(rows: any[][]): ImportRowData[] {
       program: progIdx >= 0 ? String(r[progIdx] || '').trim() : 'Undergraduate',
       semester: semIdx >= 0 ? String(r[semIdx] || '').trim() : 'Spring',
       academicYear: yearIdx >= 0 ? String(r[yearIdx] || '').trim() : '2026',
-      amount: amountIdx >= 0 ? parseFloat(String(r[amountIdx] || '0').replace(/[^0-9.]/g, '')) || 0 : 0,
-      dueDate: dueDateIdx >= 0 ? String(r[dueDateIdx] || '').trim() : undefined,
+      // Keeps a leading minus sign so a negative input is actually parsed as negative and
+      // rejected by the "Amount must be positive" check below — the old [^0-9.] strip silently
+      // discarded the sign first, turning e.g. "-500" into 500 and letting it through as valid.
+      amount: amountIdx >= 0 ? parseFloat(String(r[amountIdx] || '0').replace(/[^0-9.-]/g, '')) || 0 : 0,
+      dueDate: dueDateIdx >= 0 ? formatDueDateCell(r[dueDateIdx]) : undefined,
       feeLabel: labelIdx >= 0 ? String(r[labelIdx] || '').trim() : undefined,
     });
   }

@@ -5,6 +5,7 @@ import {
   ArrowLeft, Loader2, Send, UserPlus, StickyNote, Snowflake, Forward as ForwardIcon,
   Banknote, CheckCircle2, XCircle, History, Shield, AlertTriangle,
   Hash, MapPin, Smartphone, Clock, CreditCard, User, Flag, Download,
+  FileText, Image as ImageIcon, Paperclip, MessageSquare,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
@@ -21,6 +22,7 @@ import {
   getDisputePdf, type AccountsDisputeDetail, type RefundMethod,
 } from '@/lib/disputeApi';
 import { triggerDownload } from '@/lib/download';
+import { useDisputeRoom } from '@/lib/socket';
 
 type Action = null | 'assign' | 'reply' | 'forward' | 'refund' | 'resolve' | 'reject';
 
@@ -65,6 +67,7 @@ export default function DisputeCaseDetailPage() {
   };
 
   useEffect(load, [disputeId]);
+  useDisputeRoom(disputeId, () => load());
   useEffect(() => { getAccountsOfficers().then(r => setOfficers(r.officers)); getAccountsShops().then(r => setShops(r.shops)); }, []);
 
   const resetAction = () => { setAction(null); setText(''); setSelectValue(''); setShopValue(''); setIsInternal(false); setHighPriority(false); setRefundAmount(''); };
@@ -98,7 +101,7 @@ export default function DisputeCaseDetailPage() {
   if (loading) return <div className="flex items-center justify-center py-24"><Loader2 className="w-8 h-8 animate-spin text-primary" /></div>;
   if (!detail) return <p className="text-center text-sm text-muted-foreground py-24">Case not found.</p>;
 
-  const { dispute, student, transaction, messages, timeline, statusHistory, refunds, assignments, auditLogs, previousCases, relatedTransactions, risk } = detail;
+  const { dispute, student, transaction, messages, attachments, timeline, statusHistory, refunds, assignments, auditLogs, previousCases, relatedTransactions, risk } = detail;
   const isTerminal = TERMINAL.includes(dispute.status);
   const hasActiveRefund = refunds.some(r => r.status === 'Pending' || r.status === 'Processed');
 
@@ -122,7 +125,7 @@ export default function DisputeCaseDetailPage() {
         <div className="flex flex-wrap gap-1.5 mb-4">
 
 
-          <Button size="sm" variant="outline" className="text-xs gap-1.5" onClick={() => setAction('reply')} disabled={isTerminal}><Send className="w-3.5 h-3.5" /> Reply</Button>
+          <Button size="sm" variant="outline" className="text-xs gap-1.5" onClick={() => setAction('reply')}><Send className="w-3.5 h-3.5" /> Reply</Button>
           <Button size="sm" variant="outline" className="text-xs gap-1.5" onClick={() => setAction('forward')} disabled={isTerminal}><ForwardIcon className="w-3.5 h-3.5" /> Forward</Button>
           <Button size="sm" variant="outline" className="text-xs gap-1.5 border-[hsl(var(--chart-3))]/40 text-[hsl(var(--chart-3))]" onClick={() => setAction('refund')} disabled={isTerminal || hasActiveRefund}><Banknote className="w-3.5 h-3.5" /> Refund</Button>
           <Button size="sm" variant="outline" className="text-xs gap-1.5 border-[hsl(var(--chart-3))]/40 text-[hsl(var(--chart-3))]" onClick={() => setAction('resolve')} disabled={isTerminal}><CheckCircle2 className="w-3.5 h-3.5" /> Resolve</Button>
@@ -244,6 +247,28 @@ export default function DisputeCaseDetailPage() {
           </div>
         )}
 
+        {/* Description */}
+        <div className="rounded-xl border border-border/60 bg-card p-4 mb-4">
+          <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-1.5 flex items-center gap-1.5"><FileText className="w-3.5 h-3.5" /> Student's Description</p>
+          <p className="text-sm text-foreground leading-relaxed whitespace-pre-line">{dispute.description || <span className="italic text-muted-foreground">No description provided.</span>}</p>
+        </div>
+
+        {/* Initial Attachments (files attached when dispute was created) */}
+        {attachments.length > 0 && (
+          <div className="rounded-xl border border-border/60 bg-card p-4 mb-4">
+            <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-2 flex items-center gap-1.5"><Paperclip className="w-3.5 h-3.5" /> Attached Files ({attachments.length})</p>
+            <div className="flex flex-wrap gap-2">
+              {attachments.map(a => (
+                <a key={a.id} href={a.url} target="_blank" rel="noopener noreferrer" className="flex items-center gap-1.5 px-3 py-2 rounded-lg bg-accent/60 text-xs font-medium text-foreground hover:bg-accent transition-colors border border-border/40">
+                  {a.mimeType.startsWith('image/') ? <ImageIcon className="w-3.5 h-3.5" /> : <FileText className="w-3.5 h-3.5" />}
+                  {a.originalName}
+                  <Download className="w-3 h-3 ml-1 text-muted-foreground" />
+                </a>
+              ))}
+            </div>
+          </div>
+        )}
+
         {/* Student / Risk */}
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4">
           <div className="rounded-xl border border-border/60 bg-card p-4">
@@ -355,7 +380,7 @@ export default function DisputeCaseDetailPage() {
         </div>
 
         {/* Conversation (internal notes visible here for staff) */}
-        <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-2">Conversation</p>
+        <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-2 flex items-center gap-1.5"><MessageSquare className="w-3.5 h-3.5" /> Conversation</p>
         <div className="space-y-2.5 mb-6">
           {messages.length === 0 && <p className="text-xs text-muted-foreground italic py-3 text-center">No messages yet.</p>}
           {messages.map((m, i) => (
@@ -366,6 +391,15 @@ export default function DisputeCaseDetailPage() {
                 <span className="text-[10px] text-muted-foreground">{new Date(m.createdAt).toLocaleString('en-US', { timeZone: 'Asia/Dhaka', dateStyle: 'short', timeStyle: 'short' })}</span>
               </div>
               <p className="text-sm text-foreground whitespace-pre-line">{m.body}</p>
+              {m.attachments && m.attachments.length > 0 && (
+                <div className="flex flex-wrap gap-1.5 mt-2">
+                  {m.attachments.map(a => (
+                    <a key={a.id} href={a.url} target="_blank" rel="noopener noreferrer" className="flex items-center gap-1 px-2 py-1 rounded-lg bg-accent/60 text-[10px] font-medium text-foreground hover:bg-accent">
+                      {a.mimeType?.startsWith('image/') ? <ImageIcon className="w-3 h-3" /> : <FileText className="w-3 h-3" />} {a.originalName}
+                    </a>
+                  ))}
+                </div>
+              )}
             </motion.div>
           ))}
         </div>

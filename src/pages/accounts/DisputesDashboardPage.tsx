@@ -10,6 +10,7 @@ import StatusBadge from '@/components/StatusBadge';
 import { useDebouncedCallback } from 'use-debounce';
 import { getAccountsDisputeStats, getAccountsDisputeList, type AccountsDisputeSummary, type AccountsDisputeStats, type DisputeStatus } from '@/lib/disputeApi';
 import { formatCurrency } from '@/lib/mock-data';
+import BackButton from '@/components/BackButton';
 
 const KANBAN_STATUSES: DisputeStatus[] = ['Open', 'Investigating', 'WaitingForStudent', 'WaitingForShop', 'WaitingForLibrary', 'WaitingForAdmin', 'Resolved', 'Rejected', 'Refunded'];
 
@@ -44,6 +45,7 @@ export default function DisputesDashboardPage() {
 
   return (
     <div className="container mx-auto px-4 sm:px-6 py-6 max-w-6xl">
+      <BackButton fallback="/accounts" />
       <div className="flex items-center justify-between mb-6">
         <div>
           <h1 className="text-xl font-bold text-foreground">Financial Disputes</h1>

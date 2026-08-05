@@ -15,6 +15,7 @@ import {
 } from '@/lib/disputeApi';
 import { formatCurrency } from '@/lib/mock-data';
 import { triggerDownload } from '@/lib/download';
+import BackButton from '@/components/BackButton';
 
 export default function DisputeOversightPage() {
   const navigate = useNavigate();
@@ -55,6 +56,7 @@ export default function DisputeOversightPage() {
 
   return (
     <div className="container mx-auto px-4 sm:px-6 py-6 max-w-6xl">
+      <BackButton fallback="/admin" />
       <div className="flex items-center justify-between mb-6">
         <div>
           <h1 className="text-xl font-bold text-foreground">Audit dispute</h1>

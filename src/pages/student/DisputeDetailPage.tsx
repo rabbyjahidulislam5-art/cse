@@ -15,6 +15,7 @@ import {
   getDisputeDetail, replyToDispute, closeDispute, getDisputePdf, type DisputeDetail,
 } from '@/lib/disputeApi';
 import { triggerDownload } from '@/lib/download';
+import { useDisputeRoom } from '@/lib/socket';
 
 const TERMINAL_STATUSES = ['Resolved', 'Rejected', 'Refunded', 'Closed'];
 const MAX_FILES = 5;
@@ -41,6 +42,7 @@ export default function DisputeDetailPage() {
   };
 
   useEffect(load, [disputeId]);
+  useDisputeRoom(disputeId, () => load());
 
   const handleReply = async () => {
     if (!replyBody.trim()) return;

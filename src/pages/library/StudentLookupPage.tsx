@@ -6,6 +6,7 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { toast } from 'sonner';
 import { libraryStudentLookup, type LibraryStudentLookupOutputType } from '@/lib/api';
 import { motion } from 'framer-motion';
+import BackButton from '@/components/BackButton';
 
 type Student = LibraryStudentLookupOutputType['students'][0];
 
@@ -28,6 +29,7 @@ export default function StudentLookupPage() {
 
   return (
     <div className="container mx-auto px-4 sm:px-6 py-6 max-w-3xl">
+      <BackButton fallback="/library" />
       <h1 className="text-xl font-bold text-foreground mb-6">Student Lookup</h1>
 
       <div className="flex gap-2 mb-6">

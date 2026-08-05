@@ -9,6 +9,7 @@ import { FadeIn } from '@/components/PageTransition';
 import { formatCurrency } from '@/lib/mock-data';
 import { getLibraryDisputeDetail, replyToLibraryDispute, recommendLibraryDecision, getDisputePdf, type AccountsDisputeDetail } from '@/lib/disputeApi';
 import { triggerDownload } from '@/lib/download';
+import { useDisputeRoom } from '@/lib/socket';
 
 export default function LibraryDisputeDetailPage() {
   const [searchParams] = useSearchParams();
@@ -23,6 +24,7 @@ export default function LibraryDisputeDetailPage() {
 
   const load = () => { if (!disputeId) return; setLoading(true); getLibraryDisputeDetail({ disputeId }).then(setDetail).catch((e: any) => toast.error(e.message)).finally(() => setLoading(false)); };
   useEffect(load, [disputeId]);
+  useDisputeRoom(disputeId, () => load());
 
   const handlePdf = async () => {
     setPdfLoading(true);

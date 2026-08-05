@@ -136,7 +136,8 @@ router.post('/accounts/disputes/reply', authMiddleware, requireAccounts, staffDi
     await recordTimeline(disputeId, internal ? 'internal_note' : 'message', req.user!.id, internal ? 'Internal note added' : `${req.user!.fullName || 'Accounts Office'} replied`);
 
     if (!internal) {
-      if (dispute.status === 'WaitingForAdmin' || OPEN_STATUSES.includes(dispute.status as DisputeStatus)) {
+      const TERMINAL = ['Resolved', 'Rejected', 'Refunded', 'Closed'];
+      if (!TERMINAL.includes(dispute.status) && (dispute.status === 'WaitingForAdmin' || OPEN_STATUSES.includes(dispute.status as DisputeStatus))) {
         // A reply to the student naturally puts the ball back in their court, unless the case is
         // already in a role-specific waiting state that this reply doesn't resolve.
         if (dispute.status !== 'WaitingForShop' && dispute.status !== 'WaitingForLibrary') {

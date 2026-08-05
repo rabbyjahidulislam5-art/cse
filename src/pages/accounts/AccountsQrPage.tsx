@@ -6,6 +6,7 @@ import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, 
 import { toast } from 'sonner';
 import { getAccountsQr, regenerateAccountsQr } from '@/lib/api';
 import { motion } from 'framer-motion';
+import BackButton from '@/components/BackButton';
 
 // Mirrors LibraryQrPage.tsx — the singleton Accounts Office's permanent QR, shared by every
 // Accounts Office staff account. Unlike Shop/Library, scanning this does NOT lead to one flat
@@ -68,6 +69,7 @@ export default function AccountsQrPage() {
       <div className="text-center w-full">
         {!kiosk && (
           <motion.div initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }} className="mb-6">
+            <BackButton fallback="/accounts" />
             <h1 className="text-xl font-bold text-foreground">Accounts Office Payment QR</h1>
 
           </motion.div>

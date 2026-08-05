@@ -20,6 +20,12 @@ npm-debug.log*
 # Playwright MCP test artifacts
 .playwright-mcp/
 
+# Playwright E2E test runner artifacts
+test-results/
+playwright-report/
+blob-report/
+server/e2e-seed-data.json
+
 # IDE
 .vscode/
 .idea/
@@ -38,3 +44,4 @@ server/uploads/
 src/api/
 zite.config.json
 zite.lock
+~$*

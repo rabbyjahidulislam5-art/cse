@@ -22,6 +22,8 @@ import { parseLibraryQrPayload, ensureLibrarySingleton } from './lib/libraryServ
 import { parseAccountsQrPayload, ensureAccountsOfficeSingleton } from './lib/accountsService';
 import { markItemPaid, getOutstandingDues, isFinanciallyRestricted, PayItem } from './lib/settlement';
 import { blockIfFinanciallyRestricted } from './lib/restriction';
+import { getStudentFinancialProfile } from './lib/studentProfileAggregator';
+import { buildShopTransactionSearchWhere } from './lib/shopTransactionSearch';
 import http from 'http';
 import studentDisputeRouter from './routes/disputes/student';
 import accountsDisputeRouter from './routes/disputes/accounts';
@@ -31,7 +33,10 @@ import shopDisputeRouter from './routes/disputes/shop';
 import { disputeNotificationsRouter } from './routes/disputes/shared';
 import feeRouter from './routes/fees.js';
 import settlementRouter from './routes/settlements.js';
+import scholarshipPushRouter from './routes/scholarshipPush.js';
 import { attachRealtime } from './lib/realtime';
+import cron from 'node-cron';
+import { runDailyDueAutomation } from './lib/reminderAutoDeduct';
 
 // Abuse backstops for the two payment-confirmation entry points. Render's free tier runs a
 // single instance, so in-memory rate limiting (express-rate-limit's default store) is sufficient
@@ -1803,6 +1808,13 @@ async function confirmSslPayment(reference: string, source: 'ipn' | 'browser-val
         title: 'Library Fine Paid', body: `A library fine payment of ৳${amount.toLocaleString()} was received. Reference: ${reference}.`,
         link: '/admin/fines',
       }).catch(() => { });
+      // Accounts Office is now the centralized financial record-keeper for library fines too
+      // (mirrors the admin_fine branch below) — see /accounts/library-fines*.
+      void notifyRole('Accounts Office', {
+        category: 'payment', type: 'library_fine.payment_received',
+        title: 'Library Fine Paid', body: `A library fine payment of ৳${amount.toLocaleString()} was received. Reference: ${reference}.`,
+        link: '/accounts/library-fines',
+      }).catch(() => { });
     }
 
     // Accounts Office is the sole financial authority that collects/reconciles administrative
@@ -2399,6 +2411,37 @@ router.post('/admin/overview', authMiddleware, requireAdmin, async (req: AuthReq
   }
 });
 
+// Mirrors /accounts/profile's shape — Admin Office had no dedicated profile page before this;
+// personal-field saves reuse the existing generic /profile/update (no role restriction there).
+router.post('/admin/profile', authMiddleware, requireAdmin, async (req: AuthRequest, res) => {
+  try {
+    const user = await prisma.user.findUnique({ where: { id: req.user!.id } });
+    if (!user) return res.status(404).json({ message: 'User not found.' });
+
+    res.json({
+      user: {
+        id: user.id,
+        fullName: user.fullName || '',
+        email: user.email,
+        role: user.role || 'Admin Office',
+        employeeId: user.employeeId || `ADM-${user.id.slice(0, 6).toUpperCase()}`,
+        phone: user.phone || '',
+        emergencyContact: user.emergencyContact || '',
+        address: user.address || '',
+        bloodGroup: user.bloodGroup || '',
+        gender: user.gender || '',
+        dateOfBirth: user.dateOfBirth || '',
+        bio: user.bio || '',
+        profilePicture: user.profilePicture || '',
+        pinSet: user.pinSet || false,
+        pinLength: user.pinLength || 4,
+      },
+    });
+  } catch (err: any) {
+    res.status(500).json({ message: err.message });
+  }
+});
+
 router.post('/admin/seed', authMiddleware, requireAdmin, async (req: AuthRequest, res) => {
   try {
     const existingShops = await prisma.shop.findMany({ take: 1 });
@@ -2952,20 +2995,78 @@ router.post('/admin/waivers', authMiddleware, requireAdmin, async (req: AuthRequ
 
 router.post('/admin/waivers/update', authMiddleware, requireAdmin, async (req: AuthRequest, res) => {
   try {
-    const { waiverId, type, action } = req.body;
-    const newStatus = action === 'approve' ? 'Waived' : action === 'reject' ? 'Pending' : 'Pending';
-    const updated = type === 'admin'
-      ? await prisma.adminFine.update({ where: { id: waiverId }, data: { status: newStatus } })
-      : await prisma.libraryFine.update({ where: { id: waiverId }, data: { status: newStatus } });
-    await prisma.auditLog.create({ data: { action: `Waiver ${action === 'approve' ? 'Approved' : 'Rejected'}`, actorId: req.user!.id, entityType: type === 'admin' ? 'AdminFine' : 'LibraryFine', entityId: waiverId, ipAddress: req.ip } });
+    const { waiverId, type, action, reducedAmount } = req.body as { waiverId: string; type: 'admin' | 'library'; action: 'approve' | 'reduce' | 'reject'; reducedAmount?: number };
+
+    let updated;
+    if (action === 'reduce') {
+      const existing = type === 'admin'
+        ? await prisma.adminFine.findUnique({ where: { id: waiverId } })
+        : await prisma.libraryFine.findUnique({ where: { id: waiverId } });
+      if (!existing) return res.status(404).json({ message: 'Fine not found.' });
+      if (!reducedAmount || reducedAmount <= 0 || reducedAmount >= existing.amount) {
+        return res.status(400).json({ message: 'Reduced amount must be less than the current fine amount.' });
+      }
+      updated = type === 'admin'
+        ? await prisma.adminFine.update({ where: { id: waiverId }, data: { status: 'Pending', amount: reducedAmount } })
+        : await prisma.libraryFine.update({ where: { id: waiverId }, data: { status: 'Pending', amount: reducedAmount } });
+      await prisma.auditLog.create({ data: { action: 'Waiver Reduced', actorId: req.user!.id, entityType: type === 'admin' ? 'AdminFine' : 'LibraryFine', entityId: waiverId, details: `Reduced from ৳${existing.amount.toLocaleString()} to ৳${reducedAmount.toLocaleString()}`, ipAddress: req.ip } });
+    } else {
+      const newStatus = action === 'approve' ? 'Waived' : 'Pending';
+      updated = type === 'admin'
+        ? await prisma.adminFine.update({ where: { id: waiverId }, data: { status: newStatus } })
+        : await prisma.libraryFine.update({ where: { id: waiverId }, data: { status: newStatus } });
+      await prisma.auditLog.create({ data: { action: `Waiver ${action === 'approve' ? 'Approved' : 'Rejected'}`, actorId: req.user!.id, entityType: type === 'admin' ? 'AdminFine' : 'LibraryFine', entityId: waiverId, ipAddress: req.ip } });
+    }
+
     void notifyUser({
       recipientId: updated.studentId, category: 'payment', type: `${type}_fine.waiver_${action}`,
-      title: action === 'approve' ? 'Fine Waived' : 'Waiver Request Rejected',
-      body: action === 'approve' ? 'Your fine dispute was approved and the fine has been waived.' : 'Your fine waiver request was rejected; the fine remains due.',
+      title: action === 'approve' ? 'Fine Waived' : action === 'reduce' ? 'Fine Reduced' : 'Waiver Request Rejected',
+      body: action === 'approve' ? 'Your fine dispute was approved and the fine has been waived.'
+        : action === 'reduce' ? `Your fine was reduced to ৳${reducedAmount?.toLocaleString()}.`
+        : 'Your fine waiver request was rejected; the fine remains due.',
       link: '/student/dues',
-      emailSubject: `Fine Waiver ${action === 'approve' ? 'Approved' : 'Rejected'} — Smart Campus`,
+      emailSubject: `Fine Waiver ${action === 'approve' ? 'Approved' : action === 'reduce' ? 'Reduced' : 'Rejected'} — Smart Campus`,
     });
-    res.json({ success: true, message: `Waiver ${action}d` });
+    res.json({ success: true, message: action === 'reduce' ? `Fine reduced to ৳${reducedAmount?.toLocaleString()}` : action === 'approve' ? 'Waiver approved' : 'Waiver rejected' });
+  } catch (err: any) {
+    res.status(500).json({ message: err.message });
+  }
+});
+
+// Recent Approve/Reduce/Reject activity for the Waivers tab's history section — reads the audit
+// trail those actions already write, rather than inventing new fine-level state.
+// Covers both the appeal-review actions (Approve/Reduce/Reject) and the Issued Fines tab's direct
+// Edit/Cancel actions — any amount change or cancellation on a fine belongs in the same activity
+// feed, regardless of which tab it was triggered from.
+router.post('/admin/waivers/history', authMiddleware, requireAdmin, async (req: AuthRequest, res) => {
+  try {
+    const logs = await prisma.auditLog.findMany({
+      where: {
+        entityType: { in: ['AdminFine', 'LibraryFine'] },
+        action: { in: ['Waiver Approved', 'Waiver Reduced', 'Waiver Rejected', 'Admin Fine Updated', 'Admin Fine Cancelled'] },
+      },
+      take: 20, orderBy: { createdAt: 'desc' }, include: { actor: true },
+    });
+
+    // Each log only carries the fine's id (entityId) — join back to the fine so the activity feed
+    // can show which student it belongs to, not just which staff member acted.
+    const adminIds = logs.filter(l => l.entityType === 'AdminFine' && l.entityId).map(l => l.entityId!);
+    const libIds = logs.filter(l => l.entityType === 'LibraryFine' && l.entityId).map(l => l.entityId!);
+    const [adminFines, libFines] = await Promise.all([
+      adminIds.length ? prisma.adminFine.findMany({ where: { id: { in: adminIds } }, include: { student: true } }) : Promise.resolve([]),
+      libIds.length ? prisma.libraryFine.findMany({ where: { id: { in: libIds } }, include: { student: true } }) : Promise.resolve([]),
+    ]);
+    const studentMap = new Map<string, { studentName: string; studentId: string }>();
+    adminFines.forEach(f => studentMap.set(f.id, { studentName: f.student?.fullName || '', studentId: f.student?.studentId || '' }));
+    libFines.forEach(f => studentMap.set(f.id, { studentName: f.student?.fullName || '', studentId: f.student?.studentId || '' }));
+
+    res.json({
+      history: logs.map(l => ({
+        id: l.id, action: l.action, details: l.details || '', actorName: l.actor?.fullName || 'Admin Office',
+        studentName: studentMap.get(l.entityId || '')?.studentName || '', studentId: studentMap.get(l.entityId || '')?.studentId || '',
+        createdAt: l.createdAt.toISOString(),
+      })),
+    });
   } catch (err: any) {
     res.status(500).json({ message: err.message });
   }
@@ -3038,13 +3139,20 @@ router.post('/library/fines/assign', authMiddleware, requireLibrary, async (req:
   try {
     const { studentId, fineType, amount, dueDate, label } = req.body;
     const ref = `LIB-${Date.now().toString(36).toUpperCase()}`;
-    const fine = await prisma.libraryFine.create({ data: { label: label || `${fineType} Fine`, studentId, fineType, amount, dueDate, status: 'Pending', reference: ref } });
+    const fine = await prisma.libraryFine.create({ data: { label: label || `${fineType} Fine`, studentId, fineType, amount, dueDate, status: 'Pending', reference: ref, issuedById: req.user!.id } });
     await prisma.auditLog.create({ data: { action: 'Library Fine Assigned', actorId: req.user!.id, entityType: 'LibraryFine', entityId: fine.id, details: `${fineType} fine of ৳${amount}`, ipAddress: req.ip } });
     void notifyUser({
       recipientId: studentId, category: 'payment', type: 'library_fine.assigned',
       title: 'New Library Fine', body: `A ${fineType} fine of ৳${Number(amount).toLocaleString()} has been added to your account.`,
       link: '/student/dues',
       emailSubject: `Library Fine Assigned — ৳${amount} — Smart Campus`,
+    });
+    // Centralizes the fine in Accounts Office's financial records the moment it's issued, instead
+    // of Accounts only learning about it indirectly after payment — see /accounts/library-fines*.
+    void notifyRole('Accounts Office', {
+      category: 'payment', type: 'library_fine.recorded',
+      title: 'New Library Fine Recorded', body: `A ${fineType} fine of ৳${Number(amount).toLocaleString()} was issued to a student by Library staff. Reference: ${ref}.`,
+      link: '/accounts/library-fines',
     });
     res.json({ success: true, fineId: fine.id, message: 'Library fine assigned' });
   } catch (err: any) {
@@ -3083,6 +3191,86 @@ router.post('/library/fines/waive', authMiddleware, requireLibrary, async (req: 
       emailSubject: 'Library Fine Waived — Smart Campus',
     });
     res.json({ success: true, message: 'Fine waived' });
+  } catch (err: any) {
+    res.status(500).json({ message: err.message });
+  }
+});
+
+// Library's own "Issued Fines" list — status monitoring only, mirrors /admin/fines/list. Not a
+// receivable/reconciliation view (that's Accounts Office's /accounts/library-fines).
+router.post('/library/fines/list', authMiddleware, requireLibrary, async (req: AuthRequest, res) => {
+  try {
+    const { status, search } = req.body as { status?: string; search?: string };
+    const where: any = {};
+    if (status && status !== 'All') where.status = status;
+    if (search) {
+      where.OR = [
+        { label: { contains: search, mode: 'insensitive' } },
+        { student: { fullName: { contains: search, mode: 'insensitive' } } },
+        { student: { studentId: { contains: search, mode: 'insensitive' } } },
+      ];
+    }
+    const fines = await prisma.libraryFine.findMany({ where, take: 100, orderBy: { createdAt: 'desc' }, include: { student: true } });
+    res.json({
+      fines: fines.map(f => ({
+        id: f.id, label: f.label || f.fineType || '', fineType: f.fineType || '', amount: f.amount,
+        reference: f.reference || '', status: f.status, dueDate: f.dueDate || '', createdAt: f.createdAt.toISOString(),
+        studentName: f.student?.fullName || '', studentId: f.student?.studentId || '',
+      })),
+    });
+  } catch (err: any) {
+    res.status(500).json({ message: err.message });
+  }
+});
+
+// Library staff may cancel a fine it issued only while it's still unpaid — mirrors
+// /admin/fines/cancel exactly. Cancelled fines are excluded from payment the same way
+// (/payment/init's item validation already requires status === 'Pending').
+router.post('/library/fines/cancel', authMiddleware, requireLibrary, async (req: AuthRequest, res) => {
+  try {
+    const { fineId, reason } = req.body;
+    const fine = await prisma.libraryFine.findUnique({ where: { id: fineId } });
+    if (!fine) return res.status(404).json({ message: 'Fine not found.' });
+    if (fine.status !== 'Pending') return res.status(400).json({ message: `Only a Pending fine can be cancelled (current status: ${fine.status}).` });
+
+    await prisma.libraryFine.update({ where: { id: fineId }, data: { status: 'Cancelled', cancelledAt: new Date(), cancelledById: req.user!.id } });
+    await prisma.auditLog.create({ data: { action: 'Library Fine Cancelled', actorId: req.user!.id, entityType: 'LibraryFine', entityId: fineId, details: reason || 'Fine cancelled by Library', ipAddress: req.ip } });
+    void notifyUser({
+      recipientId: fine.studentId, category: 'payment', type: 'library_fine.cancelled',
+      title: 'Library Fine Cancelled', body: `Your fine of ৳${fine.amount.toLocaleString()} (${fine.label || fine.fineType || 'Library Fine'}) has been cancelled and is no longer payable.`,
+      link: '/student/dues',
+    });
+    res.json({ success: true, message: 'Fine cancelled' });
+  } catch (err: any) {
+    res.status(500).json({ message: err.message });
+  }
+});
+
+// Recent Waive/Reduce/Cancel activity for the Waivers tab's history section — reads the audit
+// trail every one of those actions already writes, rather than inventing new fine-level state to
+// track "this fine was reduced" (LibraryFine has no such flag, and adding one risks touching the
+// existing reduce/waive logic). Purely additive read.
+router.post('/library/fines/history', authMiddleware, requireLibrary, async (req: AuthRequest, res) => {
+  try {
+    const logs = await prisma.auditLog.findMany({
+      where: { entityType: 'LibraryFine', action: { in: ['Library Fine Waived', 'Library Fine Reduced', 'Library Fine Cancelled'] } },
+      take: 20, orderBy: { createdAt: 'desc' }, include: { actor: true },
+    });
+
+    // Each log only carries the fine's id (entityId) — join back to the fine so the activity feed
+    // can show which student it belongs to, not just which staff member acted.
+    const fineIds = logs.filter(l => l.entityId).map(l => l.entityId!);
+    const fines = fineIds.length ? await prisma.libraryFine.findMany({ where: { id: { in: fineIds } }, include: { student: true } }) : [];
+    const studentMap = new Map<string, { studentName: string; studentId: string }>();
+    fines.forEach(f => studentMap.set(f.id, { studentName: f.student?.fullName || '', studentId: f.student?.studentId || '' }));
+
+    res.json({
+      history: logs.map(l => ({
+        id: l.id, action: l.action, details: l.details || '', actorName: l.actor?.fullName || 'Library',
+        studentName: studentMap.get(l.entityId || '')?.studentName || '', studentId: studentMap.get(l.entityId || '')?.studentId || '',
+        createdAt: l.createdAt.toISOString(),
+      })),
+    });
   } catch (err: any) {
     res.status(500).json({ message: err.message });
   }
@@ -3512,6 +3700,115 @@ router.post('/accounts/admin-fines/reconcile', authMiddleware, requireAccounts, 
   }
 });
 
+// ─── LIBRARY FINES — ACCOUNTS OFFICE RECEIVABLE VIEW ───
+// Mirrors /accounts/admin-fines* byte-for-byte (list/detail/reconcile) so Library Fines get the
+// same Accounts-facing centralized financial visibility as Administrative Fines. Library's own
+// dashboard/fine-management routes (/library/fines/*) are completely untouched — this is a
+// read-mostly, additive Accounts-side view over the same LibraryFine rows.
+router.post('/accounts/library-fines', authMiddleware, requireAccounts, async (req: AuthRequest, res) => {
+  try {
+    const { status, search, dateFrom, dateTo, page = 1, pageSize = 20 } = req.body as {
+      status?: string; search?: string; dateFrom?: string; dateTo?: string; page?: number; pageSize?: number;
+    };
+    const where: any = {};
+    if (status && status !== 'All') where.status = status;
+    if (dateFrom || dateTo) {
+      where.createdAt = {};
+      if (dateFrom) where.createdAt.gte = new Date(dateFrom);
+      if (dateTo) where.createdAt.lte = new Date(dateTo);
+    }
+    if (search) {
+      where.OR = [
+        { label: { contains: search, mode: 'insensitive' } },
+        { fineType: { contains: search, mode: 'insensitive' } },
+        { reference: { contains: search, mode: 'insensitive' } },
+        { student: { fullName: { contains: search, mode: 'insensitive' } } },
+        { student: { studentId: { contains: search, mode: 'insensitive' } } },
+        { student: { email: { contains: search, mode: 'insensitive' } } },
+      ];
+    }
+
+    const take = Math.min(Math.max(Number(pageSize) || 20, 1), 100);
+    const skip = (Math.max(Number(page) || 1, 1) - 1) * take;
+
+    const [fines, total, statusCountsRaw] = await Promise.all([
+      prisma.libraryFine.findMany({
+        where, take, skip, orderBy: { createdAt: 'desc' },
+        include: { student: true, issuedBy: true },
+      }),
+      prisma.libraryFine.count({ where }),
+      prisma.libraryFine.groupBy({ by: ['status'], _count: { status: true } }),
+    ]);
+
+    const statusCounts: Record<string, number> = {};
+    for (const row of statusCountsRaw) statusCounts[row.status] = row._count.status;
+
+    res.json({
+      fines: fines.map(f => ({
+        id: f.id, label: f.label || '', fineType: f.fineType || '', amount: f.amount, reference: f.reference || '',
+        status: f.status, dueDate: f.dueDate || '', createdAt: f.createdAt.toISOString(), updatedAt: f.updatedAt.toISOString(),
+        student: { id: f.studentId, fullName: f.student?.fullName || '', studentId: f.student?.studentId || '', email: f.student?.email || '' },
+        issuedBy: f.issuedBy ? { id: f.issuedBy.id, fullName: f.issuedBy.fullName || '', email: f.issuedBy.email } : null,
+        cancelledAt: f.cancelledAt ? f.cancelledAt.toISOString() : null,
+        reconciledAt: f.reconciledAt ? f.reconciledAt.toISOString() : null,
+      })),
+      total, page: Number(page) || 1, pageSize: take, statusCounts,
+    });
+  } catch (err: any) {
+    res.status(500).json({ message: err.message });
+  }
+});
+
+router.post('/accounts/library-fines/detail', authMiddleware, requireAccounts, async (req: AuthRequest, res) => {
+  try {
+    const { fineId } = req.body as { fineId: string };
+    const fine = await prisma.libraryFine.findUnique({ where: { id: fineId }, include: { student: true, issuedBy: true } });
+    if (!fine) return res.status(404).json({ message: 'Fine not found.' });
+
+    const [transaction, ledgerEntries, auditLogs] = await Promise.all([
+      fine.reference ? prisma.transaction.findFirst({ where: { reference: fine.reference } }) : Promise.resolve(null),
+      fine.reference ? prisma.ledgerEntry.findMany({ where: { reference: fine.reference }, orderBy: { createdAt: 'asc' } }) : Promise.resolve([]),
+      prisma.auditLog.findMany({ where: { entityType: 'LibraryFine', entityId: fineId }, orderBy: { createdAt: 'asc' }, include: { actor: true } }),
+    ]);
+
+    res.json({
+      fine: {
+        id: fine.id, label: fine.label || '', fineType: fine.fineType || '', amount: fine.amount, reference: fine.reference || '',
+        status: fine.status, dueDate: fine.dueDate || '', createdAt: fine.createdAt.toISOString(), updatedAt: fine.updatedAt.toISOString(),
+        student: { id: fine.studentId, fullName: fine.student?.fullName || '', studentId: fine.student?.studentId || '', email: fine.student?.email || '' },
+        issuedBy: fine.issuedBy ? { id: fine.issuedBy.id, fullName: fine.issuedBy.fullName || '', email: fine.issuedBy.email } : null,
+        cancelledAt: fine.cancelledAt ? fine.cancelledAt.toISOString() : null,
+        reconciledAt: fine.reconciledAt ? fine.reconciledAt.toISOString() : null,
+      },
+      transaction: transaction ? {
+        id: transaction.id, reference: transaction.reference, status: transaction.status,
+        amount: transaction.amount, paymentMethod: transaction.paymentMethod || '', updatedAt: transaction.updatedAt.toISOString(),
+      } : null,
+      ledgerEntries: ledgerEntries.map(l => ({ id: l.id, entryNumber: l.entryNumber, type: l.type, debitAmount: l.debitAmount, creditAmount: l.creditAmount, balanceAfter: l.balanceAfter, createdAt: l.createdAt.toISOString() })),
+      auditTrail: auditLogs.map(a => ({ id: a.id, action: a.action, actorName: a.actor?.fullName || 'System', details: a.details || '', createdAt: a.createdAt.toISOString() })),
+    });
+  } catch (err: any) {
+    res.status(500).json({ message: err.message });
+  }
+});
+
+// Manual reconciliation mark — identical guard/pattern to /accounts/admin-fines/reconcile.
+router.post('/accounts/library-fines/reconcile', authMiddleware, requireAccounts, async (req: AuthRequest, res) => {
+  try {
+    const { fineId } = req.body as { fineId: string };
+    const fine = await prisma.libraryFine.findUnique({ where: { id: fineId } });
+    if (!fine) return res.status(404).json({ message: 'Fine not found.' });
+    if (fine.status !== 'Paid') return res.status(400).json({ message: 'Only a Paid fine can be reconciled.' });
+    if (fine.reconciledAt) return res.status(400).json({ message: 'This fine is already reconciled.' });
+
+    await prisma.libraryFine.update({ where: { id: fineId }, data: { reconciledAt: new Date(), reconciledById: req.user!.id } });
+    await prisma.auditLog.create({ data: { action: 'Library Fine Reconciled', actorId: req.user!.id, entityType: 'LibraryFine', entityId: fineId, details: `Reconciled ৳${fine.amount.toLocaleString()} (ref ${fine.reference || 'n/a'})`, ipAddress: req.ip } });
+    res.json({ success: true, message: 'Fine marked reconciled' });
+  } catch (err: any) {
+    res.status(500).json({ message: err.message });
+  }
+});
+
 // ─── OFFLINE BANK PAYMENT SETTLEMENT ───
 // A student who paid manually at a bank brings the receipt to Accounts Office. Staff look the
 // student up, verify the receipt, and record it here — the same Unified Outstanding Due
@@ -3542,6 +3839,56 @@ router.post('/accounts/student-outstanding-dues', authMiddleware, requireAccount
       restricted: restriction.restricted,
       reason: restriction.reason,
     });
+  } catch (err: any) {
+    res.status(500).json({ message: err.message });
+  }
+});
+
+// ─── ACCOUNTS OFFICE — UNIFIED STUDENT FINANCIAL PROFILE ───
+// A centralized, read-only per-student view (search by ID/Name/Email -> balance, all dues, all
+// fines, tuition dues, scholarship credits, payment history, ledger) — purely additive, does not
+// change /accounts/student-outstanding-dues, /accounts/ledger, or any existing accounting report.
+router.post('/accounts/student-search', authMiddleware, requireAccounts, async (req: AuthRequest, res) => {
+  try {
+    const query = String(req.body?.query || '').trim();
+    if (!query) return res.json({ students: [] });
+
+    const students = await prisma.user.findMany({
+      where: {
+        role: 'Student',
+        OR: [
+          { fullName: { contains: query, mode: 'insensitive' } },
+          { studentId: { contains: query, mode: 'insensitive' } },
+          { email: { contains: query, mode: 'insensitive' } },
+        ],
+      },
+      take: 20,
+      orderBy: { fullName: 'asc' },
+    });
+
+    res.json({
+      students: students.map(s => ({
+        id: s.id, fullName: s.fullName || '', studentId: s.studentId || '', email: s.email,
+        department: s.department || '', batch: s.batch || '', status: s.status,
+      })),
+    });
+  } catch (err: any) {
+    res.status(500).json({ message: err.message });
+  }
+});
+
+router.post('/accounts/student-profile', authMiddleware, requireAccounts, async (req: AuthRequest, res) => {
+  try {
+    const studentDbId = String(req.body?.studentDbId || '').trim();
+    if (!studentDbId) return res.status(400).json({ message: 'studentDbId is required.' });
+
+    const profile = await getStudentFinancialProfile(studentDbId, {
+      txPage: Number(req.body?.txPage) || 1,
+      txPageSize: Number(req.body?.txPageSize) || 20,
+    });
+    if (!profile.found) return res.status(404).json({ message: 'No student found.' });
+
+    res.json(profile);
   } catch (err: any) {
     res.status(500).json({ message: err.message });
   }
@@ -3734,8 +4081,49 @@ router.post('/shop/dashboard', authMiddleware, requireShopStaff, async (req: Aut
       weekRevenue: weekTxns.reduce((s, t) => s + t.amount, 0), monthRevenue: monthTxns.reduce((s, t) => s + t.amount, 0),
       totalRevenue, totalSettled, pendingSettlement: Math.max(0, totalRevenue - totalSettled),
       recentTransactions: recentTxns.map(t => ({ id: t.id, reference: t.reference, amount: t.amount, status: t.status, description: t.description || '', paymentMethod: t.paymentMethod || '', createdAt: t.createdAt.toISOString() })),
-      pendingPayLater: payLater.map(p => ({ id: p.id, reference: p.reference || '', amount: p.amount, status: p.status, studentName: p.student?.fullName || '', dueDate: p.dueDate || '', description: p.description || '' })),
+      pendingPayLater: payLater.map(p => ({ id: p.id, reference: p.reference || '', amount: p.amount, status: p.status, studentName: p.student?.fullName || '', studentId: p.student?.studentId || '', dueDate: p.dueDate || '', description: p.description || '', createdAt: p.createdAt.toISOString() })),
       recentSettlements: recentSettlements.map(s => ({ id: s.id, amount: s.amount, notes: s.notes || '', settledAt: s.settledAt.toISOString() })),
+    });
+  } catch (err: any) {
+    res.status(500).json({ message: err.message });
+  }
+});
+
+// Server-side filtered/paginated search over a shop's own Success transactions ("Completed
+// Payments") — the existing sales-ledger report and dashboard's recentTransactions only ever
+// offer a today/week/month period toggle over a max-20/2000-row array, never a real student ID /
+// name / date-range / transaction-ID search. Purely additive; /shop/dashboard's response shape,
+// /shop/sales-ledger/report, and every existing shop route are untouched.
+router.post('/shop/transactions/search', authMiddleware, requireShopStaff, async (req: AuthRequest, res) => {
+  try {
+    const shop = await prisma.shop.findFirst({ where: { ownerId: req.user!.id } });
+    if (!shop) return res.status(404).json({ message: 'No shop is linked to this account. Contact the Admin Office.' });
+
+    const {
+      studentId, studentName, dateFrom, dateTo, transactionId,
+      page = 1, pageSize = 20,
+    } = req.body as {
+      studentId?: string; studentName?: string; dateFrom?: string; dateTo?: string; transactionId?: string;
+      page?: number; pageSize?: number;
+    };
+
+    const where = buildShopTransactionSearchWhere(shop.id, { studentId, studentName, dateFrom, dateTo, transactionId });
+    const take = Math.min(Math.max(Number(pageSize) || 20, 1), 100);
+    const skip = (Math.max(Number(page) || 1, 1) - 1) * take;
+
+    const [transactions, total] = await Promise.all([
+      prisma.transaction.findMany({ where, take, skip, orderBy: { createdAt: 'desc' }, include: { user: true } }),
+      prisma.transaction.count({ where }),
+    ]);
+
+    res.json({
+      transactions: transactions.map(t => ({
+        id: t.id, reference: t.reference, amount: t.amount, status: t.status,
+        description: t.description || '', paymentMethod: t.paymentMethod || '',
+        studentName: t.user?.fullName || '', studentId: t.user?.studentId || '',
+        createdAt: t.createdAt.toISOString(),
+      })),
+      total, page: Number(page) || 1, pageSize: take,
     });
   } catch (err: any) {
     res.status(500).json({ message: err.message });
@@ -3847,6 +4235,8 @@ app.use('/api', feeRouter);
 app.use('/', feeRouter);
 app.use('/api', settlementRouter);
 app.use('/', settlementRouter);
+app.use('/api', scholarshipPushRouter);
+app.use('/', scholarshipPushRouter);
 
 // Fallback JSON 404 handler (ensures HTML is NEVER returned)
 app.use((_req, res) => {
@@ -3858,6 +4248,15 @@ app.use((_req, res) => {
 // request-handling logic changes.
 const httpServer = http.createServer(app);
 attachRealtime(httpServer);
+
+// Outstanding-Due Reminder / Auto-Deduction / Late-Fine automation — runs once daily at 02:00
+// server time (off-peak). Additive only: covers PayLaterDue/AdminFine/LibraryFine exclusively and
+// never touches isFinanciallyRestricted()/the SemesterFee unified settlement sweep. Safe to run in
+// this single long-running process the same way Socket.IO already does — Render's free tier runs
+// one instance, so no distributed-lock/leader-election concern exists here.
+cron.schedule('0 2 * * *', () => {
+  runDailyDueAutomation().catch(err => console.error('[reminderAutoDeduct] daily run failed:', err));
+});
 
 // Loud, impossible-to-miss warning if the JWT signing secret is the hardcoded fallback (see
 // lib/auth.ts / lib/realtime.ts) — that fallback string is visible in public source, so anyone

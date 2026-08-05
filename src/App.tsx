@@ -48,6 +48,7 @@ const StaffAccountsPage = lazy(() => import('./pages/admin/StaffAccountsPage'));
 const DisputeOversightPage = lazy(() => import('./pages/admin/DisputeOversightPage'));
 const AdminDisputeDetailPage = lazy(() => import('./pages/admin/AdminDisputeDetailPage'));
 const AdminNotificationsPage = lazy(() => import('./pages/admin/AdminNotificationsPage'));
+const AdminProfilePage = lazy(() => import('./pages/admin/AdminProfilePage'));
 
 // Library pages
 const LibraryHomePage = lazy(() => import('./pages/library/LibraryHomePage'));
@@ -75,6 +76,9 @@ const DisputeCaseDetailPage = lazy(() => import('./pages/accounts/DisputeCaseDet
 const DisputeReportsPage = lazy(() => import('./pages/accounts/DisputeReportsPage'));
 const AccountsNotificationsPage = lazy(() => import('./pages/accounts/AccountsNotificationsPage'));
 const AdministrativeFinesPage = lazy(() => import('./pages/accounts/AdministrativeFinesPage'));
+const LibraryFinesPage = lazy(() => import('./pages/accounts/LibraryFinesPage'));
+const StudentFinancialProfilePage = lazy(() => import('./pages/accounts/StudentFinancialProfilePage'));
+const ScholarshipPushPage = lazy(() => import('./pages/accounts/ScholarshipPushPage'));
 const AccountsQrPage = lazy(() => import('./pages/accounts/AccountsQrPage'));
 const ManualBankPaymentPage = lazy(() => import('./pages/accounts/ManualBankPaymentPage'));
 const AccountsChangeTempPasswordPage = lazy(() => import('./pages/accounts/AccountsChangeTempPasswordPage'));
@@ -88,6 +92,7 @@ const ShopHomePage = lazy(() => import('./pages/shop/ShopHomePage'));
 const ShopQrPage = lazy(() => import('./pages/shop/ShopQrPage'));
 const ShopNotificationsPage = lazy(() => import('./pages/shop/ShopNotificationsPage'));
 const ShopSalesLedgerPage = lazy(() => import('./pages/shop/ShopSalesLedgerPage'));
+const ShopPaymentsPage = lazy(() => import('./pages/shop/ShopPaymentsPage'));
 const ShopDisputesPage = lazy(() => import('./pages/shop/ShopDisputesPage'));
 const ShopDisputeDetailPage = lazy(() => import('./pages/shop/ShopDisputeDetailPage'));
 const ShopChangeTempPasswordPage = lazy(() => import('./pages/shop/ShopChangeTempPasswordPage'));
@@ -142,6 +147,7 @@ export default function App() {
                 <Route path="disputes" element={<DisputeOversightPage />} />
                 <Route path="disputes/detail" element={<AdminDisputeDetailPage />} />
                 <Route path="notifications" element={<AdminNotificationsPage />} />
+                <Route path="profile" element={<AdminProfilePage />} />
               </Route>
 
               {/* Library first-login onboarding — standalone, outside LibraryLayout (no nav chrome, mandatory) */}
@@ -180,6 +186,9 @@ export default function App() {
                 <Route path="disputes/reports" element={<DisputeReportsPage />} />
                 <Route path="notifications" element={<AccountsNotificationsPage />} />
                 <Route path="admin-fines" element={<AdministrativeFinesPage />} />
+                <Route path="library-fines" element={<LibraryFinesPage />} />
+                <Route path="student-profile" element={<StudentFinancialProfilePage />} />
+                <Route path="scholarship-push" element={<ScholarshipPushPage />} />
                 <Route path="qr" element={<AccountsQrPage />} />
                 <Route path="manual-payment" element={<ManualBankPaymentPage />} />
                 <Route path="profile" element={<AccountsProfilePage />} />
@@ -197,6 +206,7 @@ export default function App() {
                 <Route path="qr" element={<ShopQrPage />} />
                 <Route path="notifications" element={<ShopNotificationsPage />} />
                 <Route path="ledger" element={<ShopSalesLedgerPage />} />
+                <Route path="payments" element={<ShopPaymentsPage />} />
                 <Route path="disputes" element={<ShopDisputesPage />} />
                 <Route path="disputes/detail" element={<ShopDisputeDetailPage />} />
                 <Route path="profile" element={<ShopProfilePage />} />

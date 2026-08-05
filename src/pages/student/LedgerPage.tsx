@@ -14,6 +14,7 @@ import { useDebouncedCallback } from 'use-debounce';
 import { FadeIn } from '@/components/PageTransition';
 import TransactionDetailCard from '@/components/disputes/TransactionDetailCard';
 import DisputeWizard from '@/components/disputes/DisputeWizard';
+import BackButton from '@/components/BackButton';
 import type { TransactionDetail } from '@/lib/disputeApi';
 
 type TxType = GetTransactionsOutputType['transactions'][0];
@@ -60,6 +61,7 @@ export default function LedgerPage() {
   return (
     <div className="container mx-auto px-4 sm:px-6 py-6 max-w-5xl">
       <FadeIn>
+        <BackButton fallback="/student" />
         <div className="mb-6">
           <h1 className="text-xl font-bold text-foreground">Transaction Ledger</h1>
           <p className="text-sm text-muted-foreground mt-0.5">Complete history of all wallet activity</p>

@@ -17,6 +17,7 @@ import {
   executeFeePushBatch,
   exportAdvisingFees
 } from '@/lib/api';
+import BackButton from '@/components/BackButton';
 
 const DEPARTMENTS = [
   'Computer Science', 'EEE', 'BBA', 'Economics', 'English', 'Pharmacy', 'Law', 'Architecture', 'Civil Engineering', 'Social Relations'
@@ -199,6 +200,7 @@ export default function FeeWizardPage() {
 
   return (
     <div className="container mx-auto px-4 sm:px-6 py-6 max-w-6xl">
+      <BackButton fallback="/accounts" />
       {/* Header */}
       <div className="mb-8 text-center sm:text-left">
         <h1 className="text-2xl font-bold tracking-tight text-foreground">Semester Fee Management</h1>
@@ -386,7 +388,7 @@ export default function FeeWizardPage() {
 
           {/* Items Preview Table */}
           <div className="border border-border/60 rounded-xl overflow-hidden">
-            <div className="max-h-72 overflow-y-auto">
+            <div className="max-h-72 overflow-auto">
               <table className="w-full text-xs text-left">
                 <thead className="bg-accent/60 text-muted-foreground uppercase tracking-wider font-semibold sticky top-0">
                   <tr>
@@ -446,7 +448,7 @@ export default function FeeWizardPage() {
 
           {/* Data Table */}
           <div className="border border-border/60 rounded-xl overflow-hidden">
-            <div className="max-h-96 overflow-y-auto">
+            <div className="max-h-96 overflow-auto">
               <table className="w-full text-xs text-left">
                 <thead className="bg-accent/60 text-muted-foreground uppercase tracking-wider font-semibold sticky top-0">
                   <tr>

@@ -1,26 +1,26 @@
 import { Outlet, NavLink, useNavigate } from 'react-router-dom';
-import { Home, Store, ShieldAlert, FileText, UserCog, LogOut, Shield, ScrollText } from 'lucide-react';
+import { Home, Store, ShieldAlert, UserCog, LogOut, Shield, UserCircle } from 'lucide-react';
 import { useAuth } from '@/lib/auth-context';
 import { Skeleton } from '@/components/ui/skeleton';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger, DropdownMenuSeparator } from '@/components/ui/dropdown-menu';
 import { motion } from 'framer-motion';
-import { useEffect, useState } from 'react';
-import { getDisputeBadgeCounts } from '@/lib/disputeApi';
-import { useDisputeSocket } from '@/lib/socket';
+import { useEffect } from 'react';
 import NotificationBell from '@/components/NotificationBell';
-import { MoreMenuDesktop, MoreMenuMobile, type MoreMenuItem } from '@/components/MoreMenu';
 
+// Exactly 5 primary tabs, matching the Student/Library nav pattern — Disputes/Audit (formerly a
+// "More" dropdown) now live as icon tiles on the Home dashboard instead, matching the Scan & Pay
+// / Add Money tile style used elsewhere.
 const primaryNavItems = [
   { to: '/admin', icon: Home, label: 'Home', end: true },
   { to: '/admin/shops', icon: Store, label: 'Shops' },
   { to: '/admin/fines', icon: ShieldAlert, label: 'Fines' },
   { to: '/admin/staff', icon: UserCog, label: 'Staff' },
+  { to: '/admin/profile', icon: UserCircle, label: 'Profile' },
 ];
 
 export default function AdminLayout() {
   const navigate = useNavigate();
   const { user, isLoading, loginWithRedirect, logout } = useAuth();
-  const [pendingCases, setPendingCases] = useState(0);
 
   useEffect(() => {
     if (!isLoading && !user) loginWithRedirect({ redirectUrl: window.location.href });
@@ -29,25 +29,6 @@ export default function AdminLayout() {
   useEffect(() => {
     if (user && user.role !== 'Admin Office') navigate('/', { replace: true });
   }, [user, navigate]);
-
-  const fetchBadge = () => getDisputeBadgeCounts().then(r => setPendingCases(r.pendingCases)).catch(() => {});
-  useEffect(() => {
-    if (!user) return;
-    fetchBadge();
-    const interval = setInterval(fetchBadge, 30000);
-    return () => clearInterval(interval);
-  }, [user]);
-  useDisputeSocket(() => fetchBadge());
-
-  const overflowItems: MoreMenuItem[] = [
-    {
-      to: '/admin/disputes', icon: ScrollText, label: 'Disputes',
-      badge: pendingCases > 0 ? (
-        <span className="min-w-[16px] h-4 px-1 rounded-full bg-destructive text-[9px] font-bold text-white flex items-center justify-center">{pendingCases > 99 ? '99+' : pendingCases}</span>
-      ) : undefined,
-    },
-    { to: '/admin/audit', icon: FileText, label: 'Audit' },
-  ];
 
   if (isLoading || !user || user.role !== 'Admin Office') return null;
 
@@ -81,7 +62,6 @@ export default function AdminLayout() {
                 )}
               </NavLink>
             ))}
-            <MoreMenuDesktop items={overflowItems} layoutPrefix="admin" />
           </div>
 
           <div className="flex items-center gap-2">
@@ -125,7 +105,6 @@ export default function AdminLayout() {
               )}
             </NavLink>
           ))}
-          <MoreMenuMobile items={overflowItems} layoutPrefix="admin-mobile" />
         </div>
       </nav>
     </div>

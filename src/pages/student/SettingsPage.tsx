@@ -7,6 +7,7 @@ import { ShieldCheck, Lock, ChevronRight, LogOut, Bell, Shield, Smartphone, Key 
 import { useAuth } from '@/lib/auth-context';
 import { useUser } from '@/lib/user-context';
 import { FadeIn } from '@/components/PageTransition';
+import BackButton from '@/components/BackButton';
 
 function ToggleSwitch({ checked, onChange }: { checked: boolean; onChange: (v: boolean) => void }) {
   return (
@@ -41,6 +42,7 @@ export default function SettingsPage() {
   return (
     <div className="container mx-auto px-4 sm:px-6 py-6 max-w-2xl">
       <FadeIn>
+        <BackButton fallback="/student" />
         <div className="mb-6">
           <h1 className="text-xl font-bold text-foreground">Settings</h1>
         </div>

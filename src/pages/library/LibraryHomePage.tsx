@@ -1,16 +1,36 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { BookX, Users, AlertTriangle, Loader2 } from 'lucide-react';
+import { BookX, Users, AlertTriangle, Loader2, ScrollText, Search, UserCircle } from 'lucide-react';
 import { Skeleton } from '@/components/ui/skeleton';
 import { getLibraryOverview, type GetLibraryOverviewOutputType } from '@/lib/api';
+import { getDisputeBadgeCounts } from '@/lib/disputeApi';
+import { useDisputeSocket } from '@/lib/socket';
 import { motion } from 'framer-motion';
+
+// Disputes/Payment Ledger/Profile moved here from the nav bar's old "More" dropdown — that
+// dropdown's collapsed button showed a live pulsing dot for pending disputes, so this tile now
+// carries the same live badge (polled + socket-updated) to preserve that at-a-glance visibility.
+const quickActionMeta = [
+  { label: 'Disputes', to: '/library/disputes', icon: ScrollText, color: 'bg-destructive/10', iconColor: 'text-destructive' },
+  { label: 'Payment Ledger', to: '/library/lookup', icon: Search, color: 'bg-primary/10', iconColor: 'text-primary' },
+  { label: 'Profile', to: '/library/profile', icon: UserCircle, color: 'bg-[hsl(var(--chart-3))]/10', iconColor: 'text-[hsl(var(--chart-3))]' },
+];
 
 export default function LibraryHomePage() {
   const navigate = useNavigate();
   const [data, setData] = useState<GetLibraryOverviewOutputType | null>(null);
   const [loading, setLoading] = useState(true);
+  const [pendingCases, setPendingCases] = useState(0);
 
   useEffect(() => { getLibraryOverview({}).then(setData).finally(() => setLoading(false)); }, []);
+
+  useEffect(() => {
+    const fetchBadge = () => getDisputeBadgeCounts().then(r => setPendingCases(r.pendingCases)).catch(() => {});
+    fetchBadge();
+    const interval = setInterval(fetchBadge, 30000);
+    return () => clearInterval(interval);
+  }, []);
+  useDisputeSocket(() => setPendingCases(c => c + 1));
 
   if (loading) return (
     <div className="container mx-auto px-4 sm:px-6 py-6 max-w-4xl space-y-6">
@@ -47,6 +67,29 @@ export default function LibraryHomePage() {
           <p className="text-sm font-semibold text-foreground">Pending Clearance</p>
           <p className="text-xs text-muted-foreground mt-0.5">Students with unpaid fines</p>
         </motion.button>
+      </div>
+
+      <div className="grid grid-cols-3 gap-3 mb-8">
+        {quickActionMeta.map((qa, i) => (
+          <motion.button
+            key={qa.label}
+            initial={{ opacity: 0, y: 16 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.15 + i * 0.06 }}
+            onClick={() => navigate(qa.to)}
+            className="relative flex flex-col items-center justify-center gap-3 p-4 sm:p-5 rounded-2xl border border-border/60 bg-card hover:border-primary/20 transition-all group active:scale-[0.97]"
+          >
+            {qa.label === 'Disputes' && pendingCases > 0 && (
+              <span className="absolute top-2.5 right-2.5 min-w-[16px] h-4 px-1 rounded-full bg-destructive text-[9px] font-bold text-white flex items-center justify-center">
+                {pendingCases > 99 ? '99+' : pendingCases}
+              </span>
+            )}
+            <div className={`w-11 h-11 rounded-xl ${qa.color} flex items-center justify-center group-hover:scale-105 transition-transform`}>
+              <qa.icon className={`w-5 h-5 ${qa.iconColor}`} />
+            </div>
+            <span className="text-xs font-semibold text-foreground">{qa.label}</span>
+          </motion.button>
+        ))}
       </div>
 
       {data?.recentFines && data.recentFines.length > 0 && (
