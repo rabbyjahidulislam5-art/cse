@@ -1,9 +1,7 @@
-import { PrismaClient } from '@prisma/client';
 import ExcelJS from 'exceljs';
 import PDFDocument from 'pdfkit';
 import { matchStudent } from './studentMatcher.js';
-
-const prisma = new PrismaClient();
+import prisma from './prisma.js';
 
 export interface ImportRowData {
   studentId: string;

@@ -16,6 +16,7 @@ import {
   DialogClose,
 } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
+import { fetchWithRetry } from './fetch-with-retry';
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:4000/api';
 
@@ -336,7 +337,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const safeAuthCall = async (endpoint: string, body: Record<string, unknown>) => {
     try {
       const targetUrl = `${API_URL}${endpoint}`;
-      const res = await fetch(targetUrl, {
+      const res = await fetchWithRetry(targetUrl, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
@@ -355,7 +356,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     } catch (err: any) {
       if (err.message?.includes('Failed to fetch') || err.name === 'TypeError') {
         if (window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1') {
-          throw new Error('Cannot reach Render Backend server. Please verify your Render Backend URL in Vercel Environment Variables.');
+          throw new Error('Cannot reach the backend server. It may be waking up from sleep (free hosting can take up to a minute) — please wait a moment and try again.');
         } else {
           throw new Error('Cannot connect to local backend (port 4000). Make sure to run "npm run dev" inside the server directory.');
         }

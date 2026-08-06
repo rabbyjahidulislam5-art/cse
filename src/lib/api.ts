@@ -1,5 +1,6 @@
 import { sessionEvents } from './session-events';
 import { getAuthToken } from './auth-token';
+import { fetchWithRetry } from './fetch-with-retry';
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:4000/api';
 
@@ -10,7 +11,7 @@ function getToken(): string | null {
 async function apiCall<T>(endpoint: string, input: Record<string, unknown> = {}): Promise<T> {
   const token = getToken();
   try {
-    const res = await fetch(`${API_URL}${endpoint}`, {
+    const res = await fetchWithRetry(`${API_URL}${endpoint}`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -39,7 +40,7 @@ async function apiCall<T>(endpoint: string, input: Record<string, unknown> = {})
     return data;
   } catch (err: any) {
     if (err.message?.includes('Failed to fetch') || err.name === 'TypeError') {
-      throw new Error('Cannot connect to backend server. Make sure the API server is running.');
+      throw new Error('Cannot connect to backend server. It may be waking up from sleep (free hosting can take up to a minute) — please wait a moment and try again.');
     }
     throw err;
   }

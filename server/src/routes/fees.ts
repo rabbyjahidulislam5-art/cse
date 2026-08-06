@@ -1,5 +1,4 @@
 import { Router, Response } from 'express';
-import { PrismaClient } from '@prisma/client';
 import multer from 'multer';
 import ExcelJS from 'exceljs';
 import { authMiddleware, requireRole, AuthRequest } from '../lib/auth.js';
@@ -17,9 +16,9 @@ import {
 } from '../lib/feeManagementService.js';
 import { matchStudent, matchStudentInDb } from '../lib/studentMatcher.js';
 import { notifyUser } from '../lib/notify.js';
+import prisma from '../lib/prisma.js';
 
 const router = Router();
-const prisma = new PrismaClient();
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } });
 const requireAccounts = requireRole('Accounts Office', 'Admin Office');
 
