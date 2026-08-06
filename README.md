@@ -18,7 +18,7 @@ https://cse-mocha.vercel.app
 
 📄 Full Project Report
 
-(EWU Campus Wallet.pdf)
+https://github.com/rabbyjahidulislam5-art/EWU-Campus-Wallet/blob/main/EWU%20Campus%20Wallet.pdf
 
  Project Overview
 
